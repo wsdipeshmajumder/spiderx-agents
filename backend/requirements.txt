@@ -1,0 +1,17 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+google-genai>=1.40
+python-dotenv>=1.0
+# Phase 1 — Postgres backend. asyncpg drives the async query layer; SQLAlchemy
+# is pulled in for Alembic's migration tooling (we keep raw SQL in db_pg.py;
+# the ORM is not used at runtime). psycopg[binary] is the sync driver Alembic
+# uses under the hood for DDL migrations.
+asyncpg>=0.30
+alembic>=1.13
+SQLAlchemy>=2.0
+psycopg[binary]>=3.2
+# Template-driven Eva builds (Phase: deterministic interview). YAML loader
+# for backend/build_templates/. Already a transitive dep of google-genai,
+# pinned here explicitly so a future env without that transitive pull-in
+# still resolves.
+PyYAML>=6.0

@@ -1,0 +1,47 @@
+# Car dealership in Kolkata. City-specific override of the en-IN
+# template — demonstrates the city axis of the matrix. Only the
+# DIFFERENCES from the parent live here; everything else is inherited.
+#
+# Differences:
+#   • Bengali greeting + small_talk (callers in Kolkata often
+#     prefer Bengali over Hindi)
+#   • One extra question: which catchment area the showroom mostly
+#     serves (Salt Lake / Howrah / South Kolkata / etc.) — informs
+#     small talk + drive-time discussions on callbacks
+#   • Sample phrases tuned to the local vernacular
+id: automotive.dealership.en-IN.kolkata
+schema_version: 1
+inherits: automotive.dealership.en-IN
+
+facets:
+  industry: automotive
+  sub_industry: dealership
+  locale: en-IN
+  city: kolkata
+
+matches:
+  city_keywords: [kolkata, calcutta, salt lake, howrah, kestopur]
+
+intro: |
+  Got it. She'll greet in Bengali and switch to English on cue.
+
+# Add ONE question on top of the inherited 8 — catchment area.
+# The loader's merge logic appends these to the parent's question list.
+questions_append:
+  - id: catchment_area
+    prompt: "Which part of Kolkata do most of your callers come from?"
+    slot: variables.catchment_area
+    type: text
+    required: false
+    hint: "e.g. Salt Lake, Howrah, South Kolkata, Bidhannagar. Optional — helps her chat naturally about drive times."
+
+# Override JUST the greeting + small_talk on the agent_profile.
+# Everything else (system_prompt, connectors, outcomes, policy) is
+# inherited from automotive.dealership.en-IN.
+agent_profile_overrides:
+  greeting: "Namaskar, this is {{agent_name}} from {{business_name}} — apnake kibhabe sahajya korte pari?"
+  small_talk:
+    - "Namaskar, kemon achen?"
+    - "Hello, how can I help you today?"
+    - "Gari kena niye kichu jante chan?"
+    - "Test drive korte chan?"
