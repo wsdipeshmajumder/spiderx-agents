@@ -62,7 +62,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 177
+APP_BUILD = 184
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1845,9 +1845,29 @@ FRONTEND_DIR = ROOT / "frontend"
 _NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
 
 
+# Build-pin interpolation. The static index.html ships with `{BUILD}`
+# placeholders in the <script>/<link> ?v= query strings; we substitute
+# APP_BUILD on every SPA request so the cache-bust pin can never drift
+# from the constant we bump in code. Before build 184 these were
+# hand-maintained string literals in index.html — the user lost time
+# to "I bumped APP_BUILD but the browser still served the old JS"
+# because the SPA pin pointed at an older build. Re-reading the file
+# per request is cheap (≈ 2 KB) and means an operator who hot-swaps
+# `frontend/index.html` doesn't need to restart the server.
+def _render_index() -> "HTMLResponse":
+    from fastapi.responses import HTMLResponse
+    try:
+        html_text = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
+    except Exception:  # pragma: no cover — only fires if the file is gone
+        log.exception("_render_index: failed to read index.html")
+        return HTMLResponse("<h1>SpiderX AI · Eva</h1><p>Frontend missing.</p>", status_code=500, headers=_NO_CACHE)
+    html_text = html_text.replace("{BUILD}", str(APP_BUILD))
+    return HTMLResponse(html_text, headers=_NO_CACHE)
+
+
 @app.get("/")
-async def index() -> FileResponse:
-    return FileResponse(FRONTEND_DIR / "index.html", headers=_NO_CACHE)
+async def index() -> "HTMLResponse":
+    return _render_index()
 
 
 @app.get("/agent/{slug}")
@@ -1857,19 +1877,19 @@ async def agent_page(slug: str, section: Optional[str] = None) -> FileResponse:
     sub-pages (/calls, /settings, /numbers). The client reads location.pathname
     to pick which page to render. Slug is validated on the client; non-existent
     slugs flash a "not found" hint and the user lands back on /."""
-    return FileResponse(FRONTEND_DIR / "index.html", headers=_NO_CACHE)
+    return _render_index()
 
 
 @app.get("/build")
 async def build_page() -> FileResponse:
     """Direct deep-link into Eva's build flow — skips the landing splash."""
-    return FileResponse(FRONTEND_DIR / "index.html", headers=_NO_CACHE)
+    return _render_index()
 
 
 @app.get("/agents")
 async def agents_page() -> FileResponse:
     """Full-page list of saved agents (replaces the old tweaks-drawer list)."""
-    return FileResponse(FRONTEND_DIR / "index.html", headers=_NO_CACHE)
+    return _render_index()
 
 
 @app.get("/for-{slug}")
@@ -1877,7 +1897,7 @@ async def industry_landing_page(slug: str) -> FileResponse:
     """Per-industry landing page — /for-automobile, /for-dental, etc. The
     SPA reads the slug, reskins the homepage to that industry, and presets
     the build's industry context. Unknown slugs render the plain landing."""
-    return FileResponse(FRONTEND_DIR / "index.html", headers=_NO_CACHE)
+    return _render_index()
 
 
 @app.get("/login")
@@ -1885,7 +1905,7 @@ async def industry_landing_page(slug: str) -> FileResponse:
 async def auth_page() -> FileResponse:
     """Stub auth surface — the SPA renders sign-in / sign-up cards. Once
     Auth0 is wired, these redirect to the hosted-login experience."""
-    return FileResponse(FRONTEND_DIR / "index.html", headers=_NO_CACHE)
+    return _render_index()
 
 
 @app.get("/account/billing")
@@ -1896,7 +1916,7 @@ async def account_page() -> FileResponse:
     """Account-scoped pages — billing (plans + upgrade), integrations,
     organisation (billing + tax entity), team (members + invites). SPA
     handles routing."""
-    return FileResponse(FRONTEND_DIR / "index.html", headers=_NO_CACHE)
+    return _render_index()
 
 
 @app.get("/invite/{token}")
@@ -1904,7 +1924,7 @@ async def invite_page(token: str) -> FileResponse:
     """Public accept-invite landing. The SPA reads the token from the URL,
     fetches /api/invites/{token} to render the preview, and either prompts
     login + calls /accept, or shows decline / expired states."""
-    return FileResponse(FRONTEND_DIR / "index.html", headers=_NO_CACHE)
+    return _render_index()
 
 
 @app.get("/admin")
@@ -1913,7 +1933,7 @@ async def admin_page(section: str = "") -> FileResponse:
     """Super-admin shell. The SPA gates this on /api/me.is_super_admin —
     a non-admin who guesses the URL gets the shell but every API call 403s
     so no data leaks. Reach: orgs, users, calls, audit, super-admins."""
-    return FileResponse(FRONTEND_DIR / "index.html", headers=_NO_CACHE)
+    return _render_index()
 
 
 @app.get("/embed/{slug}")
@@ -1922,7 +1942,7 @@ async def embed_page(slug: str) -> FileResponse:
     the orb + a "Tap to talk to {agent}" CTA, no brandbar/nav. Designed to
     be loaded inside an iframe via /static/embed.js, mounted on third-party
     sites. CORS-free because it's same-origin to our app."""
-    return FileResponse(FRONTEND_DIR / "index.html", headers=_NO_CACHE)
+    return _render_index()
 
 
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")

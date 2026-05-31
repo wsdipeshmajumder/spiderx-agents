@@ -1,11 +1,29 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { createRoot } from "react-dom/client";
 import htm from "htm";
+// marked is the markdown renderer powering MarkdownEditor's preview pane.
+// Pinned to v12 (the last commonjs-shim-free release before v13's ESM
+// reshuffle). Loaded from esm.sh so it benefits from the same browser
+// import-map cache as React.
+import { marked } from "https://esm.sh/marked@12.0.2";
+// EasyMDE — the WYSIWYG-ish markdown editor powering every prompt field
+// on the dashboard. Loaded as a UMD <script> tag in index.html (NOT via
+// esm.sh) because EasyMDE bundles CodeMirror 5 with `window.CodeMirror`
+// globals that don't survive a strict ESM conversion. The script tag
+// exposes `window.EasyMDE`; we read it inside the React wrapper at
+// mount time with a brief retry loop in case the script hasn't finished
+// parsing before React's first paint.
 
 import { AudioEngine } from "/static/audio-engine.js?v=23";
 import { VoiceBlob } from "/static/voice-blob.js?v=34";
 
 const html = htm.bind(React.createElement);
+
+// marked is configured once at module load: GitHub-Flavoured Markdown for
+// tables/strikethrough/etc., `breaks:true` so a single newline becomes a
+// <br> (operators don't expect to need a blank line between paragraphs in
+// a prompt editor), no header IDs (we never link to them), no XHTML.
+marked.use({ async: false, gfm: true, breaks: true });
 
 // Interaction model
 // ─────────────────
@@ -25,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 177;
+const SXAI_BUILD = 184;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1260,6 +1278,159 @@ function AgentEditor({ draft, updateDraft, updateTweak, toggleArr, presets, sche
 // up top, search-as-you-type if the list grows large. Clicking an agent
 // routes to /agent/<slug> which mounts the cockpit (where Test / Go-live /
 // Performance lives).
+
+// ─────────────────────────────────────────────────────────────────────────
+// MarkdownEditor — thin React wrapper around EasyMDE. EasyMDE replaces the
+// underlying <textarea> with a CodeMirror surface that renders bold,
+// italic, headings, lists, links, and inline code visually inline as the
+// operator types — so the editor "looks like a word processor with
+// markdown markers visible" rather than "raw source you can preview".
+//
+// Stored value remains plain markdown text — Gemini Live reads markdown
+// fine, and any downstream TTS path can render or strip it without
+// behavioural change. This keeps the on-the-wire shape identical to the
+// previous textarea-based editor, so no save_args or DB rows need to
+// change.
+//
+// API kept stable with the prior version so the seven call-sites
+// (system_prompt, greeting, extra_info notes, knowledge notes, custom
+// dos/don'ts, offers) need no changes. `compact` collapses the toolbar
+// to bold/italic/list/link + skips side-by-side, `defaultMode="split"`
+// auto-toggles EasyMDE's built-in side-by-side preview on mount.
+// ─────────────────────────────────────────────────────────────────────────
+function MarkdownEditor({
+  value,
+  onChange,
+  rows = 12,
+  placeholder = "",
+  className = "",
+  monospace = false,
+  compact = false,
+  defaultMode = "edit",
+}) {
+  // The <textarea> EasyMDE replaces. We never style it directly — EasyMDE
+  // hides it and renders a CodeMirror surface in its place.
+  const taRef = useRef(null);
+  // The EasyMDE instance. Stored in a ref so the cleanup useEffect can
+  // tear it down, and so the external-value sync useEffect can call
+  // .value() without re-running on every render.
+  const mdeRef = useRef(null);
+  // The most recent value EasyMDE itself produced. We compare against
+  // this in the external-sync useEffect so a re-render triggered by our
+  // OWN onChange doesn't loop back into mde.value(...) (which would
+  // jump the caret to the end).
+  const lastEmittedRef = useRef(value || "");
+  // Stable handle to the latest onChange so the EasyMDE listener — set
+  // up once at mount — always calls the freshest callback.
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  useEffect(() => {
+    if (!taRef.current || mdeRef.current) return undefined;
+    let cancelled = false;
+    let retryTimer = null;
+
+    const mount = () => {
+      if (cancelled || mdeRef.current) return;
+      const E = (typeof window !== "undefined") ? window.EasyMDE : null;
+      if (!E) {
+        // Script tag is still parsing. Retry a few times before
+        // giving up — total wait < 2 s in the worst case.
+        retryTimer = setTimeout(mount, 80);
+        return;
+      }
+      if (!taRef.current) return;
+      // Toolbar layout. This is a PROMPT editor — the only thing the
+      // operator should see are the markdown actions themselves. We
+      // drop EasyMDE's preview / side-by-side / fullscreen / undo /
+      // redo / quote / horizontal-rule because:
+      //   - in-source rendering already styles bold/italic/headings/
+      //     lists visually inline, so preview panes are redundant
+      //   - undo/redo are handled natively by the browser (Cmd/Ctrl+Z)
+      //   - quote and hr are rarely used in agent prompts
+      //   - fullscreen is overkill for a 16-row field
+      // The compact and full toolbars both ship the same essentials;
+      // compact only differs in editor min-height (set elsewhere).
+      const toolbar = [
+        "bold", "italic", "heading",
+        "|", "unordered-list", "ordered-list",
+        "|", "link", "code",
+      ];
+      try {
+        const mde = new E({
+          element: taRef.current,
+          initialValue: value || "",
+          placeholder: placeholder,
+          spellChecker: false,
+          status: false,
+          autosave: { enabled: false },
+          forceSync: true,
+          minHeight: Math.max(80, rows * 22) + "px",
+          toolbar: toolbar,
+          renderingConfig: {
+            codeSyntaxHighlighting: false,
+            singleLineBreaks: true,
+          },
+          previewClass: ["md-preview"],
+          lineWrapping: true,
+        });
+        mdeRef.current = mde;
+        mde.codemirror.on("change", () => {
+          const v = mde.value();
+          lastEmittedRef.current = v;
+          onChangeRef.current(v);
+        });
+        // No auto-open of side-by-side: in-source rendering already
+        // styles bold/italic/headings/lists visually, so an extra
+        // preview pane would be duplicate information. `defaultMode`
+        // is kept on the prop signature for API stability but is now
+        // a no-op.
+      } catch (err) {
+        // EasyMDE init failed (rare — usually means the script loaded
+        // but CodeMirror's globals are missing). Log loudly so we can
+        // tell from the console; the host textarea stays visible so
+        // the operator can still type.
+        // eslint-disable-next-line no-console
+        console.error("MarkdownEditor: EasyMDE init failed:", err);
+      }
+    };
+
+    mount();
+
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      const m = mdeRef.current;
+      if (m) {
+        try { m.toTextArea(); } catch { /* harmless on hot reload */ }
+        mdeRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // External value-sync. Fires when a parent component replaces the
+  // value (e.g. a "Reset" button, or a wizard-to-chat sync pulling in
+  // the operator's already-answered facts). We skip the round-trip
+  // when the change came from the user typing here — that path went
+  // through onChange → lastEmittedRef already.
+  useEffect(() => {
+    const mde = mdeRef.current;
+    if (!mde) return;
+    const next = value || "";
+    if (lastEmittedRef.current === next) return;
+    lastEmittedRef.current = next;
+    mde.value(next);
+  }, [value]);
+
+  // Render the host textarea. EasyMDE swaps it for its own surface on
+  // mount, so this exists only briefly during the first render.
+  return html`
+    <div class=${"md-editor md-easy" + (compact ? " md-easy-compact" : "") + (monospace ? " md-easy-mono" : "") + (className ? " " + className : "")}>
+      <textarea ref=${taRef} defaultValue=${value || ""}></textarea>
+    </div>
+  `;
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // DashboardShell — white-theme page chrome with persistent left nav. Used
@@ -3926,10 +4097,12 @@ function AgentExtraInfoPage({ agent, agents, presets, plan, onNav, refreshAgent 
               </button>
               ${open ? html`
                 <div class="db-info-group-body">
-                  <textarea class="db-textarea" rows="5"
-                            placeholder=${"Add " + g.label.toLowerCase() + " — " + g.desc.toLowerCase() + "."}
-                            value=${val}
-                            onInput=${(e) => set(g.id, e.target.value)}></textarea>
+                  <${MarkdownEditor}
+                    value=${val}
+                    onChange=${(v) => set(g.id, v)}
+                    rows=${5}
+                    compact=${true}
+                    placeholder=${"Add " + g.label.toLowerCase() + " — " + g.desc.toLowerCase() + "."} />
                 </div>
               ` : ""}
             </div>
@@ -5127,7 +5300,12 @@ function AgentPersonaPage({ agent, agents, presets, plan, onNav, refreshAgent })
             improvise an opening.
           </${InfoDot}>
         </h3>
-        <textarea class="db-textarea" rows="2" value=${draft.greeting} onInput=${(e) => set("greeting", e.target.value)} placeholder="Hello, this is Maya at BrightSmile Dental. How can I help you today?"></textarea>
+        <${MarkdownEditor}
+          value=${draft.greeting}
+          onChange=${(v) => set("greeting", v)}
+          rows=${2}
+          compact=${true}
+          placeholder="Hello, this is Maya at BrightSmile Dental. How can I help you today?" />
         <span class="db-form-help">The very first thing the caller hears.</span>
       </section>
 
@@ -5151,9 +5329,13 @@ function AgentPersonaPage({ agent, agents, presets, plan, onNav, refreshAgent })
           a human on request) is always applied on top automatically, so you
           don't need to re-state the basics here.
         </p>
-        <textarea class="db-textarea db-textarea-prompt" rows="16" value=${draft.system_prompt} onInput=${(e) => set("system_prompt", e.target.value)}
-                  placeholder="You are Maya, the receptionist for BrightSmile Dental…&#10;&#10;Most callers want to book a check-up, reschedule, or ask about hours and pricing.&#10;&#10;To book: check the calendar, propose 2 nearby slots, confirm, and send an SMS.&#10;&#10;Tone: warm, calm, unhurried. Switch to Hindi if the caller does.&#10;&#10;If asked about pain or symptoms, don't advise — offer the soonest appointment."></textarea>
-        <span class="db-form-help">Tip: structure it as Who she is → What callers want → How to handle each → Tone → Edge-cases → Close.</span>
+        <${MarkdownEditor}
+          value=${draft.system_prompt}
+          onChange=${(v) => set("system_prompt", v)}
+          rows=${16}
+          className="md-editor-prompt"
+          placeholder=${"You are Maya, the receptionist for BrightSmile Dental…\n\n## What callers want\n- Book a check-up\n- Reschedule\n- Ask about hours and pricing\n\n## How to handle bookings\n1. Check the calendar\n2. Propose 2 nearby slots\n3. Confirm and send an SMS recap\n\n## Tone\nWarm, calm, unhurried. Switch to Hindi if the caller does.\n\n## Edge cases\nIf asked about pain or symptoms, don't advise — offer the soonest appointment."} />
+        <span class="db-form-help">Tip: structure it as Who she is → What callers want → How to handle each → Tone → Edge-cases → Close. Markdown headings, lists and bold help her parse it.</span>
       </section>
 
       <section class="db-panel db-danger">
@@ -5508,8 +5690,12 @@ function AgentKnowledgePage({ agent, agents, presets, plan, onNav, refreshAgent 
         <section class="db-panel">
           <h3 class="db-panel-title">What ${agent.name || "your agent"} knows</h3>
           <p class="db-panel-sub">Hours, prices, FAQs, policies — anything she should be able to answer. Paste freely; she cites only what's here. Anything imported from URLs or uploaded files lands here too, in a clearly-bounded KNOWLEDGE block — edit it like any other text.</p>
-          <textarea class="db-textarea" rows="18" value=${text} onInput=${(e) => setText(e.target.value)}
-                    placeholder="Opening hours: 9 AM – 9 PM, Mon–Sun. Address: 123 MG Road, Bengaluru. Pricing: consultation ₹500, root canal ₹4500..."></textarea>
+          <${MarkdownEditor}
+            value=${text}
+            onChange=${(v) => setText(v)}
+            rows=${18}
+            className="md-editor-prompt"
+            placeholder=${"## Hours\nMon–Sun, 9 AM – 9 PM\n\n## Address\n123 MG Road, Bengaluru\n\n## Pricing\n- Consultation ₹500\n- Root canal ₹4500\n\n## FAQs\n**Do you accept insurance?** Yes — Star Health, ICICI Lombard, HDFC ERGO."} />
         </section>
 
         <section class="db-panel">
@@ -6196,9 +6382,12 @@ function AgentGuardrailsPage({ agent, agents, presets, plan, onNav, refreshAgent
           </ul>
           <label class="db-form-field" style=${{ marginTop: 12 }}>
             <span class="db-form-label">Add your own <span class="db-form-opt">(one per line)</span></span>
-            <textarea class="db-textarea" rows="3" value=${policy.custom_dos}
-                      onInput=${(e) => setPolicy((p) => ({ ...p, custom_dos: e.target.value }))}
-                      placeholder="e.g. Greet returning callers by name · Always upsell the lifetime plan if they ask about pricing"></textarea>
+            <${MarkdownEditor}
+              value=${policy.custom_dos}
+              onChange=${(v) => setPolicy((p) => ({ ...p, custom_dos: v }))}
+              rows=${3}
+              compact=${true}
+              placeholder=${"- Greet returning callers by name\n- Always upsell the lifetime plan if they ask about pricing"} />
           </label>
         </section>
 
@@ -6225,9 +6414,12 @@ function AgentGuardrailsPage({ agent, agents, presets, plan, onNav, refreshAgent
           </ul>
           <label class="db-form-field" style=${{ marginTop: 12 }}>
             <span class="db-form-label">Add your own <span class="db-form-opt">(one per line)</span></span>
-            <textarea class="db-textarea" rows="3" value=${policy.custom_donts}
-                      onInput=${(e) => setPolicy((p) => ({ ...p, custom_donts: e.target.value }))}
-                      placeholder="e.g. Never reveal that you are an AI unless asked · Don't discuss internal staffing"></textarea>
+            <${MarkdownEditor}
+              value=${policy.custom_donts}
+              onChange=${(v) => setPolicy((p) => ({ ...p, custom_donts: v }))}
+              rows=${3}
+              compact=${true}
+              placeholder=${"- Never reveal that you are an AI unless asked\n- Don't discuss internal staffing"} />
           </label>
         </section>
       </div>
@@ -6558,10 +6750,12 @@ function AgentProfilePage({ agent, agents, presets, plan, onNav, refreshAgent, o
     html`${agent.name} mentions these when a caller asks "anything on right now?" or as a soft upsell.`,
     html`
       <label class="db-form-field">
-        <textarea class="db-textarea" rows="4"
-                  value=${vars.offers || ""}
-                  placeholder=${sectorSchema?.offers_examples || "e.g. 20% off first booking · Free consultation through Friday"}
-                  onInput=${(e) => setVar("offers", e.target.value)}></textarea>
+        <${MarkdownEditor}
+          value=${vars.offers || ""}
+          onChange=${(v) => setVar("offers", v)}
+          rows=${4}
+          compact=${true}
+          placeholder=${sectorSchema?.offers_examples || "- 20% off first booking\n- Free consultation through Friday"} />
         <span class="db-form-help">Update this as your promotions change — the agent reads the latest text on every call.</span>
       </label>
     `,

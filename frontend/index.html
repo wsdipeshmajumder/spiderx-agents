@@ -4,7 +4,19 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>SpiderX AI · Eva</title>
-    <link rel="stylesheet" href="/static/styles.css?v=177" />
+    <!-- EasyMDE — markdown editor with in-source WYSIWYG rendering.
+         Loaded as a UMD script (NOT via esm.sh / import-map) because
+         EasyMDE bundles CodeMirror 5 with `window.CodeMirror` globals
+         that don't survive a strict ESM conversion. The script tag
+         exposes `window.EasyMDE` which our React wrapper picks up.
+         The CSS sits BEFORE our stylesheet so our overrides win the
+         cascade. -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde@2.18.0/dist/easymde.min.css" />
+    <script src="https://cdn.jsdelivr.net/npm/easymde@2.18.0/dist/easymde.min.js"></script>
+    <!-- {BUILD} placeholders are interpolated by backend.app._render_index
+         on every SPA request so the cache-bust pin always matches APP_BUILD.
+         No more drift between styles.css?v= / app.js?v= / SXAI_BUILD. -->
+    <link rel="stylesheet" href="/static/styles.css?v={BUILD}" />
     <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='40' fill='%23a78bfa'/></svg>" />
     <script type="importmap">
       {
@@ -18,6 +30,6 @@
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/static/app.js?v=174"></script>
+    <script type="module" src="/static/app.js?v={BUILD}"></script>
   </body>
 </html>

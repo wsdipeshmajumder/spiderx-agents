@@ -10093,3 +10093,325 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
 
 /* ─── Dark-theme parity for the new hamburger + drawer overlay ────────── */
 :root[data-theme="dark"] .db-nav-overlay { background: rgba(0, 0, 0, 0.52); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * MARKDOWN EDITOR (build 180 — EasyMDE-backed)
+ *
+ * Replaces the build-178 custom textarea+toolbar editor with a CodeMirror-
+ * powered EasyMDE instance. EasyMDE renders bold/italic/headings/lists
+ * visually inline as the operator types (the markdown markers like ** and
+ * ## stay visible but de-emphasised; the surrounding text is styled). The
+ * result is a "looks like a word processor" feel without abandoning the
+ * markdown source that Gemini Live consumes.
+ *
+ * EasyMDE's own stylesheet is loaded in index.html BEFORE this file, so
+ * everything below is an override: we recolour the toolbar to match the
+ * dashboard, swap CodeMirror's serif preview for the dashboard's sans
+ * stack, and add a dark theme.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* The .md-editor wrapper supplies the focus ring + outer border so the
+ * editor sits inside the same chrome as the dashboard's other inputs. */
+.md-editor {
+  display: block;
+  border: 1px solid #d8dbe4;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #ffffff;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.md-editor:focus-within {
+  border-color: #a78bfa;
+  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.18);
+}
+
+/* Host textarea fallback: EasyMDE hides this itself once it mounts
+ * (it sets style="display:none" inline). If EasyMDE fails to load
+ * — CDN blocked, ad-blocker, offline — we WANT the raw textarea to
+ * remain visible so the operator can still edit. So we don't add
+ * our own display:none here. EasyMDE wraps the textarea inside
+ * `.EasyMDEContainer` post-mount, so our chrome on .md-editor still
+ * surrounds it consistently. */
+.md-editor > textarea {
+  display: block;
+  width: 100%;
+  border: 0;
+  outline: none;
+  padding: 12px 14px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+  background: transparent;
+  resize: vertical;
+  min-height: 80px;
+  color: var(--fg-0, #1f2230);
+}
+
+/* EasyMDE's container — strip the default purple border (we own that on
+ * the wrapper) and let our radius win. */
+.md-editor .EasyMDEContainer { background: transparent; }
+.md-editor .EasyMDEContainer .editor-toolbar {
+  background: #f7f8fc;
+  border: 0;
+  border-bottom: 1px solid #e6e7ec;
+  border-radius: 0;
+  padding: 6px 8px;
+  opacity: 1;
+}
+.md-editor .EasyMDEContainer .editor-toolbar.fullscreen { background: #f7f8fc; }
+.md-editor .EasyMDEContainer .editor-toolbar::before,
+.md-editor .EasyMDEContainer .editor-toolbar::after { display: none; }
+.md-editor .EasyMDEContainer .editor-toolbar button {
+  color: #4a4f5e;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  width: 30px; height: 30px;
+  line-height: 28px;
+  margin: 0 1px;
+  background: transparent;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.md-editor .EasyMDEContainer .editor-toolbar button:hover {
+  background: #ffffff;
+  border-color: #d8dbe4;
+  color: #1f2230;
+}
+.md-editor .EasyMDEContainer .editor-toolbar button.active,
+.md-editor .EasyMDEContainer .editor-toolbar button:active {
+  background: #ede9fe;
+  border-color: #c4b5fd;
+  color: #6d28d9;
+}
+.md-editor .EasyMDEContainer .editor-toolbar i.separator {
+  border-left: 1px solid #d8dbe4;
+  margin: 0 6px;
+}
+
+/* CodeMirror — the actual edit surface. Use the dashboard's font stack
+ * and a comfortable line-height so bold/italic/heading styles read
+ * inline as the operator types. */
+.md-editor .EasyMDEContainer .CodeMirror {
+  border: 0;
+  border-radius: 0;
+  font-family: inherit;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--fg-0, #1f2230);
+  background: #ffffff;
+  padding: 4px 0;
+}
+.md-editor .EasyMDEContainer .CodeMirror-scroll {
+  min-height: 140px;
+}
+.md-editor .EasyMDEContainer .CodeMirror-cursor {
+  border-left-color: #6d28d9;
+  border-left-width: 2px;
+}
+.md-editor .EasyMDEContainer .CodeMirror-placeholder { color: #9095a3 !important; }
+
+/* CodeMirror tokens — this is what makes the in-source WYSIWYG work.
+ * Bold text becomes 600-weight, italic becomes italic, headings get
+ * progressively larger; the markdown markers (** _ ## > >) become
+ * smaller and lower-contrast so the EYE skips over them. */
+.md-editor .CodeMirror .cm-strong { font-weight: 700; color: #1f2230; }
+.md-editor .CodeMirror .cm-em     { font-style: italic; color: #1f2230; }
+.md-editor .CodeMirror .cm-header  { font-weight: 700; color: #1f2230; line-height: 1.35; }
+.md-editor .CodeMirror .cm-header-1 { font-size: 1.55em; }
+.md-editor .CodeMirror .cm-header-2 { font-size: 1.32em; }
+.md-editor .CodeMirror .cm-header-3 { font-size: 1.18em; }
+.md-editor .CodeMirror .cm-header-4,
+.md-editor .CodeMirror .cm-header-5,
+.md-editor .CodeMirror .cm-header-6 { font-size: 1.06em; }
+.md-editor .CodeMirror .cm-link    { color: #6d28d9; }
+.md-editor .CodeMirror .cm-url     { color: #9095a3; text-decoration: none; }
+.md-editor .CodeMirror .cm-comment,
+.md-editor .CodeMirror .cm-formatting-code,
+.md-editor .CodeMirror .cm-string,
+.md-editor .CodeMirror .cm-string-2 {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  background: #f0eef9;
+  color: #4a4f5e;
+  padding: 0 3px;
+  border-radius: 4px;
+}
+.md-editor .CodeMirror .cm-quote   { color: #6a6f7d; font-style: italic; }
+.md-editor .CodeMirror .cm-hr      { color: #c4b5fd; }
+.md-editor .CodeMirror .cm-tag     { color: #6d28d9; }
+.md-editor .CodeMirror .cm-formatting {
+  /* The asterisks, underscores, # signs, > marks — make them visible
+   * but secondary so the styled content reads first. */
+  color: #c1c4ce;
+  font-weight: 400;
+}
+/* When a heading is active the `#` markers are part of the same line —
+ * keep them small/quiet so the line still feels heading-sized but the
+ * markers don't shout. */
+.md-editor .CodeMirror .cm-formatting-header {
+  color: #c1c4ce;
+  font-weight: 400;
+}
+
+/* Selection colour — match the dashboard's purple accent. */
+.md-editor .CodeMirror .CodeMirror-selected,
+.md-editor .CodeMirror .CodeMirror-line ::selection {
+  background: rgba(167, 139, 250, 0.22) !important;
+}
+
+/* Side-by-side mode — EasyMDE puts the preview in its own pane on the
+ * right. Style that pane to match the dashboard's panel look. */
+.md-editor .EasyMDEContainer .editor-preview-side {
+  background: #fafbff;
+  border-left: 1px solid #e6e7ec;
+  padding: 14px 18px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--fg-0, #1f2230);
+}
+.md-editor .EasyMDEContainer .editor-preview-side > *:first-child { margin-top: 0; }
+.md-editor .EasyMDEContainer .editor-preview-side > *:last-child  { margin-bottom: 0; }
+.md-editor .EasyMDEContainer .editor-preview-side h1,
+.md-editor .EasyMDEContainer .editor-preview-side h2,
+.md-editor .EasyMDEContainer .editor-preview-side h3,
+.md-editor .EasyMDEContainer .editor-preview-side h4 {
+  margin: 14px 0 6px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  line-height: 1.3;
+  color: #1f2230;
+}
+.md-editor .EasyMDEContainer .editor-preview-side h1 { font-size: 19px; }
+.md-editor .EasyMDEContainer .editor-preview-side h2 { font-size: 16px; }
+.md-editor .EasyMDEContainer .editor-preview-side h3 { font-size: 14.5px; }
+.md-editor .EasyMDEContainer .editor-preview-side p  { margin: 6px 0; }
+.md-editor .EasyMDEContainer .editor-preview-side ul,
+.md-editor .EasyMDEContainer .editor-preview-side ol { padding-left: 22px; margin: 6px 0; }
+.md-editor .EasyMDEContainer .editor-preview-side li { margin: 2px 0; }
+.md-editor .EasyMDEContainer .editor-preview-side a  { color: #6d28d9; text-decoration: underline; text-underline-offset: 2px; }
+.md-editor .EasyMDEContainer .editor-preview-side code {
+  background: #f0eef9;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+.md-editor .EasyMDEContainer .editor-preview-side pre {
+  background: #f4f4f8;
+  border: 1px solid #e6e7ec;
+  padding: 10px 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 13px;
+}
+.md-editor .EasyMDEContainer .editor-preview-side blockquote {
+  border-left: 3px solid #c4b5fd;
+  margin: 8px 0;
+  padding: 2px 12px;
+  color: #4a4f5e;
+}
+
+/* Fullscreen — EasyMDE swaps to a fixed-position cover. Keep the
+ * dashboard chrome visible underneath isn't possible, but at least
+ * style the fullscreen container to match. */
+.md-editor .EasyMDEContainer .CodeMirror-fullscreen,
+.md-editor .EasyMDEContainer .editor-preview-side.editor-preview-active-side {
+  background: #ffffff;
+}
+
+/* Compact editors — shrink the toolbar height a touch and tighten the
+ * editor's min-height. The compact API hides preview/side-by-side
+ * buttons by construction (see the JS toolbar list). */
+.md-easy-compact .EasyMDEContainer .editor-toolbar { padding: 4px 6px; }
+.md-easy-compact .EasyMDEContainer .editor-toolbar button {
+  width: 28px; height: 28px; line-height: 26px;
+}
+.md-easy-compact .EasyMDEContainer .CodeMirror { font-size: 14px; }
+.md-easy-compact .EasyMDEContainer .CodeMirror-scroll { min-height: 80px; }
+
+/* Monospace editors — used for fields where the operator types
+ * structured text (none of the prompt editors today, but the prop is
+ * supported for future YAML/JSON fields). */
+.md-easy-mono .EasyMDEContainer .CodeMirror {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+
+/* The big-prompt variant (system_prompt / Knowledge Notes) gets extra
+ * breathing room — both the source and the side-by-side preview are
+ * substantial. */
+.md-editor-prompt .EasyMDEContainer .CodeMirror-scroll { min-height: 280px; }
+.md-editor-prompt .EasyMDEContainer .editor-preview-side { min-height: 280px; }
+
+/* ─── Phone reflow ────────────────────────────────────────────────────── */
+@media (max-width: 720px) {
+  /* Side-by-side mode is too cramped on phones — EasyMDE handles the
+   * stacked layout reasonably well, but we still want to compact the
+   * toolbar buttons so they don't wrap. */
+  .md-editor .EasyMDEContainer .editor-toolbar { padding: 4px 4px; }
+  .md-editor .EasyMDEContainer .editor-toolbar button { margin: 0; }
+}
+@media (max-width: 480px) {
+  .md-editor .EasyMDEContainer .editor-toolbar button { width: 30px; height: 30px; }
+}
+
+/* ─── Dark theme ──────────────────────────────────────────────────────── */
+:root[data-theme="dark"] .md-editor {
+  background: #1a1c25;
+  border-color: rgba(255, 255, 255, 0.09);
+}
+:root[data-theme="dark"] .md-editor:focus-within {
+  border-color: #a78bfa;
+  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.22);
+}
+:root[data-theme="dark"] .md-editor .EasyMDEContainer .editor-toolbar {
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom-color: rgba(255, 255, 255, 0.07);
+}
+:root[data-theme="dark"] .md-editor .EasyMDEContainer .editor-toolbar button { color: #c8ccd9; }
+:root[data-theme="dark"] .md-editor .EasyMDEContainer .editor-toolbar button:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+:root[data-theme="dark"] .md-editor .EasyMDEContainer .editor-toolbar button.active,
+:root[data-theme="dark"] .md-editor .EasyMDEContainer .editor-toolbar button:active {
+  background: rgba(167, 139, 250, 0.18);
+  border-color: rgba(167, 139, 250, 0.32);
+  color: #ddd6fe;
+}
+:root[data-theme="dark"] .md-editor .EasyMDEContainer .editor-toolbar i.separator {
+  border-left-color: rgba(255, 255, 255, 0.12);
+}
+:root[data-theme="dark"] .md-editor .EasyMDEContainer .CodeMirror {
+  background: #1a1c25;
+  color: #e8e9ef;
+}
+:root[data-theme="dark"] .md-editor .CodeMirror .cm-strong { color: #ffffff; }
+:root[data-theme="dark"] .md-editor .CodeMirror .cm-em { color: #ffffff; }
+:root[data-theme="dark"] .md-editor .CodeMirror .cm-header { color: #ffffff; }
+:root[data-theme="dark"] .md-editor .CodeMirror .cm-link { color: #c4b5fd; }
+:root[data-theme="dark"] .md-editor .CodeMirror .cm-url { color: #6a6f7d; }
+:root[data-theme="dark"] .md-editor .CodeMirror .cm-formatting,
+:root[data-theme="dark"] .md-editor .CodeMirror .cm-formatting-header { color: #4a4f5e; }
+:root[data-theme="dark"] .md-editor .CodeMirror .cm-comment,
+:root[data-theme="dark"] .md-editor .CodeMirror .cm-formatting-code,
+:root[data-theme="dark"] .md-editor .CodeMirror .cm-string,
+:root[data-theme="dark"] .md-editor .CodeMirror .cm-string-2 {
+  background: rgba(167, 139, 250, 0.18);
+  color: #ddd6fe;
+}
+:root[data-theme="dark"] .md-editor .CodeMirror .cm-quote { color: #a4a8b8; }
+:root[data-theme="dark"] .md-editor .CodeMirror .CodeMirror-cursor { border-left-color: #c4b5fd; }
+:root[data-theme="dark"] .md-editor .EasyMDEContainer .editor-preview-side {
+  background: rgba(255, 255, 255, 0.025);
+  border-left-color: rgba(255, 255, 255, 0.08);
+  color: #e8e9ef;
+}
+:root[data-theme="dark"] .md-editor .EasyMDEContainer .editor-preview-side a { color: #c4b5fd; }
+:root[data-theme="dark"] .md-editor .EasyMDEContainer .editor-preview-side code {
+  background: rgba(167, 139, 250, 0.18);
+  color: #ddd6fe;
+}
+:root[data-theme="dark"] .md-editor .EasyMDEContainer .editor-preview-side blockquote {
+  border-left-color: #a78bfa;
+  color: #c8ccd9;
+}

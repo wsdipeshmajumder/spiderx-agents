@@ -855,6 +855,210 @@ def _format_purpose_for_prompt(agent: dict[str, Any]) -> str:
     return "\n\n".join(parts)
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# Build-form coverage formatters (build 183).
+#
+# Pre-183 the runtime prompt was missing several fields the operator could
+# edit on the dashboard — `policy.custom_dos`, `policy.custom_donts`, the
+# `policy.dos.*` / `policy.donts.*` toggles, the canonical business
+# `variables` block (hours/address/phone/website/etc.), and the
+# sector-schema fields (`vars.{sector}_*`). Those edits were saved to the
+# DB but never reached the model, so a later "update opening hours" on
+# the dashboard had zero behavioural effect on calls. These formatters
+# render those fields into clearly-labelled blocks the LLM can consult.
+# ─────────────────────────────────────────────────────────────────────────
+
+# Human-readable labels for the policy toggles. Must match the frontend
+# DOS / DONTS arrays in app.js (~line 6301). When you add a new toggle in
+# the UI, mirror the label here so it shows up at runtime too.
+_POLICY_DOS_LABELS: dict[str, str] = {
+    "confirm_booking":  "Repeat back the booking time before confirming.",
+    "sms_recap":        "Send an SMS recap after every booking.",
+    "language_match":   "Switch to the caller's language if you detect one.",
+    "offer_transcript": "Offer to email a transcript at end of call.",
+    "name_caller":      "Use the caller's name once you have it.",
+}
+_POLICY_DONTS_LABELS: dict[str, str] = {
+    "no_price_promise": "Don't quote prices that aren't in the knowledge base.",
+    "no_delivery_eta":  "Don't promise specific delivery / arrival times.",
+    "no_competitors":   "Don't discuss competitors by name.",
+    "no_after_hours":   "Don't accept bookings outside business hours.",
+    "no_phone_payment": "Don't process payments over the phone.",
+}
+
+# Canonical business-profile variables — the ones every agent should
+# surface verbatim to the model so edits on the Profile page flow live.
+# Ordered by "what callers ask about most" so the model sees the high-
+# frequency facts first when scanning the block.
+_BUSINESS_FACT_KEYS: list[tuple[str, str]] = [
+    ("business_name", "Business name"),
+    ("hours",         "Hours"),
+    ("address",       "Address"),
+    ("phone",         "Phone (human escalation line)"),
+    ("email",         "Email"),
+    ("website",       "Website"),
+    ("services",      "Services"),
+    ("offers",        "Current offers"),
+    ("city",          "City"),
+    ("country",       "Country"),
+    ("timezone",      "Timezone"),
+    ("billing_address", "Billing address"),
+]
+
+
+def _format_business_facts_for_prompt(agent: dict[str, Any]) -> str:
+    """Render the agent's saved business `variables` as a CURRENT BUSINESS
+    FACTS block. This is the bridge between the dashboard's Profile page
+    and the model — if the operator updates opening hours, the change
+    reaches Gemini Live on the very next call instead of being trapped
+    in `variables.hours` and ignored.
+
+    Empty / missing keys are skipped; if nothing is set we return ''
+    so the block doesn't show up as an empty heading."""
+    variables = agent.get("variables") if isinstance(agent.get("variables"), dict) else {}
+    if not variables:
+        return ""
+    lines: list[str] = []
+    for key, label in _BUSINESS_FACT_KEYS:
+        val = variables.get(key)
+        if val is None:
+            continue
+        if isinstance(val, (list, tuple)):
+            val = ", ".join(str(v).strip() for v in val if str(v).strip())
+        text = str(val).strip()
+        if not text:
+            continue
+        lines.append(f"  • {label}: {text}")
+
+    # Sector-schema variables (vars.{sector}_*) — anything the operator
+    # filled on the Profile page's per-sector section. Some of these are
+    # already read by phone_ai_conventions playbooks, but most aren't —
+    # this block makes ALL of them visible so the model can answer
+    # questions like "what's your cancellation policy" without us
+    # hard-coding a playbook hook for every key.
+    sector = (agent.get("sector") or "").strip()
+    if sector:
+        prefix = f"{sector}_"
+        sector_lines: list[str] = []
+        for k, v in variables.items():
+            if not isinstance(k, str) or not k.startswith(prefix):
+                continue
+            if v is None:
+                continue
+            if isinstance(v, (list, tuple)):
+                v = ", ".join(str(x).strip() for x in v if str(x).strip())
+            text = str(v).strip()
+            if not text:
+                continue
+            # snake_case → Title Case for the label — matches what the
+            # operator sees in the dashboard close enough for prompt use.
+            human = k[len(prefix):].replace("_", " ").strip().capitalize()
+            if human:
+                sector_lines.append(f"  • {human}: {text}")
+        if sector_lines:
+            lines.append("")  # blank line separator
+            lines.append(f"  ── Sector-specific ({sector}) ──")
+            lines.extend(sector_lines)
+
+    if not lines:
+        return ""
+    return (
+        "━━━━━━━━━━━━━ CURRENT BUSINESS FACTS ━━━━━━━━━━━━━\n"
+        "These are the up-to-date facts from the operator's dashboard. They "
+        "override anything stale in the role description above. Cite them "
+        "directly when the caller asks — never invent or 'round' the values.\n"
+        + "\n".join(lines)
+    )
+
+
+def _format_policy_for_prompt(agent: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """Materialise the operator's Guardrails-page choices into Do's and
+    Don'ts strings the runtime prompt can consume. Returns (extra_dos,
+    extra_donts) — both lists of human-readable rule strings.
+
+    Three sources:
+      • `policy.dos.*` / `policy.donts.*` — boolean toggles (TRUE means
+        on). Mapped via _POLICY_DOS_LABELS / _POLICY_DONTS_LABELS.
+      • `policy.custom_dos` / `policy.custom_donts` — free-form text
+        the operator typed. Each line becomes its own rule.
+
+    Pre-183 ALL FOUR fields were silently dropped by the composer."""
+    policy = agent.get("policy") if isinstance(agent.get("policy"), dict) else {}
+    extra_dos: list[str] = []
+    extra_donts: list[str] = []
+
+    dos_toggles = policy.get("dos") if isinstance(policy.get("dos"), dict) else {}
+    for key, on in dos_toggles.items():
+        if not on:
+            continue
+        label = _POLICY_DOS_LABELS.get(key)
+        if label:
+            extra_dos.append(label)
+
+    donts_toggles = policy.get("donts") if isinstance(policy.get("donts"), dict) else {}
+    for key, on in donts_toggles.items():
+        if not on:
+            continue
+        label = _POLICY_DONTS_LABELS.get(key)
+        if label:
+            extra_donts.append(label)
+
+    custom_dos_raw = str(policy.get("custom_dos") or "").strip()
+    if custom_dos_raw:
+        for line in custom_dos_raw.splitlines():
+            t = line.strip().lstrip("-•*").strip()
+            if t:
+                extra_dos.append(t)
+
+    custom_donts_raw = str(policy.get("custom_donts") or "").strip()
+    if custom_donts_raw:
+        for line in custom_donts_raw.splitlines():
+            t = line.strip().lstrip("-•*").strip()
+            if t:
+                extra_donts.append(t)
+
+    return extra_dos, extra_donts
+
+
+def _format_outcomes_with_kinds_for_prompt(agent: dict[str, Any]) -> str:
+    """Render the agent's outcomes as a labelled list with the kind
+    (success / qualified / info / failure) the operator + dashboard
+    consider each one to be. Pre-183 the runtime prompt only listed the
+    enum slugs (csv), so the model had no signal about which outcomes
+    the operator considers wins vs failures."""
+    raw = agent.get("outcomes") or []
+    if not isinstance(raw, list) or not raw:
+        return ""
+    try:
+        from . import call_outcomes
+        catalogue = {c["id"]: c for c in call_outcomes.catalogue_for(agent) if isinstance(c, dict)}
+    except Exception:  # noqa: BLE001
+        catalogue = {}
+    if not catalogue:
+        return ""
+    lines: list[str] = []
+    for oid_raw in raw:
+        oid = str(oid_raw).strip()
+        if not oid:
+            continue
+        meta = catalogue.get(oid)
+        if meta:
+            kind = meta.get("kind") or "info"
+            label = meta.get("label") or oid
+            lines.append(f"  • {oid}  [{kind}] — {label}")
+        else:
+            # Custom outcome the operator typed that isn't in the
+            # sector catalogue. Keep it but mark the kind unknown.
+            lines.append(f"  • {oid}  [info]")
+    if not lines:
+        return ""
+    return (
+        "Outcome catalogue (pass the `outcome` field to end_call as one of these):\n"
+        + "\n".join(lines)
+        + "\n  Kind legend — success: counts as a win · qualified: lead captured, follow-up needed · info: information given, no action · failure: poor outcome."
+    )
+
+
 def _format_extra_info_for_prompt(agent: dict[str, Any]) -> str:
     """Render the agent's industry-adaptive `extra_info` groups as a
     REFERENCE INFO section for the live-call prompt. Empty → ''. The
@@ -899,7 +1103,23 @@ def _agent_system_prompt(agent: dict[str, Any]) -> str:
       6. Call lifecycle (kickoff / resumption / silence handling)"""
 
     guardrails = agent.get("guardrails") or []
-    rails = "\n".join(f"  - {g}" for g in guardrails) if guardrails else "  - (none specified)"
+    # Operator-edited Do's / Don'ts (toggles + free-form custom lines)
+    # land here too. Pre-183 these were silently dropped — the prompt
+    # only listed `guardrails[]`. Now we append them as bulleted rules
+    # so a single Do/Don't field on the dashboard reaches the model.
+    extra_dos, extra_donts = _format_policy_for_prompt(agent)
+    rail_lines: list[str] = []
+    for g in guardrails:
+        rail_lines.append(f"  - {g}")
+    if extra_dos:
+        rail_lines.append("  Operator-set Do's:")
+        for line in extra_dos:
+            rail_lines.append(f"    • {line}")
+    if extra_donts:
+        rail_lines.append("  Operator-set Don'ts:")
+        for line in extra_donts:
+            rail_lines.append(f"    • {line}")
+    rails = "\n".join(rail_lines) if rail_lines else "  - (none specified)"
     # Variable substitution — replace {{key}} in persona/greeting/system_prompt
     # with the agent's saved variables before the prompt reaches Gemini.
     variables = agent.get("variables") or {}
@@ -913,6 +1133,11 @@ def _agent_system_prompt(agent: dict[str, Any]) -> str:
     outcomes_csv = ", ".join(
         agent.get("outcomes") or ["resolved", "callback_requested", "not_interested", "voicemail"]
     )
+    # Kind-labelled outcome block — the model now sees [success]/[qualified]/
+    # [info]/[failure] tags so it knows which outcomes the operator
+    # considers wins. Pre-183 it only saw the CSV slugs.
+    outcomes_block = _format_outcomes_with_kinds_for_prompt(agent)
+    business_facts_block = _format_business_facts_for_prompt(agent)
     # Small-talk rapport phrases — rendered inline in the A-STAR "Small talk"
     # block. Empty list (legacy agents pre-migration) collapses to a generic
     # fallback so the block always has SOMETHING — never a bare "Small talk:"
@@ -980,6 +1205,8 @@ Sector: {agent.get('sector')}
 Locale: {agent.get('locale')}
 Greeting line: {greeting_text}
 
+{business_facts_block}
+
 ━━━━━━━━━━━━━ CORE PURPOSE ━━━━━━━━━━━━━
 {_format_purpose_for_prompt(agent)}
 {_format_extra_info_for_prompt(agent)}
@@ -1001,6 +1228,7 @@ Call lifecycle:
 Wrapping up — ALWAYS call `end_call`:
   • When the caller says goodbye / "that's all" / hangs up the conversation, call the `end_call` connector ONCE with:
       outcome → one of {outcomes_csv}
+{outcomes_block}
       reason → one of CONVERSATION_COMPLETE, USER_REQUESTED, VOICEMAIL_DETECTED, WRONG_NUMBER, ESCALATED_TO_HUMAN, ABANDONED
       summary → 1-2 factual sentences of what happened
       extracted → an object with any structured fields you captured (e.g. {{"name": "Arjun", "phone": "9876543210", "appointment_at": "2026-05-15T15:00"}})
@@ -1640,6 +1868,7 @@ At the top of your system instruction (above this line, when present) you'll see
 ────────── TOOL GUIDE ──────────
 READS — diagnose with real data before recommending or acting (cheap, use freely):
 • `read_agent(agent_id)` — current full state of one agent. Mandatory before any nested-JSONB edit so you don't clobber sibling keys.
+• `read_runtime_prompt(agent_id)` — the EXACT composed system prompt the model sees on her next call. Use when the operator asks "what does she know about X?" / "are my custom Do's reaching her?" / "is my new opening hours actually being used?" — quotes the relevant snippet back instead of guessing. Returns a `blocks_present` map so you can answer "is BUSINESS FACTS in there?" instantly.
 • `read_outcomes_report(agent_id, days?)` — performance numbers: per-outcome counts, kind totals, weighted success rate, purpose alignment. ALWAYS read this BEFORE recommending weight or purpose changes — never guess from vibes.
 • `read_recent_calls(agent_id, limit?, outcome?)` — most recent calls (default 10, max 25). Each row has outcome + summary + sentiment + lead_quality. Use to answer "what happened on the last call?" or to look for patterns ("why all voicemail?").
 • `read_conventions(agent_id)` — speech / silence / sector-playbook rules baked into every call. Use when the operator asks "what defaults is she following?".
@@ -2067,6 +2296,31 @@ def _read_recent_calls_decl() -> types.FunctionDeclaration:
     )
 
 
+def _read_runtime_prompt_decl() -> types.FunctionDeclaration:
+    """The exact composed system prompt that Gemini Live will see on the
+    agent's next call. Eva uses this to answer "what does she actually
+    know about my hours?" / "is my custom Do being applied?" / "show me
+    the BUSINESS FACTS block for Mira" — diagnostic visibility into
+    everything `_agent_system_prompt` assembles."""
+    return types.FunctionDeclaration(
+        name="read_runtime_prompt",
+        description=(
+            "Read the FULL composed system prompt that will be sent to "
+            "the model on this agent's next call. Use to verify a "
+            "specific field reaches the model (e.g. operator asks 'are "
+            "you using my new hours?'). Returns the whole prompt + a "
+            "list of which optional blocks are present."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            required=["agent_id"],
+            properties={
+                "agent_id": types.Schema(type=types.Type.INTEGER),
+            },
+        ),
+    )
+
+
 def _read_conventions_decl() -> types.FunctionDeclaration:
     """Operator-facing JSON view of the systemic phone-AI conventions
     (speech rules, silence policy, sector playbook) that apply to THIS
@@ -2184,6 +2438,7 @@ def _helper_tools() -> list[types.Tool]:
         _set_purpose_decl(),
         # Tier 2 — read-only intelligence
         _read_agent_decl(),
+        _read_runtime_prompt_decl(),
         _read_outcomes_report_decl(),
         _read_recent_calls_decl(),
         _read_conventions_decl(),
@@ -5406,6 +5661,48 @@ async def run_helper_session(
             log.exception("helper.read_recent_calls failed")
             return {"ok": False, "error": str(e)[:200]}
 
+    async def on_read_runtime_prompt(args: dict[str, Any]) -> dict[str, Any]:
+        """Compose the agent's system prompt the same way a real call would
+        and surface it back to Eva. Lets the operator ask 'what does she
+        actually know about my hours?' and get a real, verifiable answer
+        instead of vibes. Trimmed to ~6 KB so the helper-session token
+        budget stays sane; Eva can quote the relevant snippet."""
+        try:
+            agent_id = int(args.get("agent_id"))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "agent_id required"}
+        a = await _ensure_agent_access(agent_id, write=False)
+        if not a:
+            return {"ok": False, "error": f"no access to agent {agent_id}"}
+        try:
+            prompt = _agent_system_prompt(a)
+            # Quick presence map for the optional blocks added in build
+            # 183. Lets Eva answer 'are my custom Do's reaching her?'
+            # without re-grepping the whole string.
+            blocks_present = {
+                "business_facts":    "CURRENT BUSINESS FACTS" in prompt,
+                "operator_dos":      "Operator-set Do's:" in prompt,
+                "operator_donts":    "Operator-set Don'ts:" in prompt,
+                "reference_info":    "REFERENCE INFO" in prompt or "Reference info" in prompt,
+                "conventions":       "Speech & format" in prompt or "Sector playbook" in prompt,
+                "outcome_kinds":     "[success]" in prompt or "[qualified]" in prompt
+                                     or "[info]" in prompt or "[failure]" in prompt,
+                "purpose_mission":   "Mission:" in prompt,
+                "knowledge_block":   "KNOWLEDGE" in prompt,
+            }
+            return {
+                "ok": True,
+                "agent_id": agent_id,
+                "agent_name": a.get("name"),
+                "length_chars": len(prompt),
+                "blocks_present": blocks_present,
+                "prompt": prompt[:6000],
+                "truncated": len(prompt) > 6000,
+            }
+        except Exception as e:  # noqa: BLE001
+            log.exception("helper.read_runtime_prompt failed")
+            return {"ok": False, "error": str(e)[:200]}
+
     async def on_read_conventions(args: dict[str, Any]) -> dict[str, Any]:
         try:
             agent_id = int(args.get("agent_id"))
@@ -5513,6 +5810,8 @@ async def run_helper_session(
         # Tier 2 — read-only intelligence
         if name == "read_agent":
             return await on_read_agent(args)
+        if name == "read_runtime_prompt":
+            return await on_read_runtime_prompt(args)
         if name == "read_outcomes_report":
             return await on_read_outcomes_report(args)
         if name == "read_recent_calls":
