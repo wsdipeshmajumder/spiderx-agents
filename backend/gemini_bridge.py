@@ -906,6 +906,47 @@ _BUSINESS_FACT_KEYS: list[tuple[str, str]] = [
 ]
 
 
+_FEMALE_VOICES = {"Aoede", "Leda", "Kore", "Zephyr"}
+_MALE_VOICES   = {"Charon", "Fenrir", "Puck", "Orus"}
+
+
+def _resolve_gender(agent: dict[str, Any]) -> str:
+    """Return 'female' / 'male' / 'neutral' for an agent. Explicit
+    `variables.gender` wins; if absent we infer from the chosen TTS
+    voice (Aoede/Leda/Kore/Zephyr → female; Charon/Fenrir/Puck/Orus →
+    male). Returns 'neutral' if nothing decisive.
+
+    Build 187 wires this into the runtime prompt + the dashboard's
+    pronouns helper so a male-named agent (Rohan, Vikram, Arjun) stops
+    being referred to as 'her' on every surface."""
+    variables = agent.get("variables") if isinstance(agent.get("variables"), dict) else {}
+    raw = str(variables.get("gender") or "").strip().lower()
+    if raw in ("female", "male", "neutral"):
+        return raw
+    voice = str(agent.get("voice") or "").strip()
+    if voice in _FEMALE_VOICES:
+        return "female"
+    if voice in _MALE_VOICES:
+        return "male"
+    return "neutral"
+
+
+def _gender_hint_for_prompt(agent: dict[str, Any]) -> str:
+    """One-line gender hint for the runtime prompt. Used by Gemini Live
+    for languages with gendered grammar (Hindi 'karna' vs 'karni',
+    Spanish 'cansado' vs 'cansada', etc.) and for any "I am a man/I am
+    a woman" prosody calibration the model does internally. Phrased
+    conversationally so it reads naturally inside the RUNTIME CONTEXT
+    block — not as a flag/enum."""
+    g = _resolve_gender(agent)
+    name = agent.get("name") or "the agent"
+    if g == "female":
+        return f"female — refer to {name} with she/her pronouns. In Hindi / Marathi / Gujarati / Bengali use feminine verb forms (karti, rahi, etc.)."
+    if g == "male":
+        return f"male — refer to {name} with he/him pronouns. In Hindi / Marathi / Gujarati / Bengali use masculine verb forms (karta, raha, etc.)."
+    return f"unspecified — use the name '{name}' rather than gendered pronouns; in languages with gendered grammar, prefer neutral phrasings."
+
+
 def _format_business_facts_for_prompt(agent: dict[str, Any]) -> str:
     """Render the agent's saved business `variables` as a CURRENT BUSINESS
     FACTS block. This is the bridge between the dashboard's Profile page
@@ -1219,6 +1260,7 @@ Agent name: {name}
 Persona: {persona}
 Sector: {agent.get('sector')}
 Locale: {agent.get('locale')}
+Gender: {_gender_hint_for_prompt(agent)}
 Greeting line: {greeting_text}
 
 {business_facts_block}

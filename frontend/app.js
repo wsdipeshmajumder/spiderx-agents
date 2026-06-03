@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 186;
+const SXAI_BUILD = 187;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -148,6 +148,76 @@ function userInitials(u) {
   if (parts.length === 0) return "?";
   if (parts.length === 1) return parts[0][0].toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// pronouns(agent) — build 187. Pre-187 the dashboard hard-coded "she" /
+// "her" everywhere, which read wrong when Eva created a male-named agent
+// (Rohan, Vikram, Arjun). compose_dynamic_agent now picks a gender + a
+// matching TTS voice (Aoede/Leda/Kore/Zephyr ↔ female, Charon/Fenrir/
+// Puck/Orus ↔ male) and stores it on `variables.gender`. This helper
+// returns the pronoun set so the headline can read "Rohan is ready to
+// take his first call" / "Priya is ready to take her first call" /
+// "Sam is ready to take their first call" without each call-site
+// reimplementing the lookup.
+//
+// Resolution order:
+//   1. agent.variables.gender ("female" / "male" / "neutral")
+//   2. infer from agent.voice (female voices vs male voices)
+//   3. default to a NAME-FIRST set (use the agent's name + "they") so
+//      we never confidently misgender an old agent
+//
+// Each accessor (.subj / .obj / .poss / .reflexive) is a function so
+// the caller can request capitalised forms when the pronoun starts a
+// sentence ("He is..." vs "...with him").
+const _FEMALE_VOICES_FE = new Set(["Aoede", "Leda", "Kore", "Zephyr"]);
+const _MALE_VOICES_FE   = new Set(["Charon", "Fenrir", "Puck", "Orus"]);
+function _resolveGender(agent) {
+  if (!agent) return "neutral";
+  const stored = String(agent.variables?.gender || "").trim().toLowerCase();
+  if (stored === "female" || stored === "male" || stored === "neutral") return stored;
+  const voice = String(agent.voice || "").trim();
+  if (_FEMALE_VOICES_FE.has(voice)) return "female";
+  if (_MALE_VOICES_FE.has(voice)) return "male";
+  return "neutral";
+}
+function pronouns(agent) {
+  const g = _resolveGender(agent);
+  const name = agent?.name || "the agent";
+  // Singular-they for neutral so the copy stays grammatical without
+  // resorting to the agent's name on every reference (which reads
+  // robotic at higher densities).
+  if (g === "male") {
+    return {
+      gender: "male",
+      subj: "he", subjCap: "He",
+      obj:  "him", objCap:  "Him",
+      poss: "his", possCap: "His",
+      reflexive: "himself",
+      verb: (sing, plur) => sing,  // "is", "has"
+    };
+  }
+  if (g === "female") {
+    return {
+      gender: "female",
+      subj: "she", subjCap: "She",
+      obj:  "her", objCap:  "Her",
+      poss: "her", possCap: "Her",
+      reflexive: "herself",
+      verb: (sing, plur) => sing,
+    };
+  }
+  return {
+    gender: "neutral",
+    subj: "they", subjCap: "They",
+    obj:  "them", objCap:  "Them",
+    poss: "their", possCap: "Their",
+    reflexive: "themself",
+    // Singular-they STILL takes plural-form auxiliaries in modern English
+    // ("they are ready", not "they is ready"). Callers that need verb
+    // agreement use pron.verb("is", "are") and we hand back the right form.
+    verb: (sing, plur) => plur,
+  };
 }
 
 (function patchFetch() {
@@ -649,8 +719,8 @@ function AgentCockpit({ agent, presets, onTest, onEdit, onGoLive, onDismiss, onT
                 <div class="perf-empty">
                   <div class="perf-empty-title">No calls yet.</div>
                   <div class="perf-empty-sub">
-                    Once ${agent.name} answers her first call, the log + outcomes
-                    will land here. Tap <b>Test it</b> to give her a dry run, or
+                    Once ${agent.name} answers ${pronouns(agent).poss} first call, the log + outcomes
+                    will land here. Tap <b>Test it</b> to give ${pronouns(agent).obj} a dry run, or
                     <b>Go live</b> to wire a real number.
                   </div>
                 </div>
@@ -821,7 +891,7 @@ function GoLiveModal({ agent, onClose }) {
         ${done ? html`
           <h2>You're all set — number on the way.</h2>
           <p class="lede">
-            We're picking a ${countryObj.label} number for ${agent?.name || "your agent"} and pointing it at her now.
+            We're picking a ${countryObj.label} number for ${agent?.name || "your agent"} and pointing it at ${pronouns(agent).obj} now.
             You'll get the number on ${handle.trim()} — usually within 1 working hour.
           </p>
           <div class="golive-success">
@@ -4351,28 +4421,32 @@ function AgentOverviewPage({ agent, agents, presets, plan, stats, onTest, onGoLi
       ${(() => {
         const name = agent.name || "Your agent";
         const live = !!agent.published;
+        // pronouns() picks she/he/they based on agent.variables.gender or
+        // (fallback) the chosen voice. Lets a male-named agent like Rohan
+        // be referred to as "his" instead of "her" in every UI string.
+        const pn = pronouns(agent);
         let title, sub;
         if (totalOC === 0) {
           if (live) {
-            title = `${name} is live and waiting for her first caller.`;
+            title = `${name} is live and waiting for ${pn.poss} first caller.`;
             sub = "Once a call comes in, it'll show up below in Recent activity.";
           } else {
-            title = `${name} is ready to take her first call.`;
-            sub = "Send yourself a test call to see her in action, then publish when you're happy.";
+            title = `${name} is ready to take ${pn.poss} first call.`;
+            sub = `Send yourself a test call to see ${pn.obj} in action, then publish when you're happy.`;
           }
         } else if (purposeKpi && purposeKpi.primary_count > 0) {
           const pct = purposeKpi.conversion_rate || 0;
           const moodTitle = pct >= 70 ? `${name} is having a strong month`
                           : pct >= 40 ? `${name} is steady this month`
-                          :              `${name} is finding her feet`;
+                          :              `${name} is finding ${pn.poss} feet`;
           const primary = (purposeKpi.primary_outcomes || [])
             .filter((o) => o.count > 0).sort((a, b) => b.count - a.count)[0];
           if (primary) {
             title = `${moodTitle} — ${primary.count} ${primary.label.toLowerCase()} across ${totalOC} call${totalOC === 1 ? "" : "s"}.`;
-            sub = `${pct}% of calls aligned with what she was built for.`;
+            sub = `${pct}% of calls aligned with what ${pn.subj} ${pn.verb("was","were")} built for.`;
           } else {
             title = `${moodTitle}.`;
-            sub = `${pct}% of ${totalOC} calls aligned with what she was built for.`;
+            sub = `${pct}% of ${totalOC} calls aligned with what ${pn.subj} ${pn.verb("was","were")} built for.`;
           }
         } else if (topOutcome) {
           title = `${name} handled ${totalOC} call${totalOC === 1 ? "" : "s"} this month — top result was ${topOutcome.label.toLowerCase()}.`;
@@ -5084,7 +5158,7 @@ function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
               <div class="db-empty-title">${filter ? "No calls match this filter" : "No calls yet"}</div>
               <div class="db-empty-sub">${filter
                 ? html`No calls in this window had outcome <b>${filterLabel}</b>. <button class="db-btn-ghost db-btn-sm" type="button" onClick=${clearFilter} style=${{ marginLeft: "8px" }}>Show all calls</button>`
-                : html`Once ${agent.name} answers her first call, every call lands here with full transcript, outcome and summary.`}</div>
+                : html`Once ${agent.name} answers ${pronouns(agent).poss} first call, every call lands here with full transcript, outcome and summary.`}
               ${!filter ? html`<button class="db-btn-primary" onClick=${onEdit}>Send a test call →</button>` : ""}
             </div>
           </div>
@@ -7287,7 +7361,7 @@ function AgentTestCallPage({ agent, agents, presets, plan, onNav, onTest, onTest
           <span class="db-testcall-tag">Web call</span>
         </div>
         <h3 class="db-testcall-title">Talk in your browser</h3>
-        <p class="db-testcall-sub">Use your mic right now. The fastest way to hear ${agent.name} say her greeting and answer a quick question.</p>
+        <p class="db-testcall-sub">Use your mic right now. The fastest way to hear ${agent.name} say ${pronouns(agent).poss} greeting and answer a quick question.</p>
         <ul class="db-testcall-bullets">
           <li><span class="db-testcall-bullet-tick" aria-hidden="true">✓</span> No phone number needed</li>
           <li><span class="db-testcall-bullet-tick" aria-hidden="true">✓</span> Instant — works on any device</li>
@@ -7709,7 +7783,7 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
     <section class="db-panel db-panel-tall">
       <h3 class="db-panel-title">You're all set — number on the way</h3>
       <p class="db-panel-sub">
-        We're picking a ${countryObj.label} number for ${agent.name} and pointing it at her now.
+        We're picking a ${countryObj.label} number for ${agent.name} and pointing it at ${pronouns(agent).obj} now.
         You'll get the number on ${handle.trim()} — usually within 1 working hour.
       </p>
       <div class="golive-success" style=${{ marginTop: 12 }}>
@@ -7777,7 +7851,7 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
           </div>
           <div class="db-publish-copy">
             ${published
-              ? html`${agent.name} is published. Visitors using the embed snippet and callers on your number reach her immediately.`
+              ? html`${agent.name} is published. Visitors using the embed snippet and callers on your number reach ${pronouns(agent).obj} immediately.`
               : isPaid
                 ? html`${agent.name} is in draft. Hit Publish when you're happy — the embed widget goes live the moment you do. Add a phone number now or later — both channels unlock with the same publish.`
                 : html`Publishing unlocks the channels below. You can build, edit, and test ${agent.name} freely on the free plan — once you upgrade, just paste the web snippet to start taking real calls on day one. A phone number's a click away whenever you're ready.`}

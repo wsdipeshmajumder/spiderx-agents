@@ -406,17 +406,28 @@ async def compose_dynamic_agent(
     system = (
         "You configure production-grade phone-AI agents for ANY business. Given a "
         "use case + the operator's answers, output STRICT JSON for a complete agent. "
-        "Keys: sector (one lowercase word), persona (2-3 sentences: who she is + "
-        "tone), greeting (the EXACT first line she says on answering a call — one "
-        "warm sentence that names the business), system_prompt (a thorough, "
-        "well-structured operating brief: who she is, what the business does using "
-        "the facts, how to handle the common call types for THIS use case step by "
-        "step, tone, and GUARDRAILS — never invent prices/availability/dates (offer "
-        "a callback instead), never take card payments on the call, hand off to a "
-        "human when unsure), small_talk (3-4 short on-brand lines), outcomes (array "
-        "of 4-6 OBJECTS, see below), connectors (subset of "
-        + ", ".join(_ALLOWED_CONNECTORS) + "), info_groups, extra_info_prefill, "
-        "purpose, and guardrails.\n"
+        "Keys: sector (one lowercase word), gender, voice, persona (2-3 sentences: "
+        "who the agent is + tone), greeting (the EXACT first line spoken on "
+        "answering a call — one warm sentence that names the business), "
+        "system_prompt (a thorough, well-structured operating brief: who the agent "
+        "is, what the business does using the facts, how to handle the common call "
+        "types for THIS use case step by step, tone, and GUARDRAILS — never invent "
+        "prices/availability/dates (offer a callback instead), never take card "
+        "payments on the call, hand off to a human when unsure), small_talk (3-4 "
+        "short on-brand lines), outcomes (array of 4-6 OBJECTS, see below), "
+        "connectors (subset of " + ", ".join(_ALLOWED_CONNECTORS) + "), info_groups, "
+        "extra_info_prefill, purpose, and guardrails.\n"
+        # ── gender + voice: drive pronouns + TTS picker. Tightly coupled. ──
+        "gender: one of 'female', 'male', or 'neutral'. Pick the one that matches "
+        "the agent_name and the use case (e.g. 'Rohan' / 'Vikram' / 'Arjun' are "
+        "male; 'Priya' / 'Aria' / 'Maya' / 'Anika' are female; if the operator "
+        "picked a name that doesn't read clearly gendered, return 'neutral').\n"
+        "voice: one of 'Aoede', 'Leda', 'Kore', 'Zephyr' (female-sounding), or "
+        "'Charon', 'Fenrir', 'Puck', 'Orus' (male-sounding). MUST match the gender "
+        "you picked. Default to 'Aoede' for female, 'Charon' for male, 'Kore' for "
+        "neutral. Pick a more specific voice when the use case suggests one ('Leda' "
+        "for soft / clinical; 'Charon' for deep / formal; 'Puck' for upbeat / "
+        "kid-facing; 'Orus' for measured / corporate).\n"
         # ── purpose: drives the runtime CORE PURPOSE / Mission: block. ──
         "purpose: an object { summary, actions }. summary is one sentence in the "
         "operator's voice describing why this agent exists ('Qualify wedding-photo "
@@ -578,6 +589,34 @@ async def compose_dynamic_agent(
             if gid in valid_ids and isinstance(text, (str, int, float)) and str(text).strip():
                 extra_info[gid] = str(text).strip()
 
+    # Gender + matching voice (build 187). Tightly coupled so the agent
+    # the operator sees on the dashboard, the pronouns Eva uses in her
+    # build chatter, and the voice the caller hears all agree. Default
+    # to female + Aoede only if the model omits both — that's the
+    # historical behaviour, so existing wizard paths keep working.
+    _FEMALE_VOICES = {"Aoede", "Leda", "Kore", "Zephyr"}
+    _MALE_VOICES   = {"Charon", "Fenrir", "Puck", "Orus"}
+    _ALL_VOICES    = _FEMALE_VOICES | _MALE_VOICES
+    gender_raw = str(data.get("gender") or "").strip().lower()
+    if gender_raw not in ("female", "male", "neutral"):
+        gender_raw = "female"
+    voice_raw = str(data.get("voice") or "").strip()
+    if voice_raw not in _ALL_VOICES:
+        voice_raw = ""
+    # Repair mismatches — if the model picked a voice that contradicts
+    # its own gender, snap to the canonical default for the gender. We
+    # trust gender over voice because gender drives more downstream
+    # surfaces (UI pronouns, prompt hint, future selects).
+    if voice_raw:
+        in_female_set = voice_raw in _FEMALE_VOICES
+        in_male_set   = voice_raw in _MALE_VOICES
+        if gender_raw == "female" and not in_female_set:
+            voice_raw = ""
+        elif gender_raw == "male" and not in_male_set:
+            voice_raw = ""
+    if not voice_raw:
+        voice_raw = {"female": "Aoede", "male": "Charon", "neutral": "Kore"}[gender_raw]
+
     # Stash the kind-labelled outcome catalogue on `variables` under a
     # reserved key so `_format_outcomes_with_kinds_for_prompt` can pick
     # it up at runtime for catch-all agents (whose sector isn't in any
@@ -585,11 +624,16 @@ async def compose_dynamic_agent(
     # so it's clearly system metadata, not operator-edited content.
     base_variables = {k: v for k, v in answers.items() if k != "agent_name"}
     base_variables["_outcome_catalogue"] = outcome_catalogue
+    # Gender is stored under `variables.gender` (no DB migration needed —
+    # variables is JSONB). The frontend pronouns() helper + the runtime
+    # prompt's gender-hint line both read from here.
+    base_variables["gender"] = gender_raw
 
     args: dict[str, Any] = {
         "sector": str(data.get("sector") or sector_hint or "generic").strip().lower() or "generic",
         "locale": locale,
         "name": agent_name,
+        "voice": voice_raw,
         "persona": str(data.get("persona") or "").strip(),
         "greeting": str(data.get("greeting") or "").strip(),
         "system_prompt": str(data.get("system_prompt") or "").strip(),
@@ -617,8 +661,8 @@ async def compose_dynamic_agent(
         )
     if not args["persona"]:
         args["persona"] = f"Warm, helpful assistant for {business}."
-    log.info("compose_dynamic_agent: composed (model=%s, sector=%s, info_groups=%s)",
-             model, args["sector"], len(info_groups) if info_groups else 0)
+    log.info("compose_dynamic_agent: composed (model=%s, sector=%s, gender=%s, voice=%s, info_groups=%s)",
+             model, args["sector"], gender_raw, voice_raw, len(info_groups) if info_groups else 0)
     return args
 
 
