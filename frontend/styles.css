@@ -10464,6 +10464,152 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
  * column + button shape are in place so wiring real recordings is a
  * data-only swap once capture lands.
  * ═══════════════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════════════
+ * VOICE SETTINGS — reference adaptation (build 195)
+ *
+ * Replaces the old hero + 8-card grid with a cleaner CEO-approved layout:
+ * two dropdowns up top (language / voice), a single voice preview card
+ * with avatar + tags + Play Sample, then the greeting textarea with a
+ * character counter. The 8-card explorer still exists, folded into a
+ * <details> below for operators who want to compare side-by-side.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+.vs-panel { padding: 18px 20px; }
+.vs-twocol {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+.vs-select { width: 100%; }
+
+.vs-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  background: #ffffff;
+  border: 1px solid #e6e7ec;
+  border-radius: 14px;
+}
+.vs-card-left {
+  display: flex; align-items: center; gap: 14px;
+  min-width: 0;
+}
+.vs-avatar {
+  width: 52px; height: 52px;
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #ffffff;
+  font-size: 22px; font-weight: 700;
+  flex: 0 0 52px;
+  letter-spacing: -0.01em;
+}
+.vs-info {
+  display: flex; flex-direction: column; gap: 4px;
+  min-width: 0;
+}
+.vs-name {
+  font-size: 18px; font-weight: 700; color: #1f2230;
+  letter-spacing: -0.005em;
+}
+.vs-meta {
+  font-size: 13px; color: #6a6f7d;
+}
+.vs-tags {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-top: 4px;
+}
+.vs-tag {
+  display: inline-flex;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+  background: #e0e7ff;
+  color: #1e3a8a;
+}
+.vs-vibe {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: #6a6f7d;
+  font-style: italic;
+}
+.vs-play {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 22px;
+  border-radius: 999px;
+  font-size: 14.5px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.vs-warn {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  color: #92400e;
+  font-size: 12.5px;
+}
+.vs-reset { margin-top: 10px; }
+
+.vs-greeting-field { margin-top: 16px; }
+.vs-greeting {
+  resize: vertical;
+  min-height: 80px;
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 12px 14px;
+}
+.vs-counter {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #9095a3;
+}
+
+.vs-explore { padding: 14px 18px; }
+.vs-explore > summary {
+  display: flex; align-items: center; justify-content: space-between;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+  color: #1f2230;
+  padding: 4px 0;
+  list-style: none;
+}
+.vs-explore > summary::-webkit-details-marker { display: none; }
+.vs-explore > summary svg { transition: transform 0.18s ease; }
+.vs-explore[open] > summary svg { transform: rotate(180deg); }
+
+/* Phone reflow — stack the two dropdowns + collapse the card. */
+@media (max-width: 720px) {
+  .vs-twocol { grid-template-columns: 1fr; gap: 10px; }
+  .vs-card { flex-direction: column; align-items: stretch; }
+  .vs-play { width: 100%; justify-content: center; }
+}
+
+/* Dark theme */
+:root[data-theme="dark"] .vs-card {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+:root[data-theme="dark"] .vs-name { color: #e8e9ef; }
+:root[data-theme="dark"] .vs-meta { color: #a4a8b8; }
+:root[data-theme="dark"] .vs-tag {
+  background: rgba(99, 102, 241, 0.18);
+  color: #c7d2fe;
+}
+:root[data-theme="dark"] .vs-vibe { color: #a4a8b8; }
+:root[data-theme="dark"] .vs-warn {
+  background: rgba(245, 158, 11, 0.14);
+  border-color: rgba(245, 158, 11, 0.32);
+  color: #fde68a;
+}
+:root[data-theme="dark"] .vs-counter { color: #6a6f7d; }
+:root[data-theme="dark"] .vs-explore > summary { color: #e8e9ef; }
+
 /* Specificity bump: the base .db-modal.db-modal-wide pair (which the
  * JSX still applies for theme/spacing inheritance) caps width at 720px.
  * Compound selector outscores it so build-191's 1040px target wins. */

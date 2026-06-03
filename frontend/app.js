@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 194;
+const SXAI_BUILD = 195;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -6234,6 +6234,7 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
   const [draft, setDraft] = useState({
     voice: agent.voice || "Aoede",
     locale: agent.locale || "en-IN",
+    greeting: agent.greeting || "",   // build 195: greeting editable here too
     voice_tweaks: {
       temperature: agent.voice_tweaks?.temperature ?? 0.7,
       top_p: agent.voice_tweaks?.top_p ?? 0.9,
@@ -6241,6 +6242,7 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
       ...(agent.voice_tweaks || {}),
     },
   });
+  const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
   const [state, setState] = useState({ msg: "", cls: "" });
   const [showAdvanced, setShowAdvanced] = useState(false);
   // Live audio preview — single shared <audio> element so playing one voice
@@ -6312,42 +6314,115 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
   const selectedTone = VOICE_TONES[draft.voice]?.tone || "—";
   const selectedVibe = VOICE_TONES[draft.voice]?.vibe || "";
 
+  // Build 195: reference-design adaptation. Avatar initial = first letter
+  // of the voice name; colour derived by hashing the name to one of the
+  // dashboard's pastels. Tags = locale + tone descriptor split + perceived
+  // gender (which the voice-set lookup gives us for free since build 187).
+  const VOICE_AVATAR_PALETTE = [
+    "#3b82f6", "#a855f7", "#10b981", "#f59e0b",
+    "#ec4899", "#06b6d4", "#ef4444", "#6366f1",
+  ];
+  const avatarColor = (name) => {
+    let h = 0;
+    const s = String(name || "");
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return VOICE_AVATAR_PALETTE[h % VOICE_AVATAR_PALETTE.length];
+  };
+  const voiceGender = (id) => {
+    if (["Aoede", "Leda", "Kore", "Zephyr"].includes(id)) return "Female voice";
+    if (["Charon", "Fenrir", "Puck", "Orus"].includes(id)) return "Male voice";
+    return "Voice";
+  };
+  // Tone like "Warm & friendly" → ["Warm", "friendly"]. Together with the
+  // locale label + perceived gender that gives us the same 3-4 chip strip
+  // the reference shows next to its voice avatar.
+  const toneTags = (id) => {
+    const t = VOICE_TONES[id]?.tone || "";
+    return t.split(/&|,/).map((s) => s.trim()).filter(Boolean);
+  };
+  const currentLocaleLabel = (locales.find((l) => l.id === draft.locale)?.label) || draft.locale;
+  const currentVoiceTags = [currentLocaleLabel, ...toneTags(draft.voice)];
+  const greetingLimit = 240;
+  const greetingLen = (draft.greeting || "").length;
+
   const body = html`
     <div class="db-overview">
-      <!-- Hero: Eva's pick, with one-click listen. Hero stays the same card
-           even when the user changes voice — it always reflects what's
-           currently selected, framed as "Eva picked X, here's what she sounds
-           like, change if you'd rather". -->
-      <section class="db-panel db-voice-hero">
-        <div class="db-voice-hero-left">
-          <div class="db-voice-hero-eyebrow">
-            <span>${draft.voice === evaPick ? `Eva's pick for ${agent.name}` : `Switched from Eva's pick`}</span>
-          </div>
-          <h2 class="db-voice-hero-tone">${selectedTone}</h2>
-          <p class="db-voice-hero-vibe">${selectedVibe}</p>
-          <div class="db-voice-hero-actions">
-            <button class="db-btn-primary" type="button" onClick=${() => playPreview(draft.voice)}>
-              ${playing === draft.voice
-                ? html`<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg><span>Stop</span>`
-                : html`<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg><span>Hear ${draft.voice} say hello</span>`}
-            </button>
-            ${draft.voice !== evaPick ? html`
-              <button class="db-btn-ghost db-btn-sm" type="button"
-                      onClick=${() => { setDraft((d) => ({ ...d, voice: evaPick })); stopPreview(); }}>
-                Back to Eva's pick (${evaPick})
-              </button>
-            ` : ""}
-          </div>
-          ${previewError ? html`<div class="db-voice-hero-warn">${previewError}</div>` : ""}
+      <!-- Voice picker — adapted from the CEO's reference design.
+           Two dropdowns up top (language / voice), preview card with
+           avatar + tags + Play Sample, then the greeting message with
+           a character counter. Replaces the build-178 hero + 8-card
+           grid which were over-busy for what's really a 2-decision
+           page: which language, which voice. The 8-card grid lives
+           below as an optional "Explore all voices" expander. -->
+      <section class="db-panel vs-panel">
+        <div class="vs-twocol">
+          <label class="db-form-field">
+            <span class="db-form-label">Language</span>
+            <select class="db-input vs-select" value=${draft.locale}
+                    onChange=${(e) => { stopPreview(); set("locale", e.target.value); }}>
+              ${locales.map((l) => html`<option key=${l.id} value=${l.id}>${l.label}</option>`)}
+            </select>
+          </label>
+          <label class="db-form-field">
+            <span class="db-form-label">Voice</span>
+            <select class="db-input vs-select" value=${draft.voice}
+                    onChange=${(e) => { stopPreview(); selectVoice(e.target.value); }}>
+              ${voices.map((v) => {
+                const meta = VOICE_TONES[v.id] || {};
+                return html`<option key=${v.id} value=${v.id}>${v.id} — ${meta.tone || "neutral"}</option>`;
+              })}
+            </select>
+          </label>
         </div>
-        <${AudioMark} playing=${playing === draft.voice} />
+
+        <div class="vs-card">
+          <div class="vs-card-left">
+            <div class="vs-avatar" style=${{ background: avatarColor(draft.voice) }}>
+              ${(draft.voice || "?").charAt(0).toUpperCase()}
+            </div>
+            <div class="vs-info">
+              <div class="vs-name">${draft.voice}</div>
+              <div class="vs-meta">${voiceGender(draft.voice)} · ${selectedTone}</div>
+              <div class="vs-tags">
+                ${currentVoiceTags.map((t, i) => html`<span key=${i} class="vs-tag">${t}</span>`)}
+              </div>
+              ${selectedVibe ? html`<p class="vs-vibe">${selectedVibe}</p>` : ""}
+            </div>
+          </div>
+          <button class="vs-play db-btn-primary" type="button" onClick=${() => playPreview(draft.voice)}>
+            ${playing === draft.voice
+              ? html`<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg><span>Stop</span>`
+              : html`<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg><span>Play Sample</span>`}
+          </button>
+        </div>
+        ${previewError ? html`<div class="vs-warn">${previewError}</div>` : ""}
+        ${draft.voice !== evaPick ? html`
+          <button class="db-btn-ghost db-btn-sm vs-reset" type="button"
+                  onClick=${() => { set("voice", evaPick); stopPreview(); }}>
+            Back to Eva's pick (${evaPick})
+          </button>
+        ` : ""}
+
+        <label class="db-form-field vs-greeting-field">
+          <span class="db-form-label">Greeting Message</span>
+          <textarea class="db-input vs-greeting" rows="3"
+                    maxlength=${greetingLimit}
+                    value=${draft.greeting}
+                    onInput=${(e) => set("greeting", e.target.value)}
+                    placeholder="Welcome to ${agent.variables?.business_name || agent.name}. I am ${agent.name}, how can I help you today?"></textarea>
+          <span class="vs-counter">${greetingLen}/${greetingLimit} characters</span>
+        </label>
       </section>
 
-      <!-- Tone explorer: 8 cards, headlined by tone, listenable in place.
-           Picking a card auto-plays its sample so the user gets immediate
-           audible feedback instead of having to find a separate play button. -->
-      <section class="db-panel">
-        <h3 class="db-panel-title">Prefer a different tone?</h3>
+      <!-- Tone explorer kept but folded into an optional expander so the
+           page stays clean for the common "pick from dropdown + listen"
+           flow. Operators who want to compare the 8 voices side-by-side
+           open this — same picker mechanics as before. -->
+      <details class="db-panel vs-explore">
+        <summary>
+          <span>Explore all 8 voices</span>
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+        </summary>
         <p class="db-panel-sub">Every voice speaks the same ${VOICE_TOTAL_LANGS} languages — this is purely about how ${agent.name} sounds. Click any tone to hear it. Click again to stop.</p>
         <div class="db-tone-grid">
           ${voices.map((v) => {
@@ -6380,27 +6455,7 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
         <p class="db-voice-hint">
           Want to hear ${draft.voice} in a real conversation? <button class="db-link" type="button" onClick=${() => onNav && onNav(`/agent/${agent.slug || agent.id}/test-call`)}>Send yourself a test call →</button>
         </p>
-      </section>
-
-      <section class="db-panel">
-        <h3 class="db-panel-title">Language</h3>
-        <p class="db-panel-sub">Primary locale ${agent.name} answers in. She'll switch mid-call if the caller starts speaking something else from the supported list below.</p>
-        <select class="db-input" value=${draft.locale} onChange=${(e) => setDraft((d) => ({ ...d, locale: e.target.value }))}>
-          ${locales.map((l) => html`<option key=${l.id} value=${l.id}>${l.label}</option>`)}
-        </select>
-        <div class="db-lang-groups">
-          ${VOICE_SUPPORTED_LANGUAGES.map((g) => html`
-            <div class="db-lang-group" key=${g.group}>
-              <div class="db-lang-group-head">${g.group} <span class="db-lang-group-count">${g.items.length}</span></div>
-              <div class="db-lang-chips">
-                ${g.items.map((l) => html`
-                  <span class=${"db-lang-chip" + (l.id === draft.locale ? " active" : "")} key=${l.id}>${l.label}</span>
-                `)}
-              </div>
-            </div>
-          `)}
-        </div>
-      </section>
+      </details>
 
       <!-- Background ambience (Beta) — plays a low-volume loop behind the
            voice so the call doesn't sound like Eva's in a vacuum. Choice
