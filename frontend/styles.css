@@ -10415,3 +10415,40 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
   border-left-color: #a78bfa;
   color: #c8ccd9;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * CALL OUTCOMES — Advanced (build 186)
+ *
+ * The "Customize weights" button used to live in the primary tools row,
+ * which trained operators to think the success rate was driven by a
+ * tunable formula. For most operators "weights" is jargon. We moved the
+ * control to a discreet "Advanced" link at the foot of the page so
+ * non-power users see only the four kind groups (Success / Qualified /
+ * Info-only / Failure), and power users still find the override.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+.oc-advanced-foot {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px dashed #e6e7ec;
+  display: flex;
+  justify-content: center;
+}
+.oc-advanced-link {
+  background: transparent;
+  border: 0;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12.5px;
+  color: #6a6f7d;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.12s ease, color 0.12s ease;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.oc-advanced-link:hover {
+  background: #f3f4f9;
+  color: #1f2230;
+}
+:root[data-theme="dark"] .oc-advanced-foot { border-top-color: rgba(255,255,255,0.08); }
+:root[data-theme="dark"] .oc-advanced-link { color: #a4a8b8; }
+:root[data-theme="dark"] .oc-advanced-link:hover { background: rgba(255,255,255,0.05); color: #e8e9ef; }

@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 185;
+const SXAI_BUILD = 186;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -4622,14 +4622,13 @@ function AgentCallOutcomesPage({ agent, agents, presets, plan, onNav }) {
                 disabled=${!totalCalls}
                 onClick=${() => totalCalls && goToCalls("")}
                 title=${totalCalls ? "See all calls in this range" : "No calls yet"}>
-          <div class="oc-hero-label">Weighted success</div>
+          <div class="oc-hero-label">Success rate</div>
           <div class="oc-hero-value">${successRate}<span class="oc-hero-unit">%</span></div>
           <div class="oc-hero-bar" aria-hidden="true">
             ${compShares.map((s, i) => s.pct > 0 ? html`<span key=${i} style=${{ width: `${s.pct}%`, background: s.color }}></span>` : "")}
           </div>
           <div class="oc-hero-foot">
             <span>${totalCalls} call${totalCalls === 1 ? "" : "s"} · ${totalMinutes} min talk · ${days}d</span>
-            <span class="oc-hero-weights">${report?.weights_overridden ? "Custom weights" : "Default weights"}</span>
           </div>
         </button>
 
@@ -4777,14 +4776,11 @@ function AgentCallOutcomesPage({ agent, agents, presets, plan, onNav }) {
         ` : ""}
       </section>
 
-      <!-- Tools row — quiet buttons that open inline drawers. -->
+      <!-- Tools row — quiet buttons that open inline drawers. "Customize
+           weights" moved OUT of the primary row in build 186: the term
+           "weights" is jargon most operators don't think in. Catalogue
+           and trend stay because they're plain-English reads. -->
       <div class="oc-tools">
-        <button class=${"oc-tool" + (weightsOpen ? " is-open" : "")} type="button"
-                onClick=${() => setWeightsOpen((v) => !v)}>
-          <span aria-hidden="true">⚙️</span>
-          <span>${weightsOpen ? "Hide weights" : "Customize weights"}</span>
-          ${report?.weights_overridden ? html`<span class="oc-tool-dot" title="Custom weights active"></span>` : ""}
-        </button>
         <button class=${"oc-tool" + (catalogueOpen ? " is-open" : "")} type="button"
                 onClick=${() => setCatalogueOpen((v) => !v)}>
           <span aria-hidden="true">📚</span>
@@ -4799,12 +4795,16 @@ function AgentCallOutcomesPage({ agent, agents, presets, plan, onNav }) {
         ` : ""}
       </div>
 
-      <!-- Weights drawer -->
+      <!-- Weights drawer — advanced. Accessible only via the small
+           "Advanced" link at the bottom of the page (build 186). The
+           copy was rewritten to plain English: "How calls count" instead
+           of "weights", with a one-liner explaining what changes when
+           you slide. -->
       ${weightsOpen && weightsDraft ? html`
         <section class="db-panel oc-drawer">
           <div class="oc-drawer-head">
-            <h3 class="db-panel-title">Success weights ${report?.weights_overridden ? html`<span class="db-panel-pill">Custom</span>` : html`<span class="db-panel-pill">Defaults</span>`}</h3>
-            <p class="db-panel-sub">How much each kind counts toward the headline rate. Range 0–1; saved per agent.</p>
+            <h3 class="db-panel-title">How calls count toward your success rate ${report?.weights_overridden ? html`<span class="db-panel-pill">Customized</span>` : html`<span class="db-panel-pill">Default</span>`}</h3>
+            <p class="db-panel-sub">By default, every <b>Success</b> call counts as a full win, a <b>Qualified</b> lead counts as half a win, an <b>Info-only</b> call as a fifth, and a <b>Failure</b> as zero. Slide to change how much each kind contributes to the headline rate. Most operators never need to touch this.</p>
           </div>
           <div class="oc-weights-grid">
             ${["success","qualified","info","failure"].map((k) => {
@@ -4825,16 +4825,16 @@ function AgentCallOutcomesPage({ agent, agents, presets, plan, onNav }) {
                            value=${v.toFixed ? v.toFixed(2) : v}
                            onInput=${(e) => setWeight(k, parseFloat(e.target.value))} />
                   </div>
-                  <div class="oc-weight-default">Default ×${(dflt ?? 0).toFixed(2)}</div>
+                  <div class="oc-weight-default">Default: ${(dflt ?? 0) === 1 ? "full win" : (dflt ?? 0) === 0.5 ? "half a win" : (dflt ?? 0) === 0.2 ? "a fifth" : "zero"}</div>
                 </div>
               `;
             })}
           </div>
           <div class="oc-weights-foot">
-            <div class="oc-weights-help">weighted% = Σ(count × weight) / total × 100</div>
+            <div class="oc-weights-help">Headline % = a weighted average across all calls.</div>
             <div class="oc-weights-actions">
               ${weightsMsg ? html`<span class="oc-weights-msg">${weightsMsg}</span>` : ""}
-              <button class="db-btn-ghost" type="button" onClick=${resetWeights} disabled=${weightsBusy}>Reset</button>
+              <button class="db-btn-ghost" type="button" onClick=${resetWeights} disabled=${weightsBusy}>Reset to default</button>
               <button class="db-btn-primary" type="button" onClick=${saveWeights} disabled=${weightsBusy}>${weightsBusy ? "Saving…" : "Save"}</button>
             </div>
           </div>
@@ -4879,6 +4879,18 @@ function AgentCallOutcomesPage({ agent, agents, presets, plan, onNav }) {
       ` : ""}
 
       ${err ? html`<p class="db-form-help" style=${{ color: "#b91c1c" }}>Couldn't load report: ${err}</p>` : ""}
+
+      <!-- Quiet "Advanced" footer link — opens the weights drawer for
+           operators who DO want to retune how each kind contributes to
+           the headline. Build 186 moved this out of the primary tools
+           row so the page stays focused on the four kinds. -->
+      <div class="oc-advanced-foot">
+        <button class="oc-advanced-link" type="button"
+                onClick=${() => setWeightsOpen((v) => !v)}>
+          ${weightsOpen ? "Hide advanced settings" : "Advanced — how each kind contributes to the score"}
+          ${report?.weights_overridden && !weightsOpen ? html`<span class="oc-tool-dot" title="You've customised this"></span>` : ""}
+        </button>
+      </div>
     </div>
   `;
 
