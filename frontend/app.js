@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 193;
+const SXAI_BUILD = 194;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -5539,45 +5539,51 @@ function AgentPersonaPage({ agent, agents, presets, plan, onNav, refreshAgent })
 
   const body = html`
     <div class="db-overview">
-      <!-- Identity: the agent's name + one-line persona. Caller never
-           sees these labels; the name flows into the greeting + prompt. -->
-      <section class="db-panel">
-        <h3 class="db-panel-title">Identity</h3>
-        <p class="db-panel-sub">Who the agent is. The caller never sees these — they shape the greeting and how the agent refers to herself.</p>
-        <div class="db-form">
-          <label class="db-form-field">
-            <span class="db-form-label">Agent name</span>
-            <input class="db-input" value=${draft.name} onInput=${(e) => set("name", e.target.value)} placeholder="e.g. Maya" />
-          </label>
-          <label class="db-form-field">
-            <span class="db-form-label">Persona <span class="db-form-opt">(one sentence)</span></span>
-            <input class="db-input" value=${draft.persona} onInput=${(e) => set("persona", e.target.value)} placeholder="Warm, efficient receptionist at a dental clinic." />
-          </label>
-        </div>
-      </section>
+      <!-- Identity + First Message — paired side-by-side because they're
+           short and conceptually linked (the agent's persona feeds into
+           her first line). Stacks back to one column on phones via the
+           shared .db-twocol rule. -->
+      <div class="db-twocol persona-twocol">
+        <!-- Identity: the agent's name + one-line persona. Caller never
+             sees these labels; the name flows into the greeting + prompt. -->
+        <section class="db-panel">
+          <h3 class="db-panel-title">Identity</h3>
+          <p class="db-panel-sub">Who the agent is. The caller never sees these — they shape the greeting and how the agent refers to herself.</p>
+          <div class="db-form">
+            <label class="db-form-field">
+              <span class="db-form-label">Agent name</span>
+              <input class="db-input" value=${draft.name} onInput=${(e) => set("name", e.target.value)} placeholder="e.g. Maya" />
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Persona <span class="db-form-opt">(one sentence)</span></span>
+              <input class="db-input" value=${draft.persona} onInput=${(e) => set("persona", e.target.value)} placeholder="Warm, efficient receptionist at a dental clinic." />
+            </label>
+          </div>
+        </section>
 
-      <!-- First Message — the greeting the agent opens every call with.
-           Renamed from "Greeting" + given an InfoDot so a brand-new
-           operator immediately knows this is the literal first line the
-           caller hears (Vapi-style clarity). -->
-      <section class="db-panel">
-        <h3 class="db-panel-title">
-          First Message
-          <${InfoDot}>
-            The exact first line ${agent.name || "your agent"} speaks when a call connects,
-            before the caller says anything. Keep it short and natural — name +
-            business + a "how can I help?". Leave it blank to let the agent
-            improvise an opening.
-          </${InfoDot}>
-        </h3>
-        <${MarkdownEditor}
-          value=${draft.greeting}
-          onChange=${(v) => set("greeting", v)}
-          rows=${2}
-          compact=${true}
-          placeholder="Hello, this is Maya at BrightSmile Dental. How can I help you today?" />
-        <span class="db-form-help">The very first thing the caller hears.</span>
-      </section>
+        <!-- First Message — the greeting the agent opens every call with.
+             Renamed from "Greeting" + given an InfoDot so a brand-new
+             operator immediately knows this is the literal first line the
+             caller hears (Vapi-style clarity). -->
+        <section class="db-panel">
+          <h3 class="db-panel-title">
+            First Message
+            <${InfoDot}>
+              The exact first line ${agent.name || "your agent"} speaks when a call connects,
+              before the caller says anything. Keep it short and natural — name +
+              business + a "how can I help?". Leave it blank to let the agent
+              improvise an opening.
+            </${InfoDot}>
+          </h3>
+          <${MarkdownEditor}
+            value=${draft.greeting}
+            onChange=${(v) => set("greeting", v)}
+            rows=${2}
+            compact=${true}
+            placeholder="Hello, this is Maya at BrightSmile Dental. How can I help you today?" />
+          <span class="db-form-help">The very first thing the caller hears.</span>
+        </section>
+      </div>
 
       <!-- System Prompt — the master prompt. This is the answer to
            "where do I change how the agent behaves?". InfoDot explains
