@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 188;
+const SXAI_BUILD = 189;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -5311,6 +5311,7 @@ function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
                 ? html`No calls in this window had outcome <b>${filterLabel}</b>. <button class="db-btn-ghost db-btn-sm" type="button" onClick=${clearFilter} style=${{ marginLeft: "8px" }}>Show all calls</button>`
                 : html`Once ${agent.name} answers ${pronouns(agent).poss} first call, every call lands here with full transcript, outcome and summary.`}
               ${!filter ? html`<button class="db-btn-primary" onClick=${onEdit}>Send a test call →</button>` : ""}
+              </div>
             </div>
           </div>
         ` : html`
