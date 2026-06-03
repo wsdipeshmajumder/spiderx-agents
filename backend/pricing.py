@@ -19,12 +19,30 @@ from __future__ import annotations
 
 from typing import Optional
 
-# USD per 1M tokens. Sourced from Google AI pricing page, May 2026.
+# USD per 1M tokens. Sourced from Google AI pricing page, refreshed
+# June 2026 against https://ai.google.dev/gemini-api/docs/pricing.
+#
+# Audio-capable Live models moved from $0.40/$1.60 (2024) → $3.00/$12.00
+# (2025+) once Google split the audio-token tier off the cheaper text-
+# token tier. The bridge stores token counts at call-end time and the
+# cost is computed HERE on the way in, so updating these constants
+# affects all FUTURE calls; existing `calls.cost_paise` rows stay
+# frozen at whatever rate they were calculated under. That's the
+# audit trail we want — historical rows should never silently re-price
+# under a deploy.
+#
+# Tokenisation rate (reference, not multiplied in here): roughly
+# 32 audio-input tokens / second of caller speech, 25 audio-output
+# tokens / second of agent speech.
 _PRICING_USD_PER_1M = {
-    "gemini-3.1-flash-live-preview":   {"in": 0.40, "out": 1.60},
-    "gemini-2.5-flash-native-audio-latest": {"in": 0.40, "out": 1.60},
-    "gemini-2.0-flash-live-001":       {"in": 0.40, "out": 1.60},
-    "gemini-2.5-flash-preview-tts":    {"in": 0.075, "out": 0.30},
+    "gemini-3.1-flash-live-preview":        {"in": 3.00, "out": 12.00},
+    "gemini-2.5-flash-native-audio-latest": {"in": 3.00, "out": 12.00},
+    "gemini-2.5-flash-native-audio-preview-12-2025": {"in": 3.00, "out": 12.00},
+    "gemini-2.5-flash-native-audio-preview-09-2025": {"in": 3.00, "out": 12.00},
+    "gemini-2.0-flash-live-001":            {"in": 3.00, "out": 12.00},
+    # Non-Live TTS tier stays on the cheaper text-token pricing — it
+    # only runs in build/helper sessions, never the live phone call.
+    "gemini-2.5-flash-preview-tts":         {"in": 0.075, "out": 0.30},
 }
 
 # Static FX. Roughly the Mar-2026 USD-INR mid-market rate; refresh
