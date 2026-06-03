@@ -413,9 +413,31 @@ async def compose_dynamic_agent(
         "the facts, how to handle the common call types for THIS use case step by "
         "step, tone, and GUARDRAILS — never invent prices/availability/dates (offer "
         "a callback instead), never take card payments on the call, hand off to a "
-        "human when unsure), small_talk (3-4 short on-brand lines), outcomes (4-6 "
-        "snake_case call outcomes for this use case), connectors (subset of "
-        + ", ".join(_ALLOWED_CONNECTORS) + "), info_groups, and extra_info_prefill.\n"
+        "human when unsure), small_talk (3-4 short on-brand lines), outcomes (array "
+        "of 4-6 OBJECTS, see below), connectors (subset of "
+        + ", ".join(_ALLOWED_CONNECTORS) + "), info_groups, extra_info_prefill, "
+        "purpose, and guardrails.\n"
+        # ── purpose: drives the runtime CORE PURPOSE / Mission: block. ──
+        "purpose: an object { summary, actions }. summary is one sentence in the "
+        "operator's voice describing why this agent exists ('Qualify wedding-photo "
+        "leads and book pre-shoot consultations.'). actions is an ordered list of "
+        "1-3 verbs from this fixed vocabulary: callback_request, appointment_booking, "
+        "quote_request, inquiry_capture, complaint_intake, order_status, "
+        "support_ticket, emergency_routing. Pick the ones that match the use case.\n"
+        # ── outcomes objects: drives the runtime [kind] tag on each outcome. ──
+        "Each outcome is { id (snake_case slug), label (short Title Case), kind "
+        "(one of: success, qualified, info, failure) }. The kind tells the analytics "
+        "engine which calls count as wins. Examples: { id: 'consultation_booked', "
+        "label: 'Consultation booked', kind: 'success' }; { id: 'callback_requested', "
+        "label: 'Callback requested', kind: 'qualified' }; { id: 'info_only', "
+        "label: 'Information given', kind: 'info' }; { id: 'voicemail', label: "
+        "'Voicemail', kind: 'failure' }.\n"
+        # ── guardrails: short bullet rules surfaced as a separate block at runtime. ──
+        "guardrails is an array of 3-6 short rule strings the agent must follow — "
+        "use-case-specific (e.g. for dog-walking: 'Never confirm a walk without the "
+        "dog's name and the pickup address.'). Don't restate the universal safety "
+        "floor (no card numbers, no medical/legal advice) — those are auto-applied.\n"
+        # ── info_groups + extra_info_prefill (unchanged). ──
         "info_groups is an array of 4-6 'Additional Info' field groups the OPERATOR "
         "will later fill with reference knowledge the agent answers callers from — "
         "tailored to THIS use case (e.g. for a wedding photographer: Packages & "
@@ -442,10 +464,107 @@ async def compose_dynamic_agent(
     conns = [c for c in (data.get("connectors") or []) if c in _ALLOWED_CONNECTORS]
     if not conns:
         conns = ["calendar_check", "calendar_book", "sms_send", "knowledge_base_search"]
-    outcomes = [str(o).strip().lower().replace(" ", "_") for o in (data.get("outcomes") or []) if str(o).strip()]
+
+    # Outcomes — the new shape is a list of objects with id+label+kind so the
+    # runtime prompt can show [kind] tags for catch-all agents. We still
+    # accept the legacy string-only shape (older builds, or models that
+    # ignored the upgrade) and synthesise sensible defaults.
+    raw_outcomes = data.get("outcomes") or []
+    outcomes: list[str] = []
+    outcome_catalogue: list[dict[str, Any]] = []
+    seen_oids: set[str] = set()
+    for o in raw_outcomes:
+        if isinstance(o, dict):
+            oid = str(o.get("id") or "").strip().lower().replace(" ", "_")
+            if not oid or oid in seen_oids:
+                continue
+            kind = str(o.get("kind") or "").strip().lower()
+            if kind not in {"success", "qualified", "info", "failure"}:
+                kind = "info"
+            label = str(o.get("label") or oid.replace("_", " ").title()).strip()
+            outcomes.append(oid)
+            outcome_catalogue.append({"id": oid, "label": label, "kind": kind, "description": ""})
+            seen_oids.add(oid)
+        elif isinstance(o, str):
+            oid = o.strip().lower().replace(" ", "_")
+            if not oid or oid in seen_oids:
+                continue
+            outcomes.append(oid)
+            # Heuristic kind from the slug — better than nothing.
+            kind = (
+                "success" if any(k in oid for k in ("booked", "confirmed", "resolved", "scheduled", "sold"))
+                else "qualified" if any(k in oid for k in ("lead", "callback", "qualified", "interest"))
+                else "failure" if any(k in oid for k in ("voicemail", "no_interest", "lost", "abandoned"))
+                else "info"
+            )
+            label = oid.replace("_", " ").title()
+            outcome_catalogue.append({"id": oid, "label": label, "kind": kind, "description": ""})
+            seen_oids.add(oid)
     if not outcomes:
         outcomes = ["info_given", "lead_captured", "booking_made", "callback_requested", "voicemail"]
+        outcome_catalogue = [
+            {"id": "info_given",         "label": "Information given",  "kind": "info",      "description": ""},
+            {"id": "lead_captured",      "label": "Lead captured",      "kind": "qualified", "description": ""},
+            {"id": "booking_made",       "label": "Booking made",       "kind": "success",   "description": ""},
+            {"id": "callback_requested", "label": "Callback requested", "kind": "qualified", "description": ""},
+            {"id": "voicemail",          "label": "Voicemail",          "kind": "failure",   "description": ""},
+        ]
+
     small_talk = [str(s) for s in (data.get("small_talk") or []) if str(s).strip()][:5]
+
+    # Purpose — drives the runtime CORE PURPOSE block + the ⭐ primary
+    # outcomes on the Call-outcomes page. Pre-185 catch-all agents had
+    # purpose=None, so their runtime CORE PURPOSE read "(Not configured)".
+    _VALID_PURPOSE_ACTIONS = {
+        "callback_request", "appointment_booking", "quote_request",
+        "inquiry_capture", "complaint_intake", "order_status",
+        "support_ticket", "emergency_routing",
+    }
+    raw_purpose = data.get("purpose") if isinstance(data.get("purpose"), dict) else {}
+    purpose_summary = str(raw_purpose.get("summary") or "").strip()[:240]
+    purpose_actions_raw = raw_purpose.get("actions") if isinstance(raw_purpose.get("actions"), list) else []
+    purpose_actions: list[str] = []
+    for a in purpose_actions_raw:
+        if not isinstance(a, str):
+            continue
+        slug = a.strip().lower().replace(" ", "_").replace("-", "_")
+        if slug in _VALID_PURPOSE_ACTIONS and slug not in purpose_actions:
+            purpose_actions.append(slug)
+    if not purpose_summary:
+        purpose_summary = f"Handle calls for {business} — answer questions, capture leads, and book the relevant action."
+    if not purpose_actions:
+        # Last-resort guess based on the outcome kinds we already resolved.
+        if any(c["kind"] == "success" for c in outcome_catalogue):
+            purpose_actions = ["appointment_booking"]
+        else:
+            purpose_actions = ["inquiry_capture"]
+    purpose = {"summary": purpose_summary, "actions": purpose_actions}
+
+    # Guardrails — short bullet rules surfaced as a dedicated runtime block
+    # (separate from the prose guardrails baked into system_prompt). The
+    # universal safety floor (no card numbers, no medical/legal advice) is
+    # always layered on top — we only need use-case-specific rules here.
+    raw_rails = data.get("guardrails") if isinstance(data.get("guardrails"), list) else []
+    guardrails_list: list[str] = []
+    seen_rails: set[str] = set()
+    for r in raw_rails:
+        if not isinstance(r, str):
+            continue
+        t = r.strip().lstrip("-•*").strip()
+        if not t or t.lower() in seen_rails:
+            continue
+        guardrails_list.append(t[:240])
+        seen_rails.add(t.lower())
+        if len(guardrails_list) >= 6:
+            break
+    if not guardrails_list:
+        # Always-safe fallbacks so a catch-all agent ships with SOMETHING in
+        # the runtime guardrails block instead of "(none specified)".
+        guardrails_list = [
+            "Never invent prices, availability, or dates — offer a callback if unsure.",
+            "Never take card or payment details on the phone.",
+            "Hand off to a human if the caller asks, sounds upset, or you can't help.",
+        ]
 
     # Per-agent Additional Info schema (tailored to the use case). Cleaned to
     # the same {id,label,emoji,desc,info_only} shape the dashboard + call-prompt
@@ -459,6 +578,14 @@ async def compose_dynamic_agent(
             if gid in valid_ids and isinstance(text, (str, int, float)) and str(text).strip():
                 extra_info[gid] = str(text).strip()
 
+    # Stash the kind-labelled outcome catalogue on `variables` under a
+    # reserved key so `_format_outcomes_with_kinds_for_prompt` can pick
+    # it up at runtime for catch-all agents (whose sector isn't in any
+    # pre-baked call_outcomes catalogue). Keyed with a leading underscore
+    # so it's clearly system metadata, not operator-edited content.
+    base_variables = {k: v for k, v in answers.items() if k != "agent_name"}
+    base_variables["_outcome_catalogue"] = outcome_catalogue
+
     args: dict[str, Any] = {
         "sector": str(data.get("sector") or sector_hint or "generic").strip().lower() or "generic",
         "locale": locale,
@@ -469,10 +596,11 @@ async def compose_dynamic_agent(
         "small_talk": small_talk,
         "outcomes": outcomes,
         "connectors": conns,
-        "guardrails": [],
+        "guardrails": guardrails_list,
         "policy": {"dos": {"sms_recap": True, "language_match": True},
                    "donts": {"no_price_promise": True, "no_phone_payment": True}},
-        "variables": {k: v for k, v in answers.items() if k != "agent_name"},
+        "purpose": purpose,
+        "variables": base_variables,
         "info_groups": info_groups,   # None → sector fallback
         "extra_info": extra_info,
     }

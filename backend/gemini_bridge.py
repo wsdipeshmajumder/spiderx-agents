@@ -1034,6 +1034,22 @@ def _format_outcomes_with_kinds_for_prompt(agent: dict[str, Any]) -> str:
         catalogue = {c["id"]: c for c in call_outcomes.catalogue_for(agent) if isinstance(c, dict)}
     except Exception:  # noqa: BLE001
         catalogue = {}
+    # Catch-all agents have sectors (photography, pets, voice_over, etc.)
+    # that aren't in any pre-baked call_outcomes catalogue. compose_dynamic_
+    # agent stashes its kind-labelled outcomes on `variables._outcome_
+    # catalogue` so the runtime can still render [kind] tags. Layer it
+    # over the sector catalogue so any operator override on Call-outcomes
+    # still wins.
+    variables = agent.get("variables") if isinstance(agent.get("variables"), dict) else {}
+    dyn = variables.get("_outcome_catalogue") if isinstance(variables, dict) else None
+    if isinstance(dyn, list):
+        for entry in dyn:
+            if not isinstance(entry, dict):
+                continue
+            oid = entry.get("id")
+            if not oid:
+                continue
+            catalogue.setdefault(oid, entry)
     if not catalogue:
         return ""
     lines: list[str] = []
