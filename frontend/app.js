@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 190;
+const SXAI_BUILD = 191;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -5029,6 +5029,26 @@ function CallDetailModal({ loading, data, agent, onClose }) {
     if (!s) return null;
     return `${s.length > 32 ? s.slice(0, 32) + "…" : s}`;
   };
+  // Stable pastel palette — each chip gets its own colour by hashing
+  // the key. Mirrors the reference design where every extracted entity
+  // (date / time / count / location / etc.) reads as a distinct token.
+  const CHIP_PALETTE = [
+    { bg: "#fee2e2", fg: "#991b1b" }, // red
+    { bg: "#fed7aa", fg: "#9a3412" }, // orange
+    { bg: "#fef3c7", fg: "#92400e" }, // amber
+    { bg: "#d9f99d", fg: "#3f6212" }, // lime
+    { bg: "#d1fae5", fg: "#065f46" }, // emerald
+    { bg: "#cffafe", fg: "#155e75" }, // cyan
+    { bg: "#dbeafe", fg: "#1e3a8a" }, // blue
+    { bg: "#ede9fe", fg: "#5b21b6" }, // violet
+    { bg: "#fce7f3", fg: "#9f1239" }, // pink
+  ];
+  const chipColor = (key) => {
+    let h = 0;
+    const s = String(key || "");
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return CHIP_PALETTE[h % CHIP_PALETTE.length];
+  };
   const chips = data && !data._err && data.extracted && typeof data.extracted === "object"
     ? Object.entries(data.extracted).map(([k, v]) => ({ k, label: chipFor(k, v) })).filter((x) => x.label)
     : [];
@@ -5064,10 +5084,9 @@ function CallDetailModal({ loading, data, agent, onClose }) {
                     ? html`<audio controls src=${data.recording_url} class="call-detail-audio"></audio>`
                     : html`
                       <button class="db-btn-primary call-detail-rec-btn" type="button" disabled
-                              title=${data.recording_status || "Recording not available"}>
+                              title=${data.recording_status || "Audio recording coming soon — the transcript below is the source of truth."}>
                         <span>▶</span><span>Play Recording</span>
                       </button>
-                      <div class="call-detail-rec-note">${data.recording_status || "Coming soon."}</div>
                     `}
                 </div>
               </div>
@@ -5081,7 +5100,11 @@ function CallDetailModal({ loading, data, agent, onClose }) {
                 <div class="call-detail-section">
                   <div class="call-detail-section-label">Call Analysis:</div>
                   <div class="call-detail-chips">
-                    ${chips.map((c, i) => html`<span key=${i} class="call-detail-chip">${c.label}</span>`)}
+                    ${chips.map((c, i) => {
+                      const col = chipColor(c.k);
+                      return html`<span key=${i} class="call-detail-chip"
+                                  style=${{ background: col.bg, color: col.fg, borderColor: col.bg }}>${c.label}</span>`;
+                    })}
                   </div>
                 </div>
               ` : ""}
