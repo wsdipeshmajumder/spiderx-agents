@@ -10464,7 +10464,15 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
  * column + button shape are in place so wiring real recordings is a
  * data-only swap once capture lands.
  * ═══════════════════════════════════════════════════════════════════════════ */
-.call-detail-modal { width: min(880px, calc(100vw - 32px)); padding: 0; overflow: hidden; }
+/* Specificity bump: the base .db-modal.db-modal-wide pair (which the
+ * JSX still applies for theme/spacing inheritance) caps width at 720px.
+ * Compound selector outscores it so build-191's 1040px target wins. */
+.db-modal.db-modal-wide.call-detail-modal {
+  width: min(1040px, calc(100vw - 32px));
+  max-width: min(1040px, calc(100vw - 32px));
+  padding: 0;
+  overflow: hidden;
+}
 .call-detail-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 18px 22px 14px;
