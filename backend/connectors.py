@@ -354,19 +354,45 @@ async def _fire_post_call_notifications(*, agent: dict[str, Any],
         "lead_quality": record.get("lead_quality"),
         "duration_s":   record.get("duration_s") or 0,
     }
+    # Build 196: parse the JSON-serialised transcript back to turns so
+    # the HTML email can render chat-style bubbles like the dashboard.
+    import json as _json
+    raw_tx = record.get("transcript")
+    transcript_turns = None
+    if isinstance(raw_tx, str) and raw_tx.strip():
+        try:
+            parsed = _json.loads(raw_tx)
+            if isinstance(parsed, list):
+                transcript_turns = [t for t in parsed if isinstance(t, dict) and t.get("text")]
+        except Exception:  # noqa: BLE001
+            transcript_turns = None
+    rich = {
+        "lead_signals":     record.get("lead_signals"),
+        "summary":          record.get("summary"),
+        "extracted":        record.get("extracted"),
+        "call_id":          call_id,
+        "agent_slug":       agent.get("slug"),
+        "transcript_turns": transcript_turns,
+        "started_at_iso":   record.get("started_at"),
+    }
     if post_call.get("email"):
         for m in owners:
             try:
                 await email_stub.send_call_summary_email(
-                    to=m["email"], org_name=org_name,
-                    lead_signals=record.get("lead_signals"),
-                    summary=record.get("summary"),
-                    extracted=record.get("extracted"),
-                    call_id=call_id,
-                    **common,
+                    to=m["email"], org_name=org_name, **common, **rich,
                 )
             except Exception as e:  # noqa: BLE001
                 log.warning("post_call.email failed for %s: %s", m.get("email"), e)
+    # Build 196: ALSO fire the report to the fixed REPORT_EMAIL_TO
+    # recipient (devteam@spiderx.ai by default) regardless of the
+    # operator's post_call.email toggle. Useful for ops visibility on
+    # every persisted call. No-op when REPORT_EMAIL_TO is unset.
+    try:
+        await email_stub.send_call_report_to_devteam(
+            org_name=org_name, **common, **rich,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("post_call.devteam_email failed: %s", e)
     if sms_enabled:
         # SMS recipient: prefer `notification_phone` (dedicated post-call
         # SMS line, often a personal/WhatsApp number) over the generic
@@ -505,18 +531,22 @@ async def handle(connector_id: str, args: dict[str, Any], agent: dict[str, Any])
                 except Exception:  # noqa: BLE001
                     pass
 
-            # Post-call notifications. Driven by agent.purpose.post_call —
-            # email is universal, SMS is plan-gated (free → off regardless
-            # of the flag). All best-effort: a provider hiccup never
-            # poisons the calls row that just landed.
+            # Post-call notifications. Owner email + SMS are driven by
+            # agent.purpose.post_call (email universal, SMS plan-gated).
+            # The fixed-recipient devteam report (build 196) ALWAYS fires
+            # — that's wired inside _fire_post_call_notifications so we
+            # call it unconditionally and let the inner branches decide.
+            # All best-effort: a provider hiccup never poisons the calls
+            # row that just landed.
             try:
                 purpose = agent.get("purpose") or {}
-                post_call = purpose.get("post_call") if isinstance(purpose, dict) else None
-                if isinstance(post_call, dict) and (post_call.get("email") or post_call.get("sms")):
-                    await _fire_post_call_notifications(
-                        agent=agent, record=record, call_id=call_id,
-                        post_call=post_call,
-                    )
+                post_call = purpose.get("post_call") if isinstance(purpose, dict) else {}
+                if not isinstance(post_call, dict):
+                    post_call = {}
+                await _fire_post_call_notifications(
+                    agent=agent, record=record, call_id=call_id,
+                    post_call=post_call,
+                )
             except Exception as e:  # noqa: BLE001
                 log.warning("end_call: post_call notifications failed: %s", e)
 

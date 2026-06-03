@@ -5072,6 +5072,27 @@ async def run_session(
                                         "ws-close auto-commit: agent_id=%s call_id=%s turns=%d duration=%.1fs (kind=%s)",
                                         agent.get("id"), cid, len(tx_turns), duration_s, kind,
                                     )
+                                    # Build 196: fire the same post-call
+                                    # report path the connector-driven
+                                    # end_call uses, so abandoned-test
+                                    # calls also land in the devteam
+                                    # inbox + owner inboxes (subject to
+                                    # post_call.email). Best-effort —
+                                    # never raises into the bridge loop.
+                                    try:
+                                        from . import connectors as _conn
+                                        purpose = agent.get("purpose") or {}
+                                        post_call = purpose.get("post_call") if isinstance(purpose, dict) else {}
+                                        if not isinstance(post_call, dict):
+                                            post_call = {}
+                                        await _conn._fire_post_call_notifications(
+                                            agent=agent, record=record, call_id=cid,
+                                            post_call=post_call,
+                                        )
+                                    except Exception as e:  # noqa: BLE001
+                                        log.warning(
+                                            "ws-close auto-commit: report notify failed: %s", e,
+                                        )
                                 except Exception:  # noqa: BLE001
                                     log.exception(
                                         "ws-close auto-commit failed (agent_id=%s)",
