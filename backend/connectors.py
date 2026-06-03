@@ -456,7 +456,16 @@ async def handle(connector_id: str, args: dict[str, Any], agent: dict[str, Any])
                 "summary": summary,
                 "final_message": final,
                 "extracted": extracted,
-                "transcript": None,  # filled by the bridge if available
+                # Bridge stashes the in-session transcript turns on agent
+                # ["_transcript"] right before calling end_call (build 188).
+                # Pre-188 this was always None; the calls.transcript column
+                # is TEXT so we serialise the JSON shape — the dashboard's
+                # CallDetailModal parses it back to render chat bubbles.
+                "transcript": (
+                    json.dumps(agent.get("_transcript"), ensure_ascii=False)
+                    if isinstance(agent.get("_transcript"), list) and agent.get("_transcript")
+                    else None
+                ),
                 "input_tokens":  agent.get("_tokens_in"),
                 "output_tokens": agent.get("_tokens_out"),
                 "cached_tokens": agent.get("_tokens_cached"),

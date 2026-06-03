@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 187;
+const SXAI_BUILD = 188;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -4995,9 +4995,160 @@ function AgentCallOutcomesPage({ agent, agents, presets, plan, onNav }) {
 // Aggregations are computed client-side from the existing /calls endpoint
 // to avoid a new backend route; if the call volume grows past a few hundred
 // per agent, we'll add a `/call-summary` endpoint that aggregates in SQL.
+// ─────────────────────────────────────────────────────────────────────────
+// CallDetailModal — opened from the row "Details" button on AgentCallsPage
+// (build 188). Mirrors the layout the operator reference shows: Date/Time,
+// Phone, Duration + Recording row up top; Summary; Call Analysis (extracted
+// entity chips); chat-style Transcript with "User:" / "AI:" bubbles.
+//
+// Recording playback is intentionally stubbed — the audio capture path
+// hasn't shipped yet, so the button is disabled with an explanatory caption.
+// When recording lands, set `data.recording_available=true` server-side
+// and this component renders an <audio controls /> against `data.recording_url`.
+// ─────────────────────────────────────────────────────────────────────────
+function CallDetailModal({ loading, data, agent, onClose }) {
+  const fmtDate = (iso) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, {
+      month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit",
+    });
+  };
+  const fmtDur = (s) => {
+    const n = Number(s || 0);
+    if (!n) return "—";
+    const m = Math.floor(n / 60);
+    const ss = Math.round(n % 60).toString().padStart(2, "0");
+    return `${m}:${ss} mins`;
+  };
+  // Extracted JSONB → flat list of {key, val} chips. Skip booleans /
+  // empty strings — they read awkwardly as chips. Truncate long values.
+  const chipFor = (k, v) => {
+    if (v == null || v === "" || typeof v === "boolean") return null;
+    const s = (Array.isArray(v) ? v.join(", ") : String(v)).trim();
+    if (!s) return null;
+    return `${s.length > 32 ? s.slice(0, 32) + "…" : s}`;
+  };
+  const chips = data && !data._err && data.extracted && typeof data.extracted === "object"
+    ? Object.entries(data.extracted).map(([k, v]) => ({ k, label: chipFor(k, v) })).filter((x) => x.label)
+    : [];
+
+  return html`
+    <div class="db-modal-backdrop call-detail-backdrop" onClick=${onClose}>
+      <div class="db-modal db-modal-wide call-detail-modal" onClick=${(e) => e.stopPropagation()}>
+        <div class="call-detail-head">
+          <h2 class="call-detail-title">Call Details</h2>
+          <button class="db-modal-close" type="button" aria-label="Close" onClick=${onClose}>×</button>
+        </div>
+
+        ${loading ? html`<div class="db-empty"><div class="db-empty-sub">Loading…</div></div>` :
+          data?._err ? html`<div class="db-empty"><div class="db-empty-sub">Couldn't load this call.</div></div>` :
+          data ? html`
+            <div class="call-detail-body">
+              <div class="call-detail-meta-grid">
+                <div class="call-detail-meta-cell">
+                  <div class="call-detail-meta-label">📅 Date/Time</div>
+                  <div class="call-detail-meta-value">${fmtDate(data.started_at)}</div>
+                </div>
+                <div class="call-detail-meta-cell">
+                  <div class="call-detail-meta-label">📞 Phone Number</div>
+                  <div class="call-detail-meta-value">${data.phone_number || "Web / test call"}</div>
+                </div>
+                <div class="call-detail-meta-cell">
+                  <div class="call-detail-meta-label">🕐 Duration</div>
+                  <div class="call-detail-meta-value">${fmtDur(data.duration_s)}</div>
+                </div>
+                <div class="call-detail-meta-cell">
+                  <div class="call-detail-meta-label">▶️ Recording</div>
+                  ${data.recording_available
+                    ? html`<audio controls src=${data.recording_url} class="call-detail-audio"></audio>`
+                    : html`
+                      <button class="db-btn-primary call-detail-rec-btn" type="button" disabled
+                              title=${data.recording_status || "Recording not available"}>
+                        <span>▶</span><span>Play Recording</span>
+                      </button>
+                      <div class="call-detail-rec-note">${data.recording_status || "Coming soon."}</div>
+                    `}
+                </div>
+              </div>
+
+              <div class="call-detail-section">
+                <div class="call-detail-section-label">Call Summary:</div>
+                <div class="call-detail-summary">${data.summary || data.final_message || "No summary captured."}</div>
+              </div>
+
+              ${chips.length > 0 ? html`
+                <div class="call-detail-section">
+                  <div class="call-detail-section-label">Call Analysis:</div>
+                  <div class="call-detail-chips">
+                    ${chips.map((c, i) => html`<span key=${i} class="call-detail-chip">${c.label}</span>`)}
+                  </div>
+                </div>
+              ` : ""}
+
+              ${data.lead_quality || data.sentiment ? html`
+                <div class="call-detail-section call-detail-mood">
+                  ${data.lead_quality ? html`<span class=${"db-lead db-lead-" + data.lead_quality}>${data.lead_quality}</span>` : ""}
+                  ${data.sentiment ? html`<span class=${"db-mood db-mood-" + data.sentiment}>${data.sentiment}</span>` : ""}
+                  ${data.lead_signals ? html`<span class="call-detail-signals">${data.lead_signals}</span>` : ""}
+                </div>
+              ` : ""}
+
+              <div class="call-detail-section">
+                <div class="call-detail-section-label">Transcript</div>
+                ${(data.transcript_turns || []).length === 0 ? html`
+                  <div class="call-detail-tx-empty">
+                    No transcript was captured for this call.
+                    ${data.id ? html` (Calls before build 188 don't have transcripts saved — newer calls will.)` : ""}
+                  </div>
+                ` : html`
+                  <div class="call-detail-tx">
+                    <div class="call-detail-tx-marker">Call Started</div>
+                    ${(data.transcript_turns || []).map((t, i) => {
+                      // Map any role variant to user vs agent. Gemini Live
+                      // emits "user" / "model". Some legacy data may use
+                      // "assistant" / "ai".
+                      const isUser = /^(user|caller|human)/i.test(t.role || "");
+                      return html`
+                        <div key=${i} class=${"call-detail-tx-row " + (isUser ? "is-user" : "is-agent")}>
+                          <div class="call-detail-tx-bubble">
+                            <span class="call-detail-tx-who">${isUser ? "User:" : (agent?.name ? `${agent.name}:` : "AI:")}</span>
+                            <span class="call-detail-tx-text">${t.text}</span>
+                          </div>
+                        </div>
+                      `;
+                    })}
+                  </div>
+                `}
+              </div>
+            </div>
+          ` : ""}
+
+        <div class="call-detail-foot">
+          <button class="db-btn-ghost" type="button" onClick=${onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
   const [allCalls, setAllCalls] = useState([]);
   const [loading, setLoading] = useState(true);
+  // Build 188: per-row Details modal. `detailId` holds the call.id being
+  // shown; `detail` is the fetched payload. Null = modal closed.
+  const [detailId, setDetailId] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  useEffect(() => {
+    if (!detailId || !agent?.id) { setDetail(null); return; }
+    setDetailLoading(true);
+    fetch(`/api/agents/${agent.id}/calls/${detailId}`)
+      .then((r) => r.ok ? r.json() : Promise.reject(new Error("status " + r.status)))
+      .then((d) => setDetail(d))
+      .catch(() => setDetail({ _err: true }))
+      .finally(() => setDetailLoading(false));
+  }, [detailId, agent?.id]);
   // URL-driven filter — clicking on the Call outcomes page navigates here
   // with ?outcome=<id> or ?kind=<success|qualified|info|failure>. Read
   // location.search reactively so back/forward + in-app nav both update it.
@@ -5204,7 +5355,8 @@ function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
                     </td>
                     <td class="db-table-summary">${c.summary || c.reason || "—"}</td>
                     <td class="db-table-td-right">
-                      <button class="db-btn-ghost db-btn-sm" type="button">Details</button>
+                      <button class="db-btn-ghost db-btn-sm" type="button"
+                              onClick=${() => setDetailId(c.id)}>Details</button>
                     </td>
                   </tr>
                 `)}
@@ -5212,6 +5364,14 @@ function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
             </table>
           </div>
         `}
+
+      ${detailId ? html`
+        <${CallDetailModal}
+          loading=${detailLoading}
+          data=${detail}
+          agent=${agent}
+          onClose=${() => { setDetailId(null); setDetail(null); }} />
+      ` : ""}
     </div>
   `;
 

@@ -4762,6 +4762,25 @@ async def run_session(
                             if name in CONNECTOR_DECLS and allowed:
                                 label = CONNECTOR_DECLS[name].description[:80]
                                 await _send_json(ws, {"type": "tool_call", "name": name, "label": label})
+                                # Thread the in-session transcript onto the
+                                # agent dict so connectors.end_call can land
+                                # it on the calls row. Pre-188 calls.transcript
+                                # was always NULL because the bridge had the
+                                # turns in `memory.turns` but never handed
+                                # them off. Use the structured JSON form
+                                # (turns array) — db_pg insert_call serialises
+                                # it; the dashboard's Details modal renders
+                                # the chat-style bubbles directly off it.
+                                if name == "end_call" and agent is not None:
+                                    try:
+                                        turns = [
+                                            {"role": t.get("role"), "text": t.get("text")}
+                                            for t in (memory.turns or [])
+                                            if t.get("text")
+                                        ]
+                                        agent["_transcript"] = turns
+                                    except Exception:  # noqa: BLE001
+                                        pass
                                 result = await handle_connector(name, args, agent or {})
                                 # If end_call landed successfully, surface the
                                 # call_id back to the client so the cockpit

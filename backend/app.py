@@ -62,7 +62,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 187
+APP_BUILD = 188
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1082,6 +1082,59 @@ async def agent_stats(agent_id: int, request: Request) -> dict:
 async def agent_calls(agent_id: int, limit: int = 50, request: Request = None) -> list[dict]:
     await _require_agent_owned(agent_id, await current_user(request))
     return await db.list_calls_for_agent(agent_id, limit=limit)
+
+
+@app.get("/api/agents/{agent_id}/calls/{call_id}")
+async def agent_call_detail(agent_id: int, call_id: int, request: Request) -> dict:
+    """Full call detail for the dashboard's Call Details modal (build 188).
+    Returns everything `list_calls_for_agent` returns PLUS the parsed
+    transcript turns + the `final_message` + the `extracted` JSONB payload.
+    Recording is a forward-looking field: today it always returns
+    `recording_available: false` with a `recording_status` note. When
+    audio capture lands (planned build), the same endpoint will surface
+    a signed URL.
+    """
+    await _require_agent_owned(agent_id, await current_user(request))
+    import json as _json
+    row = await db.get_call_detail(agent_id, call_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="call not found")
+    # `transcript` is stored as a JSON string for build 188 onward, but
+    # legacy rows (pre-188) may be NULL or plain text. Parse defensively.
+    raw_tx = row.get("transcript")
+    turns: list[dict] = []
+    if isinstance(raw_tx, str) and raw_tx.strip():
+        try:
+            parsed = _json.loads(raw_tx)
+            if isinstance(parsed, list):
+                for t in parsed:
+                    if isinstance(t, dict) and t.get("text"):
+                        turns.append({
+                            "role": (t.get("role") or "model").strip().lower(),
+                            "text": str(t.get("text")).strip(),
+                        })
+        except Exception:  # noqa: BLE001
+            # Plain-text legacy — render as a single model turn so the
+            # operator at least sees what was captured.
+            turns = [{"role": "model", "text": raw_tx.strip()}]
+    return {
+        "id": row.get("id"),
+        "agent_id": row.get("agent_id"),
+        "started_at": str(row.get("started_at") or ""),
+        "ended_at": str(row.get("ended_at") or ""),
+        "duration_s": float(row.get("duration_s") or 0),
+        "outcome": row.get("outcome"),
+        "reason": row.get("reason"),
+        "summary": row.get("summary"),
+        "final_message": row.get("final_message"),
+        "extracted": row.get("extracted") or {},
+        "sentiment": row.get("sentiment"),
+        "lead_quality": row.get("lead_quality"),
+        "lead_signals": row.get("lead_signals"),
+        "transcript_turns": turns,
+        "recording_available": False,
+        "recording_status": "Audio recording is coming in a future update — for now the transcript is the source of truth.",
+    }
 
 
 @app.patch("/api/agents/{agent_id}")

@@ -727,6 +727,22 @@ def _parse_ts(v: Any) -> Optional[datetime]:
     return None
 
 
+async def get_call_detail(agent_id: int, call_id: int) -> Optional[dict[str, Any]]:
+    """Full call row for the Call Details modal (build 188). Includes
+    transcript + extracted + final_message, which the list endpoint omits
+    to keep the table response small."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        r = await conn.fetchrow(
+            "SELECT id, agent_id, started_at, ended_at, duration_s, outcome, reason, "
+            "       summary, final_message, extracted, transcript, "
+            "       sentiment, lead_quality, lead_signals "
+            "FROM calls WHERE id = $1 AND agent_id = $2",
+            int(call_id), int(agent_id),
+        )
+    return _record_to_dict(r) if r else None
+
+
 async def list_calls_for_agent(agent_id: int, limit: int = 50) -> list[dict[str, Any]]:
     pool = await get_pool()
     async with pool.acquire() as conn:
