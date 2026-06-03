@@ -78,6 +78,7 @@ def _generic_catalogue(locale: str, v: dict[str, Any]) -> list[dict[str, Any]]:
         _o("transferred_human",     "Transferred to human",  "info",      "Agent transferred the call to a person."),
         _o("not_interested",        "Not interested",        "failure",   "Caller decided not to proceed."),
         _o("voicemail",             "Voicemail",             "failure",   "Caller didn't engage / left voicemail."),
+        _o("abandoned",             "Abandoned",             "failure",   "Caller disconnected before the agent could finish wrapping up."),
         _o("complaint_logged",      "Complaint logged",      "failure",   "Caller registered a complaint — needs follow-up."),
     ]
 

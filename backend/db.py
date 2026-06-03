@@ -80,6 +80,7 @@ get_agent_org         = db_pg.get_agent_org
 
 insert_call               = db_pg.insert_call
 list_calls_for_agent      = db_pg.list_calls_for_agent
+get_call_detail           = db_pg.get_call_detail
 call_stats_for_agent      = db_pg.call_stats_for_agent
 
 

@@ -4750,6 +4750,17 @@ async def run_session(
                                 },
                             }
 
+                        # Mutable cell so the inner callback + the WS-close
+                        # finalization (further down) share state. True after
+                        # end_call has successfully landed a calls row. If
+                        # it stays False at session-end we auto-persist an
+                        # "abandoned" row so the operator's test still shows
+                        # up in the Call log. Pre-build-190 a user who closed
+                        # the call tab before the model could wrap up got
+                        # nothing in the log — confusing for "I just tested
+                        # but nothing's showing".
+                        call_finalized = [False]
+
                         async def on_connector_call(name: str, args: dict[str, Any]) -> dict[str, Any]:
                             # end_call is always allowed on agent sessions —
                             # it's the canonical way to wrap up. We don't
@@ -4786,6 +4797,7 @@ async def run_session(
                                 # call_id back to the client so the cockpit
                                 # can refresh stats immediately.
                                 if name == "end_call" and result.get("ok"):
+                                    call_finalized[0] = True
                                     await _send_json(ws, {
                                         "type": "call_ended",
                                         "call_id": result.get("call_id"),
@@ -4997,6 +5009,73 @@ async def run_session(
                                     log.exception(
                                         "build_state[%s]: WS-close commit raised",
                                         build_sid[:18],
+                                    )
+
+                            # ── WS-CLOSE AUTO-COMMIT (agent / test calls) ──
+                            # If the caller closed the WS before the model
+                            # called `end_call`, we still want the session
+                            # to land in the Call log so the operator's
+                            # test is visible. Pre-build-190 they got
+                            # nothing — confusing UX. We persist an
+                            # "abandoned" outcome with the partial transcript
+                            # and whatever token counters we observed.
+                            if (kind in ("agent", "test")
+                                    and not call_finalized[0]
+                                    and agent is not None
+                                    and agent.get("id")):
+                                try:
+                                    import time as _t
+                                    _now_iso_str = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                                    started_at_iso = agent.get("_call_started_iso") or _now_iso_str
+                                    started_at_mono = agent.get("_call_started_at")
+                                    duration_s = (
+                                        (_t.monotonic() - float(started_at_mono))
+                                        if started_at_mono else 0.0
+                                    )
+                                    # Capture the in-session transcript as
+                                    # the same JSON-encoded shape end_call
+                                    # uses (build 188), so the Details modal
+                                    # renders chat bubbles identically.
+                                    import json as _json
+                                    tx_turns = [
+                                        {"role": t.get("role"), "text": t.get("text")}
+                                        for t in (memory.turns or [])
+                                        if t.get("text")
+                                    ]
+                                    tx_blob = _json.dumps(tx_turns, ensure_ascii=False) if tx_turns else None
+                                    record = {
+                                        "agent_id": agent.get("id"),
+                                        "started_at": started_at_iso,
+                                        "ended_at": _now_iso_str,
+                                        "duration_s": duration_s,
+                                        "outcome": "abandoned",
+                                        "reason": "ABANDONED",
+                                        "summary": (
+                                            "Caller disconnected before the agent could wrap up. "
+                                            f"{len(tx_turns)} turn(s) captured."
+                                            if tx_turns else
+                                            "Caller disconnected before the agent could speak."
+                                        ),
+                                        "final_message": None,
+                                        "extracted": {},
+                                        "transcript": tx_blob,
+                                        "input_tokens":  agent.get("_tokens_in"),
+                                        "output_tokens": agent.get("_tokens_out"),
+                                        "cached_tokens": agent.get("_tokens_cached"),
+                                        "model_id":      agent.get("_model_id") or state.model_id,
+                                        "sentiment":     None,
+                                        "lead_quality":  None,
+                                        "lead_signals":  None,
+                                    }
+                                    cid = await db.insert_call(record)
+                                    log.info(
+                                        "ws-close auto-commit: agent_id=%s call_id=%s turns=%d duration=%.1fs (kind=%s)",
+                                        agent.get("id"), cid, len(tx_turns), duration_s, kind,
+                                    )
+                                except Exception:  # noqa: BLE001
+                                    log.exception(
+                                        "ws-close auto-commit failed (agent_id=%s)",
+                                        agent.get("id"),
                                     )
                             return
 
