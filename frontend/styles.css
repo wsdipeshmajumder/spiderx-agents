@@ -10804,6 +10804,15 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
 }
 .ax-brand-mark { display: inline-flex; color: #a78bfa; }
 .ax-brand-word { font-size: 18px; }
+/* Build 203b: when the brand swatch is the full inline SpiderX wordmark
+   logo (SpiderXLogo SVG), the `<a>` carries the `.ax-brand-logo` class
+   instead of the dot+text composite. The dark topbar is near-black so
+   currentColor on the SVG resolves to white via the parent `<a>` colour,
+   while the red X stays brand-true (it's hardcoded #df3739 inside the
+   path). Add a touch of right-padding so the next item ("Platform admin"
+   label) doesn't crowd the wordmark's trailing ".ai". */
+.ax-brand-logo { color: #f8fafc; gap: 0; padding-right: 6px; }
+.ax-brand-logo svg { display: block; }
 .ax-topbar-label {
   font-size: 13px;
   font-weight: 500;

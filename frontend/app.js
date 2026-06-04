@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 203;
+const SXAI_BUILD = 204;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -9467,14 +9467,8 @@ function AdminShell({ section, currentUser, onNav }) {
   return html`
     <div class="db-admin-shell db-admin-shell-vsplit ax-shell">
       <header class="ax-topbar">
-        <a class="ax-brand" href="/agents" onClick=${(e) => { e.preventDefault(); onNav("/agents"); }}>
-          <span class="ax-brand-mark">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7">
-              <path d="M3 7l3-3h12l3 3v13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7z"/>
-              <path d="M3 7h18"/>
-            </svg>
-          </span>
-          <span class="ax-brand-word">SpiderX.AI</span>
+        <a class="ax-brand ax-brand-logo" href="/agents" onClick=${(e) => { e.preventDefault(); onNav("/agents"); }}>
+          <${SpiderXLogo} height=${22} />
         </a>
         <span class="ax-topbar-label">Platform admin</span>
         <span class="ax-pill ax-pill-internal">
