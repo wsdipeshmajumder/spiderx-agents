@@ -232,8 +232,9 @@ KINDS = {
     "call.completed", "call.abandoned", "call.outcome.captured",
     # cost
     "cost.agent.monthly.computed", "cost.agent.threshold.warning",
-    "cost.agent.threshold.exceeded", "cost.org.threshold.warning",
-    "cost.org.threshold.exceeded",
+    "cost.agent.threshold.exceeded",
+    "cost.org.monthly.computed",
+    "cost.org.threshold.warning", "cost.org.threshold.exceeded",
     # pricing
     "pricing.observed", "pricing.drift.detected", "pricing.rate.rolled_forward",
     # notify
