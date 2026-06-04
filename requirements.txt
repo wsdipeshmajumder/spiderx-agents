@@ -1,0 +1,9 @@
+# Root-level requirements pin for Railway / Railpack auto-detection.
+#
+# Railpack's Python provider looks for `requirements.txt` (or pyproject /
+# Pipfile / poetry.lock) at the repo root. Our actual dep list lives at
+# `backend/requirements.txt` so the backend package is self-contained;
+# this file just re-exports it via pip's `-r` directive so there's exactly
+# ONE place to edit dependencies and Railpack still sees a Python project
+# at the root.
+-r backend/requirements.txt
