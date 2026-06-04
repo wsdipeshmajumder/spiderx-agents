@@ -11008,6 +11008,120 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
   padding-left: 4px;
 }
 
+/* ─── AdminFilterBar (build 202) ───────────────────────────────────────
+   Unified filter row on every super-admin page. Visually echoes the
+   `.ax-toolbar` chip-and-pill aesthetic but with paired label + control
+   "fields" so the operator can scan org / agent / phone / range at a
+   glance without reading microcopy.
+
+   Layout: horizontal flex that wraps at narrow widths — each field
+   keeps its label + control together. Apply / Reset live in a small
+   action group on the right.
+   ──────────────────────────────────────────────────────────────────── */
+.ax-filterbar {
+  display: flex; gap: 12px; align-items: end; flex-wrap: wrap;
+  background: #ffffff;
+  border: 1px solid #e6e7ec;
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 18px;
+}
+.ax-fb-field {
+  display: flex; flex-direction: column; gap: 4px;
+  min-width: 140px;
+}
+.ax-fb-field-grow { flex: 1; min-width: 220px; }
+.ax-fb-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6a6f7d;
+}
+.ax-fb-select, .ax-fb-input {
+  font: inherit;
+  font-size: 13.5px;
+  padding: 7px 12px;
+  background: #ffffff;
+  border: 1px solid #d8dbe4;
+  border-radius: 8px;
+  color: #1f2230;
+  outline: none;
+  height: 36px;
+  box-sizing: border-box;
+}
+.ax-fb-select { padding-right: 28px; cursor: pointer; }
+.ax-fb-input:focus, .ax-fb-select:focus {
+  border-color: #a855f7;
+  box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.16);
+}
+.ax-fb-input-date { min-width: 140px; }
+
+.ax-fb-actions {
+  display: flex; gap: 8px; align-items: center;
+  margin-left: auto;  /* push to the right edge */
+  padding-bottom: 1px;  /* baseline-align with input bottoms */
+}
+.ax-fb-apply {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 18px;
+  border: 0;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #ec4899 0%, #a855f7 100%);
+  color: #ffffff;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+}
+.ax-fb-apply:hover { filter: brightness(1.05); }
+.ax-fb-apply:active { transform: translateY(1px); }
+.ax-fb-reset {
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 14px;
+  border: 1px solid #d8dbe4;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1f2230;
+  cursor: pointer;
+}
+.ax-fb-reset:hover { background: #f4f5f9; }
+.ax-fb-badge {
+  display: inline-flex; align-items: center;
+  font-size: 11.5px; font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(236, 72, 153, 0.12), rgba(168, 85, 247, 0.12));
+  color: #a21caf;
+  border: 1px solid rgba(168, 85, 247, 0.28);
+}
+
+/* Dark-theme overrides — match the existing .ax-toolbar dark rules */
+:root[data-theme="dark"] .ax-filterbar {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+:root[data-theme="dark"] .ax-fb-select,
+:root[data-theme="dark"] .ax-fb-input {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #e8e9ef;
+}
+:root[data-theme="dark"] .ax-fb-label { color: #a1a4ad; }
+:root[data-theme="dark"] .ax-fb-reset {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #e8e9ef;
+}
+:root[data-theme="dark"] .ax-fb-reset:hover { background: rgba(255, 255, 255, 0.08); }
+
+@media (max-width: 700px) {
+  .ax-filterbar { flex-direction: column; align-items: stretch; }
+  .ax-fb-field { min-width: 0; }
+  .ax-fb-actions { margin-left: 0; justify-content: flex-end; }
+}
+
 /* Sub-tabs — Live feed / Schedulers / Pricing */
 .ax-subtabs {
   display: flex; gap: 4px;

@@ -110,11 +110,17 @@ async def list_events(
     only_open: bool = False,
     limit: int = 200,
     before_id: Optional[int] = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
 ) -> list[dict[str, Any]]:
     """Read events with composable filters. `kind_prefix` does a
     LIKE 'prefix.%' match so the caller can say 'all pricing.*' or
     'all agent.*' without enumerating each kind. `before_id` enables
     cursor-style pagination by id (DESC) without OFFSET pain.
+
+    Build 202: `start` / `end` are ISO timestamps applied against
+    `created_at` so the admin filter bar can scope the feed to a
+    date range (default last 7 days, configurable).
     """
     where: list[str] = []
     args: list[Any] = []
@@ -136,6 +142,12 @@ async def list_events(
     if before_id is not None:
         where.append(f"id < ${len(args)+1}")
         args.append(int(before_id))
+    if start:
+        where.append(f"created_at >= ${len(args)+1}::timestamptz")
+        args.append(start)
+    if end:
+        where.append(f"created_at < ${len(args)+1}::timestamptz")
+        args.append(end)
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
     args.append(int(max(1, min(limit, 500))))
     sql = (

@@ -63,9 +63,26 @@ async def admin_users(request: Request, limit: int = 100, offset: int = 0, q: st
 
 
 @router.get("/calls")
-async def admin_calls(request: Request, limit: int = 100) -> list[dict]:
+async def admin_calls(
+    request: Request,
+    limit: int = 100,
+    org_id: Optional[int] = None,
+    agent_id: Optional[int] = None,
+    phone: Optional[str] = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+) -> list[dict]:
+    """Build 202: accepts the unified AdminFilterBar params. Empty
+    strings are treated as 'not set' so the frontend can send the
+    full QS shape unconditionally without server-side coercion
+    surprises."""
     await _admin_user(request)
-    return await db.admin_recent_calls(limit=limit)
+    return await db.admin_recent_calls(
+        limit=limit,
+        org_id=org_id, agent_id=agent_id,
+        phone=(phone or None),
+        start=(start or None), end=(end or None),
+    )
 
 
 # ─── audit log ───────────────────────────────────────────────────────────
@@ -74,12 +91,35 @@ async def admin_calls(request: Request, limit: int = 100) -> list[dict]:
 async def admin_audit(request: Request, limit: int = 100, offset: int = 0,
                       actor_id: Optional[int] = None,
                       target_kind: Optional[str] = None,
-                      target_id: Optional[str] = None) -> list[dict]:
+                      target_id: Optional[str] = None,
+                      start: Optional[str] = None,
+                      end: Optional[str] = None) -> list[dict]:
     await _admin_user(request)
     return await db.list_audit(
         limit=limit, offset=offset,
         actor_id=actor_id, target_kind=target_kind, target_id=target_id,
+        start=(start or None), end=(end or None),
     )
+
+
+# ─── lookups for admin filter bar (build 202) ────────────────────────────
+
+@router.get("/orgs-lookup")
+async def admin_orgs_lookup(request: Request) -> list[dict]:
+    """Minimal `[{id, name}]` list for the AdminFilterBar's org
+    dropdown. Cheap query (no joins, name-sorted) — safe to call
+    on every admin-page mount without a cache layer."""
+    await _admin_user(request)
+    return await db.admin_orgs_lookup()
+
+
+@router.get("/agents-lookup")
+async def admin_agents_lookup(request: Request) -> list[dict]:
+    """Minimal `[{id, name, slug, org_id, org_name}]` list for the
+    AdminFilterBar's agent dropdown. The org join lets the bar
+    constrain the agent list when an org is already selected."""
+    await _admin_user(request)
+    return await db.admin_agents_lookup()
 
 
 # ─── super admin management ──────────────────────────────────────────────
@@ -187,13 +227,24 @@ async def admin_analytics(request: Request, days: int = 30) -> dict:
 
 
 @router.get("/analytics/llm")
-async def admin_llm_analytics(request: Request, days: int = 30) -> dict:
+async def admin_llm_analytics(
+    request: Request,
+    days: int = 30,
+    org_id: Optional[int] = None,
+    agent_id: Optional[int] = None,
+) -> dict:
     """Universal LLM-cost ledger view (Phase 7). Includes Eva-builder
     sessions that don't surface in the customer-call analytics — gives
     finance the full token + cost picture. Split by kind so we can see
-    whether the spend is build-time vs runtime."""
+    whether the spend is build-time vs runtime.
+
+    Build 202: optional `org_id` / `agent_id` to scope the ledger
+    from the AdminFilterBar."""
     await _admin_user(request)
-    return await db.llm_analytics_platform(days=max(1, min(int(days), 365)))
+    return await db.llm_analytics_platform(
+        days=max(1, min(int(days), 365)),
+        org_id=org_id, agent_id=agent_id,
+    )
 
 
 # ─── platform settings (Phase 4) ─────────────────────────────────────────
@@ -239,16 +290,22 @@ async def admin_events(
     only_open: bool = False,
     limit: int = 200,
     before_id: Optional[int] = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
 ) -> dict:
     """Filtered event feed for the Observability page. Returns
     `{items, counts}` so the page can render the KPI tiles + the list
-    in one round-trip on initial mount."""
+    in one round-trip on initial mount.
+
+    Build 202: `start` / `end` ISO timestamps come from the
+    AdminFilterBar's date range picker (default last 7 days)."""
     await _admin_user(request)
     from . import events as _ev
     items = await _ev.list_events(
         severity=severity, kind_prefix=kind_prefix,
         org_id=org_id, agent_id=agent_id,
         only_open=only_open, limit=limit, before_id=before_id,
+        start=(start or None), end=(end or None),
     )
     counts = await _ev.event_counts()
     return {"items": items, "counts": counts}
@@ -364,18 +421,30 @@ async def admin_pricing_roll_forward(request: Request) -> dict:
 
 
 @router.get("/agent-pnl")
-async def admin_agent_pnl(request: Request, days: int = 30) -> dict:
+async def admin_agent_pnl(
+    request: Request,
+    days: int = 30,
+    org_id: Optional[int] = None,
+    agent_id: Optional[int] = None,
+) -> dict:
     """Per-agent COGS roll-up for the last N days. Surfaces minutes,
     LLM cost (from agent_daily_stats), telephony estimate (computed
     at read-time as minutes × current Plivo per-min rate), and total
     COGS. Sorted by cost descending so the most expensive agents
     surface first.
 
+    Build 202: optional `org_id` / `agent_id` filters from the
+    AdminFilterBar. Date range is captured by `days` (already
+    present) — the bar's date-range picker collapses to the closest
+    preset (7/30/60/90) for this endpoint.
+
     Revenue / margin TODO once `plans.monthly_inr` exists — for now
     the P&L view is COGS-only, which is already enough to spot
     loss-makers on a flat-monthly plan."""
     await _admin_user(request)
-    rows = await db.agent_pnl_report(days=days)
+    rows = await db.agent_pnl_report(
+        days=days, org_id=org_id, agent_id=agent_id,
+    )
     return {"days": days, "agents": rows}
 
 

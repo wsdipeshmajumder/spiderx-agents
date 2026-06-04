@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 201;
+const SXAI_BUILD = 202;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -9026,6 +9026,334 @@ function AcceptInvitePage({ token, currentUser, onAccepted }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// AdminFilterBar (build 202) — unified filter row for every super-admin
+// page. Declared by the host page via the `kinds` prop, e.g.
+// `["org","agent","phone","daterange"]`. Renders only the requested
+// controls; emits a single `onChange(value)` whenever Apply is hit (not
+// on every keystroke — the table reloads are expensive enough that we
+// don't want them on a dropdown jitter).
+//
+// URL-synced via `useAdminFilters(kinds)` so refresh + back/forward
+// stays in the same filtered view. The hook is the single source of
+// truth — the bar itself is presentational.
+//
+// Date range default: last 7 days. Presets collapse to the closest
+// `days=N` for endpoints that don't accept ISO start/end (e.g.
+// /admin/agent-pnl); see `value.days` for that convenience.
+// ─────────────────────────────────────────────────────────────────────────
+
+// Date presets — labels are imperative and explicit. "Last 7 days" is
+// the default because it covers the common "what happened this week"
+// question without dragging months of stale rows into the table.
+const ADMIN_DATE_PRESETS = [
+  { key: "today",        label: "Today",        days: 1   },
+  { key: "yesterday",    label: "Yesterday",    days: 1   },  // start/end offset handles the back-1
+  { key: "last_7_days",  label: "Last 7 days",  days: 7   },
+  { key: "last_30_days", label: "Last 30 days", days: 30  },
+  { key: "last_60_days", label: "Last 60 days", days: 60  },
+  { key: "last_90_days", label: "Last 90 days", days: 90  },
+  { key: "custom",       label: "Custom range", days: null },
+];
+
+// Resolve a preset key → {start, end} ISO strings + days hint. Returns
+// nulls for "custom" so the bar knows to render date inputs.
+function _adminPresetRange(presetKey) {
+  const now = new Date();
+  const endOfToday = new Date(now); endOfToday.setHours(23,59,59,999);
+  const startOfToday = new Date(now); startOfToday.setHours(0,0,0,0);
+  switch (presetKey) {
+    case "today": {
+      return { start: startOfToday.toISOString(), end: endOfToday.toISOString(), days: 1 };
+    }
+    case "yesterday": {
+      const s = new Date(startOfToday); s.setDate(s.getDate() - 1);
+      const e = new Date(endOfToday);  e.setDate(e.getDate() - 1);
+      return { start: s.toISOString(), end: e.toISOString(), days: 1 };
+    }
+    case "last_7_days": {
+      const s = new Date(startOfToday); s.setDate(s.getDate() - 6);
+      return { start: s.toISOString(), end: endOfToday.toISOString(), days: 7 };
+    }
+    case "last_30_days": {
+      const s = new Date(startOfToday); s.setDate(s.getDate() - 29);
+      return { start: s.toISOString(), end: endOfToday.toISOString(), days: 30 };
+    }
+    case "last_60_days": {
+      const s = new Date(startOfToday); s.setDate(s.getDate() - 59);
+      return { start: s.toISOString(), end: endOfToday.toISOString(), days: 60 };
+    }
+    case "last_90_days": {
+      const s = new Date(startOfToday); s.setDate(s.getDate() - 89);
+      return { start: s.toISOString(), end: endOfToday.toISOString(), days: 90 };
+    }
+    case "custom":
+      return { start: null, end: null, days: null };
+    default:
+      // Unknown preset falls back to the safe default
+      return _adminPresetRange("last_7_days");
+  }
+}
+
+// Format an ISO timestamp as YYYY-MM-DD for the <input type=date>.
+// Empty inputs yield an empty string (browser-friendly) rather than
+// "Invalid Date" which the date picker won't accept.
+function _adminIsoToInputDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+// useAdminFilters — central state hook for the filter bar. Reads
+// initial values from `window.location.search` so refresh + back keeps
+// you in the same view. `setValue` writes back to the URL via
+// `history.replaceState` (replace, not push, so the back button still
+// goes to the previous *page*, not the previous *filter state* — that
+// would be infuriating).
+//
+// `signature` is a stable string the host page can stick in a useEffect
+// dep array so it reloads exactly when filters change.
+function useAdminFilters(kinds) {
+  const has = (k) => kinds.includes(k);
+  const defaultPreset = "last_7_days";
+
+  const initial = useMemo(() => {
+    const qs = new URLSearchParams(window.location.search);
+    const presetKey = qs.get("preset") || defaultPreset;
+    const range = _adminPresetRange(presetKey);
+    return {
+      preset: presetKey,
+      org_id: qs.get("org_id") || "",
+      agent_id: qs.get("agent_id") || "",
+      phone: qs.get("phone") || "",
+      start: qs.get("start") || range.start || "",
+      end:   qs.get("end")   || range.end   || "",
+      days: qs.get("days") ? Number(qs.get("days")) : (range.days || 7),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);  // initial only — we don't want URL to spam-update on every render
+
+  const [value, setValueRaw] = useState(initial);
+
+  const writeUrl = (v) => {
+    const qs = new URLSearchParams(window.location.search);
+    // Only persist the keys this bar exposes; leave unrelated params
+    // (?tab= etc.) untouched so other state owners stay in control.
+    const keys = ["org_id", "agent_id", "phone", "preset", "start", "end", "days"];
+    for (const k of keys) {
+      const val = v[k];
+      if (val === "" || val == null) qs.delete(k);
+      else qs.set(k, String(val));
+    }
+    const next = qs.toString();
+    const url = window.location.pathname + (next ? `?${next}` : "");
+    try { window.history.replaceState({}, "", url); } catch {}
+  };
+
+  const setValue = (next) => {
+    setValueRaw(next);
+    writeUrl(next);
+  };
+
+  const reset = () => {
+    const r = _adminPresetRange(defaultPreset);
+    const next = {
+      preset: defaultPreset,
+      org_id: "", agent_id: "", phone: "",
+      start: r.start || "", end: r.end || "", days: r.days || 7,
+    };
+    setValue(next);
+  };
+
+  // Build a URLSearchParams the host page appends to its fetch URL.
+  // Only the kinds the host bar advertises get serialised — a page
+  // that doesn't include "phone" in its kinds list won't send a stale
+  // phone filter even if one was URL-pinned by a previous page.
+  const toQuery = () => {
+    const qs = new URLSearchParams();
+    if (has("org")   && value.org_id)   qs.set("org_id",   value.org_id);
+    if (has("agent") && value.agent_id) qs.set("agent_id", value.agent_id);
+    if (has("phone") && value.phone)    qs.set("phone",    value.phone);
+    if (has("daterange")) {
+      if (value.start) qs.set("start", value.start);
+      if (value.end)   qs.set("end",   value.end);
+      // days is a convenience for endpoints that don't take start/end
+      if (value.days)  qs.set("days",  String(value.days));
+    }
+    return qs;
+  };
+
+  // Stable signature for useEffect deps — order MATTERS for a stable
+  // dep string, hence the explicit fields rather than JSON.stringify.
+  const signature = [
+    has("org")   ? value.org_id   : "",
+    has("agent") ? value.agent_id : "",
+    has("phone") ? value.phone    : "",
+    has("daterange") ? (value.preset === "custom"
+      ? `c:${value.start || ""}:${value.end || ""}`
+      : value.preset) : "",
+  ].join("|");
+
+  return { value, setValue, reset, toQuery, signature, kinds };
+}
+
+// Controlled filter bar. `state` is the object returned by
+// `useAdminFilters`. The bar holds *draft* edits internally and only
+// pushes them up via state.setValue on Apply — that's what makes a
+// dropdown change cheap (no reload until Apply).
+function AdminFilterBar({ state, orgs, agents }) {
+  const has = (k) => state.kinds.includes(k);
+  // Draft state — committed to URL/state only on Apply
+  const [draft, setDraft] = useState(state.value);
+  // Keep draft synced if state.value changes from URL (e.g. browser
+  // back). useMemo cheaper than useEffect for this — but useEffect is
+  // semantically clearer and we already pay one render either way.
+  useEffect(() => { setDraft(state.value); }, [state.signature]);
+
+  // When org changes, scope the agent dropdown to that org so the user
+  // doesn't have to scroll through 100 agents from other orgs.
+  const visibleAgents = (agents || []).filter((a) =>
+    !draft.org_id || String(a.org_id) === String(draft.org_id)
+  );
+
+  const presetChange = (key) => {
+    const r = _adminPresetRange(key);
+    setDraft((d) => ({
+      ...d,
+      preset: key,
+      start: r.start || d.start,
+      end:   r.end   || d.end,
+      days:  r.days  || d.days,
+    }));
+  };
+
+  const apply = () => state.setValue(draft);
+  const resetAll = () => state.reset();
+
+  // Active-filter count for the badge — what the user perceives as
+  // "I have 3 filters applied" excluding the always-on date range.
+  const activeCount = [
+    has("org")   && state.value.org_id,
+    has("agent") && state.value.agent_id,
+    has("phone") && state.value.phone,
+    has("daterange") && state.value.preset !== "last_7_days",
+  ].filter(Boolean).length;
+
+  return html`
+    <div class="ax-filterbar">
+      ${has("org") ? html`
+        <label class="ax-fb-field">
+          <span class="ax-fb-label">Org</span>
+          <select class="ax-fb-select" value=${draft.org_id}
+                  onChange=${(e) => setDraft((d) => ({ ...d, org_id: e.target.value, agent_id: "" }))}>
+            <option value="">All orgs</option>
+            ${(orgs || []).map((o) => html`
+              <option key=${o.id} value=${String(o.id)}>${o.name}</option>
+            `)}
+          </select>
+        </label>
+      ` : ""}
+
+      ${has("agent") ? html`
+        <label class="ax-fb-field">
+          <span class="ax-fb-label">Agent</span>
+          <select class="ax-fb-select" value=${draft.agent_id}
+                  onChange=${(e) => setDraft((d) => ({ ...d, agent_id: e.target.value }))}>
+            <option value="">All agents</option>
+            ${visibleAgents.map((a) => html`
+              <option key=${a.id} value=${String(a.id)}>
+                ${a.name}${a.org_name ? ` · ${a.org_name}` : ""}
+              </option>
+            `)}
+          </select>
+        </label>
+      ` : ""}
+
+      ${has("phone") ? html`
+        <label class="ax-fb-field ax-fb-field-grow">
+          <span class="ax-fb-label">Phone</span>
+          <input class="ax-fb-input" type="search"
+                 placeholder="Search caller phone…"
+                 value=${draft.phone}
+                 onInput=${(e) => setDraft((d) => ({ ...d, phone: e.target.value }))} />
+        </label>
+      ` : ""}
+
+      ${has("daterange") ? html`
+        <label class="ax-fb-field">
+          <span class="ax-fb-label">Range</span>
+          <select class="ax-fb-select" value=${draft.preset}
+                  onChange=${(e) => presetChange(e.target.value)}>
+            ${ADMIN_DATE_PRESETS.map((p) => html`
+              <option key=${p.key} value=${p.key}>${p.label}</option>
+            `)}
+          </select>
+        </label>
+        ${draft.preset === "custom" ? html`
+          <label class="ax-fb-field">
+            <span class="ax-fb-label">From</span>
+            <input class="ax-fb-input ax-fb-input-date" type="date"
+                   value=${_adminIsoToInputDate(draft.start)}
+                   onChange=${(e) => {
+                     const d = e.target.value ? new Date(e.target.value + "T00:00:00") : null;
+                     setDraft((dr) => ({ ...dr, start: d ? d.toISOString() : "" }));
+                   }} />
+          </label>
+          <label class="ax-fb-field">
+            <span class="ax-fb-label">To</span>
+            <input class="ax-fb-input ax-fb-input-date" type="date"
+                   value=${_adminIsoToInputDate(draft.end)}
+                   onChange=${(e) => {
+                     const d = e.target.value ? new Date(e.target.value + "T23:59:59") : null;
+                     setDraft((dr) => ({ ...dr, end: d ? d.toISOString() : "" }));
+                   }} />
+          </label>
+        ` : ""}
+      ` : ""}
+
+      <div class="ax-fb-actions">
+        <button class="ax-fb-apply" type="button" onClick=${apply}>Apply</button>
+        <button class="ax-fb-reset" type="button" onClick=${resetAll}>Reset</button>
+        ${activeCount > 0 ? html`
+          <span class="ax-fb-badge" title="Active filters beyond the default 7-day window">
+            ${activeCount} active
+          </span>
+        ` : ""}
+      </div>
+    </div>
+  `;
+}
+
+// useAdminLookups — single fetch of the org + agent dropdown data,
+// cached for the lifetime of the SPA so navigating between admin
+// pages doesn't re-fetch. Returns `{orgs, agents}` plus `reload()`.
+// Module-level cache because hooks state is per-component instance.
+let _ADMIN_LOOKUPS_CACHE = null;
+function useAdminLookups() {
+  const [data, setData] = useState(_ADMIN_LOOKUPS_CACHE || { orgs: null, agents: null });
+  useEffect(() => {
+    if (_ADMIN_LOOKUPS_CACHE) return;
+    Promise.all([
+      fetch("/api/admin/orgs-lookup").then((r) => r.ok ? r.json() : []),
+      fetch("/api/admin/agents-lookup").then((r) => r.ok ? r.json() : []),
+    ]).then(([orgs, agents]) => {
+      _ADMIN_LOOKUPS_CACHE = { orgs, agents };
+      setData(_ADMIN_LOOKUPS_CACHE);
+    }).catch(() => setData({ orgs: [], agents: [] }));
+  }, []);
+  return {
+    orgs: data.orgs || [],
+    agents: data.agents || [],
+    loaded: data.orgs !== null,
+    reload: () => { _ADMIN_LOOKUPS_CACHE = null; setData({ orgs: null, agents: null }); },
+  };
+}
+
+
 // AdminShell — /admin and /admin/<section>. Phase 3 super-admin surface.
 // UI-gates on me.is_super_admin AND every API call is independently gated,
 // so a non-admin who guesses the URL sees a clear "no access" instead of
@@ -9234,9 +9562,14 @@ function AdminObservability() {
   const [schedulers, setSchedulers] = useState([]);
   const [tab, setTab] = useState("feed");  // feed | schedulers | pricing
   const [detailEvent, setDetailEvent] = useState(null);
+  // Build 202: unified AdminFilterBar — org, agent, daterange (events
+  // can be attributed to either; phone isn't meaningful here since
+  // events don't carry a caller number).
+  const fb = useAdminFilters(["org", "agent", "daterange"]);
+  const lookups = useAdminLookups();
 
   const load = () => {
-    const qs = new URLSearchParams();
+    const qs = fb.toQuery();
     if (filter.severity) qs.set("severity", filter.severity);
     if (filter.kind_prefix) qs.set("kind_prefix", filter.kind_prefix);
     qs.set("limit", "200");
@@ -9255,7 +9588,7 @@ function AdminObservability() {
     // alive without hammering the DB on a quiet platform.
     const t = setInterval(load, 15000);
     return () => clearInterval(t);
-  }, [filter.severity, filter.kind_prefix]);
+  }, [filter.severity, filter.kind_prefix, fb.signature]);
 
   const resolveEvent = async (id) => {
     try {
@@ -9331,6 +9664,8 @@ function AdminObservability() {
   return html`
     <h1>Observability events</h1>
     <p class="ax-sub">Every noteworthy thing the platform does writes a row here — sent, deduped or failed, newest first. Click any row to see the full JSON payload.</p>
+
+    <${AdminFilterBar} state=${fb} orgs=${lookups.orgs} agents=${lookups.agents} />
 
     <!-- Status pills — top of the page, reference-style -->
     <div class="ax-statusrow">
@@ -9536,14 +9871,22 @@ function EventDetailDrawer({ event, onClose, onResolve }) {
 // ─────────────────────────────────────────────────────────────────────────
 function AdminAgentPnl() {
   const [data, setData] = useState(null);
-  const [days, setDays] = useState(30);
   const [err, setErr] = useState("");
+  // Build 202: AdminFilterBar — org, agent, daterange. The bar's
+  // `days` field is what /admin/agent-pnl actually consumes; ISO
+  // start/end are ignored by this endpoint but stay in the URL so
+  // when the user switches to another admin page the range carries.
+  const fb = useAdminFilters(["org", "agent", "daterange"]);
+  const lookups = useAdminLookups();
+  const days = fb.value.days || 30;
   useEffect(() => {
     setData(null); setErr("");
-    fetch(`/api/admin/agent-pnl?days=${days}`)
+    const qs = fb.toQuery();
+    qs.set("days", String(days));
+    fetch(`/api/admin/agent-pnl?${qs}`)
       .then((r) => r.ok ? r.json() : Promise.reject(new Error("status " + r.status)))
       .then(setData).catch((e) => setErr(String(e.message || e)));
-  }, [days]);
+  }, [fb.signature]);
   if (err) return html`<div class="db-form-help" style=${{ color: "#b91c1c" }}>Couldn't load: ${err}</div>`;
   if (!data) return html`<div class="db-loading">Loading P&L…</div>`;
   const agents = data.agents || [];
@@ -9560,13 +9903,7 @@ function AdminAgentPnl() {
     <h1>Agent P&L <span class="db-pill-soft">last ${days}d</span></h1>
     <p class="db-admin-sub">Per-agent COGS for the period — LLM cost (frozen at call time) + telephony estimate (today's Plivo rate × minutes). Revenue / margin will land once <code>plans</code> carries rate fields.</p>
 
-    <div class="db-pnl-range">
-      Range:
-      ${[7, 30, 60, 90].map((d) => html`
-        <button key=${d} class=${"db-pnl-range-btn" + (d === days ? " is-active" : "")}
-                onClick=${() => setDays(d)}>${d}d</button>
-      `)}
-    </div>
+    <${AdminFilterBar} state=${fb} orgs=${lookups.orgs} agents=${lookups.agents} />
 
     <div class="db-admin-grid db-pnl-totals">
       <div class="db-admin-tile">
@@ -9969,11 +10306,31 @@ function AdminUsers() {
 
 function AdminCalls() {
   const [rows, setRows] = useState(null);
-  useEffect(() => { fetch("/api/admin/calls?limit=200").then(r => r.json()).then(setRows); }, []);
-  if (!rows) return html`<div class="db-loading">Loading…</div>`;
-  if (rows.length === 0) return html`<h1>Recent calls</h1><p class="db-muted">No calls yet across the platform.</p>`;
+  // Build 202: full filter row — org, agent, phone, daterange.
+  const fb = useAdminFilters(["org", "agent", "phone", "daterange"]);
+  const lookups = useAdminLookups();
+  useEffect(() => {
+    setRows(null);
+    const qs = fb.toQuery();
+    qs.set("limit", "200");
+    fetch(`/api/admin/calls?${qs}`)
+      .then((r) => r.ok ? r.json() : [])
+      .then(setRows)
+      .catch(() => setRows([]));
+  }, [fb.signature]);
+  if (!rows) return html`
+    <h1>Recent calls</h1>
+    <${AdminFilterBar} state=${fb} orgs=${lookups.orgs} agents=${lookups.agents} />
+    <div class="db-loading">Loading…</div>
+  `;
+  if (rows.length === 0) return html`
+    <h1>Recent calls</h1>
+    <${AdminFilterBar} state=${fb} orgs=${lookups.orgs} agents=${lookups.agents} />
+    <p class="db-muted">No calls match these filters.</p>
+  `;
   return html`
     <h1>Recent calls <span class="db-pill-soft">${rows.length}</span></h1>
+    <${AdminFilterBar} state=${fb} orgs=${lookups.orgs} agents=${lookups.agents} />
     <table class="db-table">
       <thead>
         <tr><th>When</th><th>Org</th><th>Agent</th><th>Duration</th><th>Outcome</th><th>Tokens (in/out)</th><th>Cost (₹)</th></tr>
@@ -9997,11 +10354,32 @@ function AdminCalls() {
 
 function AdminAudit() {
   const [rows, setRows] = useState(null);
-  useEffect(() => { fetch("/api/admin/audit?limit=200").then(r => r.json()).then(setRows); }, []);
-  if (!rows) return html`<div class="db-loading">Loading…</div>`;
-  if (rows.length === 0) return html`<h1>Audit log</h1><p class="db-muted">No admin actions logged yet.</p>`;
+  // Build 202: audit feed scoped by date range (no org/agent — audit
+  // entries are actor-keyed, not target-keyed at the org level here).
+  const fb = useAdminFilters(["daterange"]);
+  const lookups = useAdminLookups();
+  useEffect(() => {
+    setRows(null);
+    const qs = fb.toQuery();
+    qs.set("limit", "200");
+    fetch(`/api/admin/audit?${qs}`)
+      .then((r) => r.ok ? r.json() : [])
+      .then(setRows)
+      .catch(() => setRows([]));
+  }, [fb.signature]);
+  if (!rows) return html`
+    <h1>Audit log</h1>
+    <${AdminFilterBar} state=${fb} orgs=${lookups.orgs} agents=${lookups.agents} />
+    <div class="db-loading">Loading…</div>
+  `;
+  if (rows.length === 0) return html`
+    <h1>Audit log</h1>
+    <${AdminFilterBar} state=${fb} orgs=${lookups.orgs} agents=${lookups.agents} />
+    <p class="db-muted">No admin actions in this window.</p>
+  `;
   return html`
     <h1>Audit log <span class="db-pill-soft">${rows.length}</span></h1>
+    <${AdminFilterBar} state=${fb} orgs=${lookups.orgs} agents=${lookups.agents} />
     <table class="db-table">
       <thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Target</th><th>Diff</th><th>IP</th></tr></thead>
       <tbody>
@@ -10237,27 +10615,38 @@ function AdminAnalytics() {
 // ─────────────────────────────────────────────────────────────────────────
 function AdminLlmLedger() {
   const [data, setData] = useState(null);
-  const [days, setDays] = useState(30);
+  // Build 202: org + agent + daterange. Days come from the bar's
+  // value (preset → days; custom → 30 fallback).
+  const fb = useAdminFilters(["org", "agent", "daterange"]);
+  const lookups = useAdminLookups();
+  const days = fb.value.days || 30;
   useEffect(() => {
-    fetch(`/api/admin/analytics/llm?days=${days}`).then(r => r.json()).then(setData);
-  }, [days]);
-  if (!data) return html`<div class="db-loading">Loading…</div>`;
+    setData(null);
+    const qs = fb.toQuery();
+    qs.set("days", String(days));
+    fetch(`/api/admin/analytics/llm?${qs}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then(setData)
+      .catch(() => setData(null));
+  }, [fb.signature]);
+  if (!data) return html`
+    <h1>LLM ledger</h1>
+    <${AdminFilterBar} state=${fb} orgs=${lookups.orgs} agents=${lookups.agents} />
+    <div class="db-loading">Loading…</div>
+  `;
   const t = data.totals || {};
   const cpm = t.cost_per_minute_paise == null ? null : Number(t.cost_per_minute_paise) / 100;
   return html`
     <h1>
       LLM ledger
       <span class="db-pill-soft">${days}d</span>
-      <span class="db-admin-range-spacer"></span>
-      ${[7, 30, 90].map((d) => html`
-        <button class=${"db-admin-range-btn" + (days === d ? " is-active" : "")} onClick=${() => setDays(d)}>${d}d</button>
-      `)}
     </h1>
     <p class="db-muted db-admin-settings-blurb">
       Universal ledger of every LLM session — including Eva-builder
       conversations and TTS previews. Customer calls are the analytics
       tab; this is the full token+cost picture.
     </p>
+    <${AdminFilterBar} state=${fb} orgs=${lookups.orgs} agents=${lookups.agents} />
     <div class="db-admin-grid">
       <div class="db-admin-tile">
         <div class="db-admin-tile-label">Sessions</div>

@@ -730,7 +730,12 @@ def _parse_ts(v: Any) -> Optional[datetime]:
 # ─── pricing_versions (build 199) ────────────────────────────────────────
 
 
-async def agent_pnl_report(days: int = 30) -> list[dict[str, Any]]:
+async def agent_pnl_report(
+    days: int = 30,
+    *,
+    org_id: Optional[int] = None,
+    agent_id: Optional[int] = None,
+) -> list[dict[str, Any]]:
     """Per-agent P&L roll-up for the last N days. Each row:
       agent_id, name, slug, sector, locale, org_id, org_name,
       published, calls_n, minutes, cost_paise_llm,
@@ -754,8 +759,22 @@ async def agent_pnl_report(days: int = 30) -> list[dict[str, Any]]:
             "WHERE provider='plivo' AND rate_kind='pstn.outbound.mobile' "
             "  AND effective_to IS NULL"
         ) or 0.60
+        # Build 202: optional org / agent filter. We push the WHERE
+        # onto the `agents` table (not the stats subquery) so an org
+        # with zero traffic still shows its agents in the list with
+        # zero numbers — useful for spotting "this agent is published
+        # but nobody's calling it."
+        params: list[Any] = [days]
+        agent_where: list[str] = []
+        if org_id is not None:
+            params.append(int(org_id))
+            agent_where.append(f"a.org_id = ${len(params)}")
+        if agent_id is not None:
+            params.append(int(agent_id))
+            agent_where.append(f"a.id = ${len(params)}")
+        agent_where_sql = (" WHERE " + " AND ".join(agent_where)) if agent_where else ""
         rows = await conn.fetch(
-            """
+            f"""
             SELECT
               a.id          AS agent_id,
               a.name        AS name,
@@ -779,9 +798,10 @@ async def agent_pnl_report(days: int = 30) -> list[dict[str, Any]]:
               WHERE day >= CURRENT_DATE - ($1::int - 1)
               GROUP BY agent_id
             ) ads ON ads.agent_id = a.id
+            {agent_where_sql}
             ORDER BY COALESCE(ads.cost_paise, 0) DESC, a.id ASC
             """,
-            days,
+            *params,
         )
     out = []
     for r in rows:
@@ -1361,9 +1381,15 @@ async def write_audit(actor_id: int, action: str,
 async def list_audit(limit: int = 100, offset: int = 0,
                       actor_id: Optional[int] = None,
                       target_kind: Optional[str] = None,
-                      target_id: Optional[str] = None) -> list[dict[str, Any]]:
+                      target_id: Optional[str] = None,
+                      start: Optional[str] = None,
+                      end: Optional[str] = None) -> list[dict[str, Any]]:
     """Paginated audit feed. Filters compose with AND. Joined to users so
-    each row carries `actor_email` without a second query in the UI."""
+    each row carries `actor_email` without a second query in the UI.
+
+    Build 202: `start` / `end` are ISO timestamps applied against
+    `a.created_at` to scope the trail to a date range from the
+    AdminFilterBar."""
     where = []
     params: list[Any] = []
     if actor_id is not None:
@@ -1372,6 +1398,10 @@ async def list_audit(limit: int = 100, offset: int = 0,
         params.append(target_kind); where.append(f"a.target_kind = ${len(params)}")
     if target_id is not None:
         params.append(target_id); where.append(f"a.target_id = ${len(params)}")
+    if start:
+        params.append(start); where.append(f"a.created_at >= ${len(params)}::timestamptz")
+    if end:
+        params.append(end); where.append(f"a.created_at < ${len(params)}::timestamptz")
     sql = """
         SELECT a.id, a.actor_id, a.action, a.target_kind, a.target_id,
                a.diff, a.ip, a.user_agent, a.created_at,
@@ -1445,24 +1475,89 @@ async def admin_list_users(limit: int = 100, offset: int = 0,
     return _records_to_list(rs)
 
 
-async def admin_recent_calls(limit: int = 100) -> list[dict[str, Any]]:
-    """Global recent-calls feed with agent + org joined in."""
+async def admin_recent_calls(
+    limit: int = 100,
+    *,
+    org_id: Optional[int] = None,
+    agent_id: Optional[int] = None,
+    phone: Optional[str] = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Global recent-calls feed with agent + org joined in.
+
+    Build 202: composable filters. `phone` is substring-matched
+    case-insensitively against any phone-shaped field inside the
+    `extracted` JSONB blob (the calls table itself has no dedicated
+    `caller_phone` column — captured phone numbers live in
+    `extracted->>'phone'` / `extracted->>'caller_phone'` /
+    `extracted->>'callback_phone'`). `start`/`end` are ISO timestamps
+    applied against `c.started_at`."""
+    where: list[str] = []
+    params: list[Any] = []
+    if org_id is not None:
+        params.append(int(org_id)); where.append(f"a.org_id = ${len(params)}")
+    if agent_id is not None:
+        params.append(int(agent_id)); where.append(f"c.agent_id = ${len(params)}")
+    if phone:
+        params.append(f"%{phone.lower()}%")
+        where.append(
+            "(lower(coalesce(c.extracted->>'phone','')) LIKE ${pi} "
+            "OR lower(coalesce(c.extracted->>'caller_phone','')) LIKE ${pi} "
+            "OR lower(coalesce(c.extracted->>'callback_phone','')) LIKE ${pi})"
+            .replace("{pi}", str(len(params)))
+        )
+    if start:
+        params.append(start); where.append(f"c.started_at >= ${len(params)}::timestamptz")
+    if end:
+        params.append(end); where.append(f"c.started_at < ${len(params)}::timestamptz")
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    params.append(int(limit))
+    sql = f"""
+        SELECT c.id, c.agent_id, c.started_at, c.ended_at, c.duration_s,
+               c.outcome, c.summary, c.input_tokens, c.output_tokens,
+               c.cost_paise, c.model_id,
+               a.name AS agent_name, a.slug AS agent_slug,
+               a.org_id, o.name AS org_name
+          FROM calls c
+          JOIN agents a ON a.id = c.agent_id
+          JOIN orgs o ON o.id = a.org_id
+         {where_sql}
+         ORDER BY c.id DESC
+         LIMIT ${len(params)}
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rs = await conn.fetch(sql, *params)
+    return _records_to_list(rs)
+
+
+async def admin_orgs_lookup() -> list[dict[str, Any]]:
+    """Minimal {id, name} list of every org — feeds the admin filter
+    bar's org dropdown. Sorted by name so the dropdown reads
+    alphabetically without per-render sorting on the client."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rs = await conn.fetch(
+            "SELECT id, name FROM orgs ORDER BY lower(name) ASC"
+        )
+    return _records_to_list(rs)
+
+
+async def admin_agents_lookup() -> list[dict[str, Any]]:
+    """Minimal {id, name, slug, org_id, org_name} list of every agent —
+    feeds the admin filter bar's agent dropdown. The org join lets the
+    UI group agents by org or filter the agent list when an org is
+    already selected."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         rs = await conn.fetch(
             """
-            SELECT c.id, c.agent_id, c.started_at, c.ended_at, c.duration_s,
-                   c.outcome, c.summary, c.input_tokens, c.output_tokens,
-                   c.cost_paise, c.model_id,
-                   a.name AS agent_name, a.slug AS agent_slug,
-                   a.org_id, o.name AS org_name
-              FROM calls c
-              JOIN agents a ON a.id = c.agent_id
-              JOIN orgs o ON o.id = a.org_id
-             ORDER BY c.id DESC
-             LIMIT $1
-            """,
-            limit,
+            SELECT a.id, a.name, a.slug, a.org_id, o.name AS org_name
+              FROM agents a
+              LEFT JOIN orgs o ON o.id = a.org_id
+             ORDER BY lower(a.name) ASC
+            """
         )
     return _records_to_list(rs)
 
@@ -1601,12 +1696,30 @@ async def llm_analytics_for_org(org_id: int, days: int = 30) -> dict[str, Any]:
     }
 
 
-async def llm_analytics_platform(days: int = 30) -> dict[str, Any]:
-    """Cross-org LLM ledger summary for the super-admin grid."""
+async def llm_analytics_platform(
+    days: int = 30,
+    *,
+    org_id: Optional[int] = None,
+    agent_id: Optional[int] = None,
+) -> dict[str, Any]:
+    """Cross-org LLM ledger summary for the super-admin grid.
+
+    Build 202: optional `org_id` / `agent_id` filters so the admin
+    filter bar can narrow the ledger to one org's spend or one
+    agent's spend without paging through every row in the UI."""
+    where = ["started_at >= now() - ($1 || ' days')::interval"]
+    params: list[Any] = [str(int(days))]
+    if org_id is not None:
+        params.append(int(org_id))
+        where.append(f"org_id = ${len(params)}")
+    if agent_id is not None:
+        params.append(int(agent_id))
+        where.append(f"agent_id = ${len(params)}")
+    where_sql = " AND ".join(where)
     pool = await get_pool()
     async with pool.acquire() as conn:
         by_kind = await conn.fetch(
-            """
+            f"""
             SELECT kind,
                    COUNT(*)                                     AS sessions,
                    COALESCE(SUM(duration_s)/60.0, 0)            AS minutes,
@@ -1618,14 +1731,14 @@ async def llm_analytics_platform(days: int = 30) -> dict[str, Any]:
                              / SUM(duration_s)
                         ELSE NULL END                           AS cost_per_minute_paise
               FROM llm_calls
-             WHERE started_at >= now() - ($1 || ' days')::interval
+             WHERE {where_sql}
              GROUP BY kind
              ORDER BY cost_paise DESC
             """,
-            str(int(days)),
+            *params,
         )
         totals = await conn.fetchrow(
-            """
+            f"""
             SELECT COUNT(*) AS sessions,
                    COALESCE(SUM(duration_s)/60.0, 0)  AS minutes,
                    COALESCE(SUM(input_tokens), 0)     AS input_tokens,
@@ -1636,9 +1749,9 @@ async def llm_analytics_platform(days: int = 30) -> dict[str, Any]:
                              / SUM(duration_s)
                         ELSE NULL END                 AS cost_per_minute_paise
               FROM llm_calls
-             WHERE started_at >= now() - ($1 || ' days')::interval
+             WHERE {where_sql}
             """,
-            str(int(days)),
+            *params,
         )
     return {
         "range_days": int(days),

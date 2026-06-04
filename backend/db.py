@@ -124,6 +124,8 @@ admin_list_orgs           = db_pg.admin_list_orgs
 admin_list_users          = db_pg.admin_list_users
 admin_recent_calls        = db_pg.admin_recent_calls
 admin_platform_summary    = db_pg.admin_platform_summary
+admin_orgs_lookup         = db_pg.admin_orgs_lookup
+admin_agents_lookup       = db_pg.admin_agents_lookup
 
 
 # ─── platform settings (Phase 4) ─────────────────────────────────────────
