@@ -97,7 +97,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 207
+APP_BUILD = 208
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1243,28 +1243,63 @@ async def agent_call_detail(agent_id: int, call_id: int, request: Request) -> di
             str(row["recording_purged_at"]) if row.get("recording_purged_at") else None
         ),
         "recording_size_bytes": row.get("recording_size_bytes"),
-        # URLs the dashboard can hit to stream the audio. Both 404 if the
-        # file isn't on disk; the UI hides the buttons in that case.
+        # Single canonical playback URL — server merges caller (left)
+        # and agent (right) into a stereo WAV lazily on first hit and
+        # caches it on disk. The two per-channel URLs stay around
+        # for advanced QA tooling that wants the raw streams.
+        "recording_url":        f"/api/agents/{row.get('agent_id')}/calls/{row.get('id')}/recording.wav" if rec_avail else None,
         "recording_caller_url": f"/api/agents/{row.get('agent_id')}/calls/{row.get('id')}/recording/caller.wav" if rec_avail else None,
         "recording_agent_url":  f"/api/agents/{row.get('agent_id')}/calls/{row.get('id')}/recording/agent.wav"  if rec_avail else None,
     }
+
+
+@app.get("/api/agents/{agent_id}/calls/{call_id}/recording.wav")
+async def agent_call_recording_mixed(
+    agent_id: int, call_id: int, request: Request,
+):
+    """Serve the stereo mixdown of a call — caller on the LEFT
+    channel, agent on the RIGHT. The browser gets one <audio> element
+    with a single seek bar that scrubs both voices in lock-step.
+
+    The mixdown is generated lazily on first request and cached as
+    `mixed.wav` in the same directory as the two source channels;
+    every subsequent play (and every range request the audio
+    element makes while seeking) hits the cached file directly.
+    The daily purge job deletes the whole directory when the call's
+    retention window expires, which catches the mixdown too.
+    """
+    await _require_agent_owned(agent_id, await current_user(request))
+    row = await db.get_call_detail(agent_id, call_id)
+    if not row or not row.get("recording_path") or row.get("recording_purged_at"):
+        raise HTTPException(status_code=404, detail="recording not available")
+    from . import recordings as _rec
+    rec_dir = _rec.RECORDING_ROOT / str(row["recording_path"])
+    mixed = _rec.get_or_build_mixed(rec_dir)
+    if mixed is None or not mixed.exists():
+        raise HTTPException(status_code=404, detail="recording mix unavailable")
+    from fastapi.responses import FileResponse
+    return FileResponse(
+        path=str(mixed),
+        media_type="audio/wav",
+        filename=f"call-{call_id}.wav",
+    )
 
 
 @app.get("/api/agents/{agent_id}/calls/{call_id}/recording/{stream:path}")
 async def agent_call_recording(
     agent_id: int, call_id: int, stream: str, request: Request,
 ):
-    """Stream one of the two channels of a call recording.
+    """Stream one of the raw channels of a call recording.
 
-    `stream` is `caller.wav` or `agent.wav` — anything else 404s, which
-    closes the door on path traversal via the URL. The auth gate on
-    the call detail endpoint applies here too: the agent must be
-    owned by the requesting user's org.
+    `stream` is `caller.wav` or `agent.wav` — anything else 404s,
+    which closes the door on path traversal via the URL. The auth
+    gate on the call detail endpoint applies here too: the agent
+    must be owned by the requesting user's org.
 
-    The file is served straight off disk via FileResponse — no
-    streaming generator, no S3 signed-URL dance. When the recordings
-    volume gets big enough to need a CDN, this endpoint flips to
-    returning a redirect; the URL the dashboard uses stays the same.
+    Kept around alongside the stereo mixdown endpoint for advanced
+    QA — diarised transcript alignment, per-channel sentiment, etc.
+    The dashboard's normal "play recording" affordance uses the
+    merged stereo URL.
     """
     if stream not in {"caller.wav", "agent.wav"}:
         raise HTTPException(status_code=404, detail="unknown stream")

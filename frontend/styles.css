@@ -11616,12 +11616,12 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
 .call-detail-rec-btn:disabled { cursor: not-allowed; opacity: 0.55; }
 .call-detail-rec-btn > span:first-child { font-size: 11px; }
 .call-detail-audio { width: 100%; max-width: 320px; }
-/* Build 206 — two-channel recording rows in Call Details. Caller + agent
-   play as separate <audio> tags so the operator can scrub one channel
-   without the other (no cross-talk in QA review). The retention meta
-   line sits right below at 11px secondary tone. */
-.call-detail-rec-row { display: flex; flex-direction: column; gap: 6px; }
-.call-detail-rec-row .call-detail-audio { max-width: 280px; height: 32px; }
+/* Build 208 — single stereo playback. Caller mixed onto the LEFT
+   channel, agent on the RIGHT — the operator gets one <audio> tag
+   with a single seek bar instead of the two-row layout from build 206.
+   Wide audio variant is used here so the seek bar has enough room
+   to scrub a 60-300s call comfortably. */
+.call-detail-audio-wide { max-width: 100%; width: 100%; height: 36px; }
 .call-detail-rec-meta {
   margin-top: 6px;
   font-size: 11px;

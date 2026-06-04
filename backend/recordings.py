@@ -307,3 +307,117 @@ async def run_daily_recording_purge() -> None:
     """Scheduler entry point — matches the (no-args) shape `register()`
     in backend/scheduler.py expects."""
     await purge_expired()
+
+
+# ─── Stereo mixdown (build 208) ──────────────────────────────────────────
+
+
+def mix_to_stereo(rec_dir: Path) -> Optional[Path]:
+    """Merge `caller.wav` (16 kHz mono) + `agent.wav` (24 kHz mono) in
+    `rec_dir` into a single stereo WAV at 24 kHz — caller on the
+    LEFT channel, agent on the RIGHT.
+
+    Output: `<rec_dir>/mixed.wav`. The file is generated lazily on
+    first request, cached on disk, and re-used until the daily purge
+    deletes the directory.
+
+    Pipeline:
+      1. Read both source WAVs.
+      2. Upsample the caller stream 16 k → 24 k using stdlib `audioop.ratecv`
+         (linear interpolation, no third-party dep).
+      3. Pad the shorter side with silence so both channels end together.
+      4. Interleave int16 samples into stereo (L, R, L, R, ...).
+      5. Write a stereo 24-kHz WAV via stdlib `wave`.
+
+    Why caller-on-left / agent-on-right:
+      Phone-QA convention. Reviewers learn the layout once and never
+      have to second-guess which side is whose.
+
+    Returns the output path or None if either source file is missing
+    or unreadable. Best-effort throughout — a mixdown failure
+    surfaces as `None` and the caller can fall back to a 404.
+    """
+    import audioop  # stdlib; deprecated in 3.13 but supported through then
+    import struct
+
+    caller_path = rec_dir / "caller.wav"
+    agent_path  = rec_dir / "agent.wav"
+    out_path    = rec_dir / "mixed.wav"
+    try:
+        if not caller_path.exists() or not agent_path.exists():
+            return None
+        # Read raw PCM frames + rate from each source file.
+        with wave.open(str(caller_path), "rb") as wc:
+            caller_rate = wc.getframerate()
+            caller_pcm = wc.readframes(wc.getnframes())
+        with wave.open(str(agent_path), "rb") as wa:
+            agent_rate = wa.getframerate()
+            agent_pcm = wa.readframes(wa.getnframes())
+        # Target rate: agent's native (24 kHz) — keeps the model's TTS
+        # at full fidelity; resampling the caller up is cheaper than
+        # downsampling the agent.
+        target_rate = max(caller_rate, agent_rate)
+        # Upsample whichever stream isn't at target_rate. audioop.ratecv
+        # returns (converted_fragment, state) — we don't need the state
+        # since we feed the WHOLE buffer in one call.
+        if caller_rate != target_rate:
+            caller_pcm, _ = audioop.ratecv(
+                caller_pcm, 2, 1, caller_rate, target_rate, None,
+            )
+        if agent_rate != target_rate:
+            agent_pcm, _ = audioop.ratecv(
+                agent_pcm, 2, 1, agent_rate, target_rate, None,
+            )
+        # Pad the shorter stream with silence so both end at the same
+        # frame. We pad with zero bytes — int16 zero = silence — which
+        # is exact (no need to worry about endianness for a zero).
+        if len(caller_pcm) < len(agent_pcm):
+            caller_pcm += b"\x00" * (len(agent_pcm) - len(caller_pcm))
+        elif len(agent_pcm) < len(caller_pcm):
+            agent_pcm += b"\x00" * (len(caller_pcm) - len(agent_pcm))
+        # Interleave: L R L R ... Each side is a contiguous int16
+        # buffer; stdlib `audioop.tomono` has a complementary `tostereo`
+        # but that mixes two streams together at gains — what we want
+        # is true left+right separation, so we hand-interleave.
+        n_frames = len(caller_pcm) // 2  # int16 → 2 bytes/sample
+        left  = struct.unpack(f"<{n_frames}h", caller_pcm)
+        right = struct.unpack(f"<{n_frames}h", agent_pcm)
+        # Pack interleaved. List-comprehension over a zip is the
+        # readable shape — at ~25 frames/ms × ~60-300s typical calls
+        # that's a few hundred thousand iterations, comfortably <100 ms
+        # on the FastAPI worker.
+        interleaved = struct.pack(
+            f"<{2 * n_frames}h",
+            *(s for pair in zip(left, right) for s in pair),
+        )
+        # Write atomically — temp file in the same dir, then rename.
+        # Same-filesystem rename is atomic on POSIX; a half-written
+        # mixed.wav can never be served.
+        tmp_path = rec_dir / "mixed.wav.tmp"
+        with wave.open(str(tmp_path), "wb") as out:
+            out.setnchannels(2)
+            out.setsampwidth(2)
+            out.setframerate(target_rate)
+            out.writeframesraw(interleaved)
+        tmp_path.rename(out_path)
+        return out_path
+    except Exception as e:  # noqa: BLE001
+        log.warning("recordings.mix_to_stereo failed dir=%s err=%s", rec_dir, e)
+        try:
+            (rec_dir / "mixed.wav.tmp").unlink(missing_ok=True)
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+
+
+def get_or_build_mixed(rec_dir: Path) -> Optional[Path]:
+    """Lazy-cache wrapper around `mix_to_stereo`. Returns the cached
+    `mixed.wav` if it already exists; otherwise generates it on the
+    fly. Used by the streaming endpoint — first hit pays the mix
+    cost, every subsequent hit (the audio element's range-request
+    seeks) gets a straight FileResponse.
+    """
+    out_path = rec_dir / "mixed.wav"
+    if out_path.exists() and out_path.stat().st_size > 44:
+        return out_path
+    return mix_to_stereo(rec_dir)

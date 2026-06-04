@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 207;
+const SXAI_BUILD = 208;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -5082,10 +5082,10 @@ function CallDetailModal({ loading, data, agent, onClose }) {
                   <div class="call-detail-meta-label">▶️ Recording</div>
                   ${data.recording_available
                     ? html`
-                      <div class="call-detail-rec-row">
-                        <audio controls src=${data.recording_caller_url} class="call-detail-audio" title="Caller channel"></audio>
-                        <audio controls src=${data.recording_agent_url}  class="call-detail-audio" title="Agent channel"></audio>
-                      </div>
+                      <audio controls preload="metadata"
+                             src=${data.recording_url}
+                             class="call-detail-audio call-detail-audio-wide"
+                             title="Caller on left, agent on right"></audio>
                     `
                     : html`
                       <button class="db-btn-primary call-detail-rec-btn" type="button" disabled
