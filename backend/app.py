@@ -97,7 +97,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 210
+APP_BUILD = 211
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1274,7 +1274,11 @@ async def agent_call_recording_mixed(
         raise HTTPException(status_code=404, detail="recording not available")
     from . import recordings as _rec
     rec_dir = _rec.RECORDING_ROOT / str(row["recording_path"])
-    mixed = _rec.get_or_build_mixed(rec_dir)
+    # Build 211 — async-safe path: offloads the sync mix to a thread
+    # executor + dedupes concurrent first-build requests with a
+    # per-call lock. Stops the modal-reopen race that occasionally
+    # produced a 503 on /recording.wav.
+    mixed = await _rec.async_get_or_build_mixed(rec_dir)
     if mixed is None or not mixed.exists():
         raise HTTPException(status_code=404, detail="recording mix unavailable")
     from fastapi.responses import FileResponse

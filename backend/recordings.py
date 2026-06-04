@@ -391,9 +391,17 @@ def mix_to_stereo(rec_dir: Path) -> Optional[Path]:
             *(s for pair in zip(left, right) for s in pair),
         )
         # Write atomically — temp file in the same dir, then rename.
-        # Same-filesystem rename is atomic on POSIX; a half-written
-        # mixed.wav can never be served.
-        tmp_path = rec_dir / "mixed.wav.tmp"
+        # Build 211: use a unique tmp filename per attempt (PID + ns
+        # clock) so two concurrent builders for the same call can't
+        # corrupt each other's output. Same-filesystem rename is
+        # atomic on POSIX — last-writer-wins on the rename, both
+        # outputs are byte-identical, no half-written file is ever
+        # served. The async lock in get_or_build_mixed normally
+        # prevents the second builder from running, but this is
+        # belt-and-braces for any path that calls mix_to_stereo
+        # directly (CLI tools, future workers).
+        import os, time as _time
+        tmp_path = rec_dir / f"mixed.wav.tmp.{os.getpid()}.{_time.time_ns()}"
         with wave.open(str(tmp_path), "wb") as out:
             out.setnchannels(2)
             out.setsampwidth(2)
@@ -403,8 +411,10 @@ def mix_to_stereo(rec_dir: Path) -> Optional[Path]:
         return out_path
     except Exception as e:  # noqa: BLE001
         log.warning("recordings.mix_to_stereo failed dir=%s err=%s", rec_dir, e)
+        # Sweep any stale per-attempt tmps so the next try starts clean.
         try:
-            (rec_dir / "mixed.wav.tmp").unlink(missing_ok=True)
+            for stale in rec_dir.glob("mixed.wav.tmp*"):
+                stale.unlink(missing_ok=True)
         except Exception:  # noqa: BLE001
             pass
         return None
@@ -421,3 +431,41 @@ def get_or_build_mixed(rec_dir: Path) -> Optional[Path]:
     if out_path.exists() and out_path.stat().st_size > 44:
         return out_path
     return mix_to_stereo(rec_dir)
+
+
+# Per-directory async locks so two concurrent first-play requests for the
+# same call don't both try to build the mixdown — one builds, the other
+# waits. Dict is process-local; fine for one-uvicorn-worker. Trimmed
+# implicitly because keys are Path objects keyed off recording paths,
+# which themselves are eventually purged by the daily job.
+import asyncio as _asyncio
+_MIX_LOCKS: dict = {}
+
+
+async def async_get_or_build_mixed(rec_dir: Path) -> Optional[Path]:
+    """Async-safe entry point for the streaming endpoint (build 211).
+
+    Two problems with calling `get_or_build_mixed` directly from a
+    FastAPI handler:
+      1. `mix_to_stereo` does ~100ms of synchronous file I/O + struct
+         pack/unpack — that blocks the event loop, which during modal
+         re-open spikes can cascade into 503s on adjacent requests.
+      2. Two concurrent first-build requests for the same call both
+         try to write to `mixed.wav.tmp` and race on the rename, which
+         could corrupt the cached output.
+
+    Fix: serialise per-call-dir with an asyncio.Lock, and offload the
+    sync work to the default thread executor so the event loop stays
+    snappy under modal-open bursts.
+    """
+    out_path = rec_dir / "mixed.wav"
+    # Fast path — cached, just return without acquiring the lock.
+    if out_path.exists() and out_path.stat().st_size > 44:
+        return out_path
+    lock = _MIX_LOCKS.setdefault(str(rec_dir), _asyncio.Lock())
+    async with lock:
+        # Re-check after acquiring the lock — first waiter built the file.
+        if out_path.exists() and out_path.stat().st_size > 44:
+            return out_path
+        loop = _asyncio.get_event_loop()
+        return await loop.run_in_executor(None, mix_to_stereo, rec_dir)

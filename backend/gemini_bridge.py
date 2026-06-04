@@ -1223,22 +1223,41 @@ def _agent_system_prompt(agent: dict[str, Any]) -> str:
     # the agent might still say it" gap.
     recording_disclosure_block = ""
     if agent.get("recording_disclosed", True) and agent.get("recording_enabled", True):
+        # Build 211 — tightened. The previous wording ("RIGHT after
+        # your greeting on the FIRST exchange") let the agent float
+        # the disclosure to turn 3 (greeting → self-intro → disclosure)
+        # by which point many test callers had already disconnected.
+        # The fix: bake it INTO the first utterance as the closing
+        # clause of the greeting — one breath, one turn.
         recording_disclosure_block = (
             "\n━━━━━━━━━━━━━ PRIVACY DISCLOSURE (REQUIRED) ━━━━━━━━━━━━━\n"
             "This call is being recorded for quality and training purposes,\n"
-            "with a 180-day retention window. RIGHT after your greeting on\n"
-            "the FIRST exchange of the call (and only the first), state this\n"
-            "in ONE natural sentence — not stiff legalese. Examples that\n"
-            "work (pick one, vary tone to match the locale):\n"
-            "  • \"Just so you know, this call is recorded for quality.\"\n"
-            "  • \"Quick note — calls here are recorded for training, alright?\"\n"
-            "  • en-IN: \"Bata du, yeh call quality ke liye record ho rahi hai.\"\n"
-            "Then carry on with the caller's reason for calling. Do NOT\n"
-            "ask for consent — this is notice, not opt-in. Do NOT repeat\n"
-            "the disclosure on later turns. If the caller asks about\n"
-            "recording / retention / their data, answer plainly: yes\n"
-            "we record for quality + training, kept 180 days, then\n"
-            "deleted. For anything past that — offer to put them through.\n"
+            "with a 180-day retention window. You MUST mention this in\n"
+            "the SAME FIRST UTTERANCE as your greeting — not on a later\n"
+            "turn, not after a pause. It rides at the END of your greeting\n"
+            "as one short natural clause. Goal: caller hears the disclosure\n"
+            "inside their first 2 seconds, even if they hang up on turn 2.\n"
+            "\n"
+            "Examples — pick one whose tone fits the locale, paraphrase\n"
+            "freely. Each is ONE breath, greeting + disclosure together:\n"
+            "  • en-US: \"Hi, this is Maya at Acme Dental — just so you\n"
+            "    know, calls here are recorded for quality. How can I\n"
+            "    help today?\"\n"
+            "  • en-IN: \"Namaste, Rohan here from Gajraj Hyundai —\n"
+            "    bata du, yeh call quality ke liye record ho rahi hai.\n"
+            "    Aapki kaise help kar sakta hoon?\"\n"
+            "  • en-UK: \"Hello, this is Priya at Bright Smiles — quick\n"
+            "    note, the call's being recorded for training. How can\n"
+            "    I help?\"\n"
+            "\n"
+            "Rules:\n"
+            "  • DO NOT split greeting and disclosure across two turns.\n"
+            "  • DO NOT repeat the disclosure on any later turn.\n"
+            "  • DO NOT ask for consent — this is notice, not opt-in.\n"
+            "  • If the caller asks about recording / retention / their\n"
+            "    data later, answer plainly: yes we record for quality\n"
+            "    + training, kept 180 days, then deleted. Beyond that,\n"
+            "    offer to put them through.\n"
         )
 
     a_star = f"""━━━━━━━━━━━━━ A-STAR FRONT-OFFICE STANDARDS ━━━━━━━━━━━━━
