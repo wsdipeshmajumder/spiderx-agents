@@ -393,6 +393,38 @@ async def _fire_post_call_notifications(*, agent: dict[str, Any],
         )
     except Exception as e:  # noqa: BLE001
         log.warning("post_call.devteam_email failed: %s", e)
+
+    # Build 198: emit call lifecycle event for the Observability feed.
+    # Severity tracks the outcome kind so the feed colour-codes wins vs
+    # failures naturally — booking_made/resolved is info, voicemail/
+    # abandoned is warning. Operators see lifecycle on the same stream
+    # as system events.
+    try:
+        from . import events as _ev
+        from . import call_outcomes as _co
+        outcome_id = (record.get("outcome") or "").lower()
+        kind_lookup = {c["id"]: c["kind"] for c in _co.catalogue_for(agent) if isinstance(c, dict)}
+        outcome_kind = kind_lookup.get(outcome_id, "info")
+        event_kind = "call.abandoned" if outcome_id == "abandoned" else "call.completed"
+        event_sev = "warning" if outcome_kind == "failure" else "info"
+        await _ev.emit(
+            event_kind, source="system", severity=event_sev,
+            org_id=agent.get("org_id"), agent_id=agent.get("id"),
+            title=(
+                f"{agent_name} — {outcome_id.replace('_', ' ') or 'call ended'} "
+                f"({(record.get('duration_s') or 0):.0f}s)"
+            ),
+            payload={
+                "call_id": call_id,
+                "outcome": outcome_id,
+                "outcome_kind": outcome_kind,
+                "sentiment": record.get("sentiment"),
+                "lead_quality": record.get("lead_quality"),
+                "duration_s": record.get("duration_s"),
+            },
+        )
+    except Exception as _e:  # noqa: BLE001
+        log.debug("events.emit call.* failed: %s", _e)
     if sms_enabled:
         # SMS recipient: prefer `notification_phone` (dedicated post-call
         # SMS line, often a personal/WhatsApp number) over the generic

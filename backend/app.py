@@ -51,10 +51,30 @@ async def _startup() -> None:
         # the probabilistic flow gracefully. But shout loud in the log.
         log.exception("build_templates: load_all crashed — falling back to probabilistic flow only: %s", e)
 
+    # Build 198: scheduler — single in-process cron loop. Registered jobs
+    # fire async on schedule; failures emit system.scheduler.run.missed
+    # events but never crash the loop.
+    try:
+        from . import scheduler, price_monitor
+        # 05:00 IST daily — wholesale price-rate watchdog (Gemini + Twilio + Plivo)
+        scheduler.register(
+            "daily_price_check", "0 5 * * *",
+            price_monitor.run_daily_price_check, tz="Asia/Kolkata",
+        )
+        await scheduler.start()
+        log.info("scheduler: started with %d job(s)", len(scheduler.list_jobs()))
+    except Exception as e:  # noqa: BLE001
+        log.exception("scheduler.boot_failed: %s", e)
+
 
 @app.on_event("shutdown")
 async def _shutdown() -> None:
     """Drain the asyncpg pool cleanly so connections aren't left dangling."""
+    try:
+        from . import scheduler
+        await scheduler.stop()
+    except Exception:  # noqa: BLE001
+        pass
     await db.shutdown()
 
 # Canonical SPA bundle version. Bump this on EVERY frontend change that the
@@ -62,7 +82,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 197
+APP_BUILD = 198
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -745,6 +765,23 @@ async def build_wizard(request: Request) -> dict:
             log.warning("seed_helper_memory(dynamic) failed: %s", e)
         log.info("build_wizard(dynamic): created agent id=%s name=%s knowledge=%s",
                  saved.get("id"), saved.get("name"), bool(knowledge_yaml))
+        # Build 198: lifecycle event for the Observability feed.
+        try:
+            from . import events as _ev
+            await _ev.emit(
+                "agent.created", source="user",
+                user_id=user["id"], org_id=saved.get("org_id"), agent_id=saved.get("id"),
+                title=f"Agent created — {saved.get('name')} ({saved.get('sector') or 'generic'})",
+                payload={
+                    "name": saved.get("name"),
+                    "sector": saved.get("sector"),
+                    "locale": saved.get("locale"),
+                    "build_path": "wizard.dynamic",
+                    "knowledge_imported": bool(knowledge_yaml),
+                },
+            )
+        except Exception as _e:  # noqa: BLE001
+            log.debug("events.emit agent.created (dynamic) failed: %s", _e)
         return {"ok": True, "agent": saved}
 
     # ── Template mode ──
@@ -802,6 +839,23 @@ async def build_wizard(request: Request) -> dict:
         log.warning("seed_helper_memory(template) failed: %s", e)
     log.info("build_wizard: created agent id=%s name=%s (template=%s) knowledge=%s",
              saved.get("id"), saved.get("name"), tpl.get("id"), bool(knowledge_yaml))
+    try:
+        from . import events as _ev
+        await _ev.emit(
+            "agent.created", source="user",
+            user_id=user["id"], org_id=saved.get("org_id"), agent_id=saved.get("id"),
+            title=f"Agent created — {saved.get('name')} ({saved.get('sector') or 'generic'})",
+            payload={
+                "name": saved.get("name"),
+                "sector": saved.get("sector"),
+                "locale": saved.get("locale"),
+                "build_path": "wizard.template",
+                "template_id": tpl.get("id"),
+                "knowledge_imported": bool(knowledge_yaml),
+            },
+        )
+    except Exception as _e:  # noqa: BLE001
+        log.debug("events.emit agent.created (template) failed: %s", _e)
     return {"ok": True, "agent": saved}
 
 
@@ -1066,9 +1120,21 @@ async def get_agent_by_slug(slug: str, request: Request) -> dict:
 async def delete_agent(agent_id: int, request: Request) -> dict:
     """Hard-delete the agent. Admin+ on the org only — members can build
     but not delete (the latter is destructive enough to gate)."""
-    await _require_agent_admin(agent_id, await current_user(request))
+    user = await current_user(request)
+    agent = await _require_agent_admin(agent_id, user)
     if not await db.delete_agent(agent_id):
         raise HTTPException(status_code=404, detail="agent not found")
+    try:
+        from . import events as _ev
+        await _ev.emit(
+            "agent.deleted", source="user", severity="warning",
+            user_id=user.get("id"), org_id=agent.get("org_id"), agent_id=agent_id,
+            title=f"Agent deleted — {agent.get('name')}",
+            payload={"name": agent.get("name"), "sector": agent.get("sector"),
+                     "published_was": bool(agent.get("published"))},
+        )
+    except Exception as _e:  # noqa: BLE001
+        log.debug("events.emit agent.deleted failed: %s", _e)
     return {"ok": True}
 
 
@@ -1171,9 +1237,49 @@ async def patch_agent(agent_id: int, request: Request) -> dict:
                     "current_plan": plan_slug or "free",
                 },
             )
+    was_published = bool(a.get("published"))
     updated = await db.update_agent(agent_id, patch)
     if not updated:
         raise HTTPException(status_code=404, detail="agent not found")
+    # Build 198: emit lifecycle events. We diff old vs new on published
+    # (because that's the most operationally important state transition)
+    # and a few other high-signal fields. purpose, knowledge, info_groups
+    # are emitted from their dedicated endpoints so we don't duplicate.
+    try:
+        from . import events as _ev
+        now_published = bool(updated.get("published"))
+        if patch.get("published") is True and not was_published:
+            await _ev.emit(
+                "agent.published", source="user",
+                user_id=user["id"], org_id=updated.get("org_id"), agent_id=agent_id,
+                title=f"Agent published — {updated.get('name')}",
+                payload={"name": updated.get("name"), "sector": updated.get("sector"),
+                         "locale": updated.get("locale")},
+            )
+        elif patch.get("published") is False and was_published:
+            await _ev.emit(
+                "agent.unpublished", source="user", severity="warning",
+                user_id=user["id"], org_id=updated.get("org_id"), agent_id=agent_id,
+                title=f"Agent unpublished — {updated.get('name')}",
+                payload={"name": updated.get("name")},
+            )
+        elif "voice" in patch and patch.get("voice") and patch.get("voice") != a.get("voice"):
+            await _ev.emit(
+                "agent.voice.changed", source="user",
+                user_id=user["id"], org_id=updated.get("org_id"), agent_id=agent_id,
+                title=f"Voice changed — {updated.get('name')} → {patch.get('voice')}",
+                payload={"from": a.get("voice"), "to": patch.get("voice")},
+            )
+        elif "purpose" in patch:
+            await _ev.emit(
+                "agent.purpose.changed", source="user",
+                user_id=user["id"], org_id=updated.get("org_id"), agent_id=agent_id,
+                title=f"Purpose updated — {updated.get('name')}",
+                payload={"summary": (patch.get("purpose") or {}).get("summary"),
+                         "actions": (patch.get("purpose") or {}).get("actions")},
+            )
+    except Exception as _e:  # noqa: BLE001
+        log.debug("events.emit on patch_agent failed: %s", _e)
     return updated
 
 

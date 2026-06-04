@@ -10454,6 +10454,202 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
 :root[data-theme="dark"] .oc-advanced-link:hover { background: rgba(255,255,255,0.05); color: #e8e9ef; }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+ * ADMIN — sidebar variant (build 198)
+ *
+ * Replaces the build-3 horizontal tab bar with a grouped left sidebar.
+ * The original .db-admin-tabs CSS still exists (unused now) so we can
+ * roll back without a deploy. Targeted classes:
+ *   .db-admin-shell-vsplit   — wrapper that switches to row layout below topbar
+ *   .db-admin-body           — flex row container (sidebar + main)
+ *   .db-admin-side           — the sidebar itself, ~220px wide
+ *   .db-admin-main-vsplit    — main pane (no longer max-width centred — sidebar
+ *                              takes the left space)
+ * ═══════════════════════════════════════════════════════════════════════════ */
+.db-admin-shell-vsplit { display: flex; flex-direction: column; }
+.db-admin-body {
+  flex: 1; min-height: 0;
+  display: flex;
+}
+.db-admin-side {
+  flex: 0 0 220px;
+  background: #ffffff;
+  border-right: 1px solid #e6e7ec;
+  padding: 14px 10px;
+  overflow-y: auto;
+  display: flex; flex-direction: column;
+  gap: 2px;
+}
+.db-admin-main-vsplit {
+  flex: 1; min-width: 0;
+  max-width: 1280px;
+  padding: 32px clamp(20px, 4vw, 48px);
+}
+@media (max-width: 768px) {
+  .db-admin-body { flex-direction: column; }
+  .db-admin-side { flex: 0 0 auto; width: 100%; border-right: 0; border-bottom: 1px solid #e6e7ec; }
+}
+:root[data-theme="dark"] .db-admin-side {
+  background: rgba(255, 255, 255, 0.03);
+  border-right-color: rgba(255, 255, 255, 0.07);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * OBSERVABILITY page (build 198)
+ *
+ * Lives on /admin/observability. KPI tiles row up top → tabs (Live feed /
+ * Schedulers) → filter row → event feed list with severity-coloured rows.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+.db-obs-tiles {
+  grid-template-columns: repeat(5, 1fr);
+  margin-bottom: 18px;
+}
+@media (max-width: 980px) {
+  .db-obs-tiles { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 560px) {
+  .db-obs-tiles { grid-template-columns: 1fr 1fr; }
+}
+
+.db-obs-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #e6e7ec;
+  margin-bottom: 16px;
+}
+.db-obs-tab {
+  padding: 10px 18px;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: #6a6f7d;
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+.db-obs-tab:hover { color: #1f2230; }
+.db-obs-tab.is-active {
+  color: #6d28d9;
+  border-bottom-color: #6d28d9;
+  font-weight: 600;
+}
+
+.db-obs-filter-row {
+  display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.db-obs-filter {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: #4a4f5e;
+}
+.db-obs-filter select {
+  font: inherit; font-size: 13px;
+  padding: 5px 10px;
+  border: 1px solid #d8dbe4;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.db-obs-feed {
+  display: flex; flex-direction: column;
+  gap: 8px;
+}
+.db-obs-row {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px 16px;
+  background: #ffffff;
+  border: 1px solid #e6e7ec;
+  border-radius: 10px;
+  transition: opacity 0.2s ease;
+}
+.db-obs-row.obs-sev-warning  { border-left: 3px solid #f59e0b; }
+.db-obs-row.obs-sev-error    { border-left: 3px solid #ef4444; }
+.db-obs-row.obs-sev-critical { border-left: 3px solid #dc2626; background: #fef2f2; }
+.db-obs-row.is-resolved { opacity: 0.55; }
+
+.db-obs-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  margin-top: 4px;
+}
+.db-obs-row-body { min-width: 0; }
+.db-obs-row-head {
+  display: flex; gap: 8px; align-items: center;
+  font-size: 11.5px; color: #6a6f7d;
+  margin-bottom: 4px;
+}
+.db-obs-kind {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  background: #f3f4f9;
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: #4a4f5e;
+}
+.db-obs-sev-tag {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  font-size: 10.5px;
+}
+.obs-sev-info     .db-obs-sev-tag { color: #6a6f7d; }
+.obs-sev-warning  .db-obs-sev-tag { color: #b45309; }
+.obs-sev-error    .db-obs-sev-tag { color: #b91c1c; }
+.obs-sev-critical .db-obs-sev-tag { color: #991b1b; }
+.db-obs-ago { color: #9095a3; margin-left: auto; }
+.db-obs-title {
+  font-size: 14px; color: #1f2230;
+  font-weight: 500; line-height: 1.4;
+}
+.db-obs-message {
+  margin-top: 4px;
+  font-size: 12.5px; color: #6a6f7d;
+  line-height: 1.5;
+}
+.db-obs-payload {
+  margin-top: 8px;
+  font-size: 11.5px;
+}
+.db-obs-payload summary {
+  cursor: pointer; color: #6d28d9;
+  user-select: none;
+}
+.db-obs-payload pre {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: #f7f8fc;
+  border: 1px solid #e6e7ec;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: #4a4f5e;
+}
+.db-obs-resolve { white-space: nowrap; }
+.db-obs-resolved {
+  align-self: center;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #9095a3;
+}
+
+.db-obs-schedulers { margin-top: 8px; }
+
+:root[data-theme="dark"] .db-obs-row {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.07);
+}
+:root[data-theme="dark"] .db-obs-row.obs-sev-critical { background: rgba(220, 38, 38, 0.10); }
+:root[data-theme="dark"] .db-obs-kind { background: rgba(255, 255, 255, 0.06); color: #c8ccd9; }
+:root[data-theme="dark"] .db-obs-title { color: #e8e9ef; }
+:root[data-theme="dark"] .db-obs-message { color: #a4a8b8; }
+:root[data-theme="dark"] .db-obs-payload pre { background: rgba(255, 255, 255, 0.03); border-color: rgba(255, 255, 255, 0.07); color: #a4a8b8; }
+:root[data-theme="dark"] .db-obs-tab.is-active { color: #c4b5fd; border-bottom-color: #a78bfa; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
  * CALL DETAILS MODAL (build 188)
  *
  * Opened from any row's "Details" button on the Call log page. Layout mirrors

@@ -55,8 +55,16 @@ def _report_recipient() -> Optional[str]:
 
 async def _send(to: str, subject: str, body: str,
                 *, html_body: Optional[str] = None) -> None:
-    """The single chokepoint. Selects a provider, never raises."""
+    """The single chokepoint. Selects a provider, never raises.
+
+    Build 198 — also emits a notify.email.sent / notify.email.failed
+    event so the Observability page tracks delivery health. Provider
+    failures stay best-effort: the event captures the failure mode
+    so ops can see Gmail rate-limiting or auth misconfig without
+    sifting through logs."""
     provider = _provider()
+    sent_ok = False
+    err_msg = None
     try:
         if provider == "gmail":
             _send_gmail(to, subject, body, html_body=html_body)
@@ -66,8 +74,30 @@ async def _send(to: str, subject: str, body: str,
             _send_resend(to, subject, body, html_body=html_body)
         else:
             log.info("email.send to=%s subject=%r\n%s", to, subject, body)
+        sent_ok = True
     except Exception as e:  # noqa: BLE001
+        err_msg = str(e)[:240]
         log.warning("email.send_failed provider=%s to=%s err=%s", provider, to, e)
+    # Lifecycle event — never raises into the caller. We import lazily
+    # to avoid a circular import between email_stub and events (events
+    # → db_pg; email_stub stays leaf).
+    try:
+        from . import events as _ev
+        if sent_ok:
+            await _ev.emit(
+                "notify.email.sent", source="system",
+                title=f"Email sent — {subject[:60]}",
+                payload={"to": to, "provider": provider, "subject": subject},
+            )
+        else:
+            await _ev.emit(
+                "notify.email.failed", source="system", severity="error",
+                title=f"Email FAILED — {subject[:60]}",
+                message=err_msg,
+                payload={"to": to, "provider": provider, "subject": subject, "error": err_msg},
+            )
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _post_json(url: str, headers: dict, payload: dict) -> dict:

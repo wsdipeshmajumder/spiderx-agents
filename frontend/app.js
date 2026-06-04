@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 197;
+const SXAI_BUILD = 198;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -9053,20 +9053,77 @@ function AdminShell({ section, currentUser, onNav }) {
     `;
   }
 
-  const tabs = [
-    { key: "summary",       label: "Platform" },
-    { key: "analytics",     label: "Analytics" },
-    { key: "llm",           label: "LLM ledger" },
-    { key: "orgs",          label: "Organisations" },
-    { key: "users",         label: "Users" },
-    { key: "calls",         label: "Calls" },
-    { key: "audit",         label: "Audit log" },
-    { key: "settings",      label: "Settings" },
-    { key: "super-admins",  label: "Super-admins" },
+  // Build 198: grouped left sidebar replaces the build-3 horizontal tab
+  // strip. Five groups — Platform, People, Calls, Observability, Settings.
+  // SessionStorage-persisted open/closed per group key, same pattern the
+  // per-agent dashboard sidebar uses. The internal `key`s map to the
+  // existing /admin/<section> routes so existing bookmarks keep working.
+  const groups = [
+    {
+      key: "platform", label: "Platform",
+      items: [
+        { key: "summary",   label: "Overview" },
+        { key: "analytics", label: "Analytics" },
+        { key: "llm",       label: "LLM ledger" },
+      ],
+    },
+    {
+      key: "people", label: "People",
+      items: [
+        { key: "orgs",          label: "Organisations" },
+        { key: "users",         label: "Users" },
+        { key: "super-admins",  label: "Super-admins" },
+      ],
+    },
+    {
+      key: "calls-group", label: "Calls",
+      items: [
+        { key: "calls", label: "All calls" },
+      ],
+    },
+    {
+      key: "observability", label: "Observability",
+      items: [
+        { key: "observability", label: "Live feed" },
+        { key: "audit",         label: "Audit log" },
+      ],
+    },
+    {
+      key: "settings-group", label: "Settings",
+      items: [
+        { key: "settings", label: "Platform settings" },
+      ],
+    },
   ];
 
+  // Which group is the active section under? Auto-open it on mount;
+  // persist any operator-driven open/closed toggles in sessionStorage
+  // keyed `sxai.admin_nav_open` so a fresh tab doesn't lose your state.
+  const NAV_KEY = "sxai.admin_nav_open";
+  const initialOpen = (() => {
+    try {
+      const stored = JSON.parse(sessionStorage.getItem(NAV_KEY) || "{}");
+      // Always open the group containing the current section
+      const activeGroup = groups.find((g) => g.items.some((i) => i.key === sec));
+      if (activeGroup) stored[activeGroup.key] = true;
+      return stored;
+    } catch { return {}; }
+  })();
+  const [openGroups, setOpenGroups] = useState(initialOpen);
+  const toggleGroup = (gk) => {
+    setOpenGroups((prev) => {
+      const next = { ...prev, [gk]: !prev[gk] };
+      try { sessionStorage.setItem(NAV_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+
+  const goSection = (sectionKey) => {
+    onNav(`/admin/${sectionKey === "summary" ? "" : sectionKey}`);
+  };
+
   return html`
-    <div class="db-admin-shell">
+    <div class="db-admin-shell db-admin-shell-vsplit">
       <header class="db-admin-topbar">
         <div class="db-admin-brand">
           <strong>SpiderX.AI</strong>
@@ -9074,28 +9131,239 @@ function AdminShell({ section, currentUser, onNav }) {
         </div>
         <button class="db-btn-ghost" onClick=${() => onNav("/agents")}>Exit admin</button>
       </header>
-      <nav class="db-admin-tabs">
-        ${tabs.map((t) => html`
-          <button
-            class=${"db-admin-tab" + (t.key === sec ? " is-active" : "")}
-            onClick=${() => onNav(`/admin/${t.key === "summary" ? "" : t.key}`)}
-          >${t.label}</button>
-        `)}
-      </nav>
-      <main class="db-admin-main">
-        ${sec === "summary" ? html`<${AdminSummary} />`
-          : sec === "analytics" ? html`<${AdminAnalytics} />`
-          : sec === "llm" ? html`<${AdminLlmLedger} />`
-          : sec === "orgs" ? html`<${AdminOrgs} />`
-          : sec === "users" ? html`<${AdminUsers} />`
-          : sec === "calls" ? html`<${AdminCalls} />`
-          : sec === "audit" ? html`<${AdminAudit} />`
-          : sec === "settings" ? html`<${AdminSettings} />`
-          : sec === "super-admins" ? html`<${AdminSuperAdmins} currentUser=${currentUser} />`
-          : html`<p>Unknown section.</p>`
-        }
-      </main>
+      <div class="db-admin-body">
+        <aside class="db-admin-side">
+          ${groups.map((g) => html`
+            <div key=${g.key} class=${"db-nav-group" + (openGroups[g.key] ? " open" : "")}>
+              <button class="db-nav-group-head" onClick=${() => toggleGroup(g.key)}>
+                <span>${g.label}</span>
+                <svg class="db-nav-group-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+              </button>
+              ${openGroups[g.key] ? html`
+                <div class="db-nav-group-items">
+                  ${g.items.map((it) => html`
+                    <button key=${it.key}
+                            class=${"db-nav-item" + (it.key === sec ? " active" : "")}
+                            onClick=${() => goSection(it.key)}>
+                      <span>${it.label}</span>
+                    </button>
+                  `)}
+                </div>
+              ` : ""}
+            </div>
+          `)}
+        </aside>
+        <main class="db-admin-main db-admin-main-vsplit">
+          ${sec === "summary" ? html`<${AdminSummary} />`
+            : sec === "analytics" ? html`<${AdminAnalytics} />`
+            : sec === "llm" ? html`<${AdminLlmLedger} />`
+            : sec === "orgs" ? html`<${AdminOrgs} />`
+            : sec === "users" ? html`<${AdminUsers} />`
+            : sec === "calls" ? html`<${AdminCalls} />`
+            : sec === "audit" ? html`<${AdminAudit} />`
+            : sec === "observability" ? html`<${AdminObservability} />`
+            : sec === "settings" ? html`<${AdminSettings} />`
+            : sec === "super-admins" ? html`<${AdminSuperAdmins} currentUser=${currentUser} />`
+            : html`<p>Unknown section.</p>`
+          }
+        </main>
+      </div>
     </div>
+  `;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// AdminObservability — /admin/observability. Build 198.
+// Live event feed + KPI tiles + filter chips + Schedulers panel.
+// Polls /api/admin/events every 15s; the cron-style schedulers panel
+// reads /api/admin/schedulers and has a "Run now" button per job.
+// ─────────────────────────────────────────────────────────────────────────
+function AdminObservability() {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [filter, setFilter] = useState({ severity: "", kind_prefix: "" });
+  const [schedulers, setSchedulers] = useState([]);
+  const [tab, setTab] = useState("feed");  // feed | schedulers
+
+  const load = () => {
+    const qs = new URLSearchParams();
+    if (filter.severity) qs.set("severity", filter.severity);
+    if (filter.kind_prefix) qs.set("kind_prefix", filter.kind_prefix);
+    qs.set("limit", "200");
+    fetch(`/api/admin/events?${qs}`)
+      .then((r) => r.ok ? r.json() : Promise.reject(new Error("status " + r.status)))
+      .then((d) => { setData(d); setErr(""); })
+      .catch((e) => setErr(String(e.message || e)));
+    fetch("/api/admin/schedulers")
+      .then((r) => r.ok ? r.json() : [])
+      .then((d) => setSchedulers(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  };
+  useEffect(() => {
+    load();
+    // Auto-refresh while the page is open. 15s is short enough to feel
+    // alive without hammering the DB on a quiet platform.
+    const t = setInterval(load, 15000);
+    return () => clearInterval(t);
+  }, [filter.severity, filter.kind_prefix]);
+
+  const resolveEvent = async (id) => {
+    try {
+      await fetch(`/api/admin/events/${id}/resolve`, { method: "POST" });
+      load();
+    } catch {}
+  };
+  const runJob = async (name) => {
+    try {
+      await fetch(`/api/admin/schedulers/${encodeURIComponent(name)}/run`, { method: "POST" });
+      setTimeout(load, 800);  // give the job a beat to write events
+    } catch {}
+  };
+
+  const fmtAgo = (iso) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    const s = Math.round((Date.now() - d.getTime()) / 1000);
+    if (s < 60) return `${s}s ago`;
+    if (s < 3600) return `${Math.round(s/60)}m ago`;
+    if (s < 86400) return `${Math.round(s/3600)}h ago`;
+    return `${Math.round(s/86400)}d ago`;
+  };
+  const sevDot = (sev) => {
+    const map = {
+      info: "#94a3b8", warning: "#f59e0b",
+      error: "#ef4444", critical: "#dc2626",
+    };
+    return map[sev] || "#94a3b8";
+  };
+
+  const counts = data?.counts || {};
+  const items = data?.items || [];
+
+  return html`
+    <h1>Observability <span class="db-pill-soft">${counts.total_24h || 0} events 24h</span></h1>
+    <p class="db-admin-sub">Every noteworthy thing the platform does writes a row here. Use the filters to scope to a kind or severity.</p>
+
+    <div class="db-admin-grid db-obs-tiles">
+      <div class="db-admin-tile">
+        <div class="db-admin-tile-label">Events 24h</div>
+        <div class="db-admin-tile-value">${counts.total_24h || 0}</div>
+      </div>
+      <div class="db-admin-tile">
+        <div class="db-admin-tile-label">Open critical</div>
+        <div class="db-admin-tile-value" style=${{ color: (counts.open_critical || 0) > 0 ? "#dc2626" : undefined }}>
+          ${counts.open_critical || 0}
+        </div>
+      </div>
+      <div class="db-admin-tile">
+        <div class="db-admin-tile-label">Rate drifts open</div>
+        <div class="db-admin-tile-value" style=${{ color: (counts.drifts_open || 0) > 0 ? "#f59e0b" : undefined }}>
+          ${counts.drifts_open || 0}
+        </div>
+      </div>
+      <div class="db-admin-tile">
+        <div class="db-admin-tile-label">Last price check</div>
+        <div class="db-admin-tile-value" style=${{ fontSize: "16px" }}>${fmtAgo(counts.last_price_check)}</div>
+      </div>
+      <div class="db-admin-tile">
+        <div class="db-admin-tile-label">Schedulers</div>
+        <div class="db-admin-tile-value" style=${{ fontSize: "16px" }}>${schedulers.length} registered</div>
+      </div>
+    </div>
+
+    <div class="db-obs-tabs">
+      <button class=${"db-obs-tab" + (tab === "feed" ? " is-active" : "")} onClick=${() => setTab("feed")}>Live feed</button>
+      <button class=${"db-obs-tab" + (tab === "schedulers" ? " is-active" : "")} onClick=${() => setTab("schedulers")}>Schedulers</button>
+    </div>
+
+    ${tab === "feed" ? html`
+      <div class="db-obs-filter-row">
+        <label class="db-obs-filter">
+          Severity:
+          <select value=${filter.severity} onChange=${(e) => setFilter((f) => ({ ...f, severity: e.target.value }))}>
+            <option value="">all</option>
+            <option value="info">info</option>
+            <option value="warning">warning</option>
+            <option value="error">error</option>
+            <option value="critical">critical</option>
+          </select>
+        </label>
+        <label class="db-obs-filter">
+          Kind:
+          <select value=${filter.kind_prefix} onChange=${(e) => setFilter((f) => ({ ...f, kind_prefix: e.target.value }))}>
+            <option value="">all</option>
+            <option value="agent">agent.*</option>
+            <option value="call">call.*</option>
+            <option value="cost">cost.*</option>
+            <option value="pricing">pricing.*</option>
+            <option value="notify">notify.*</option>
+            <option value="quality">quality.*</option>
+            <option value="system">system.*</option>
+          </select>
+        </label>
+        ${err ? html`<span class="db-form-help" style=${{ color: "#b91c1c", marginLeft: "12px" }}>Couldn't load: ${err}</span>` : ""}
+      </div>
+
+      <div class="db-obs-feed">
+        ${items.length === 0 ? html`
+          <div class="db-empty" style=${{ margin: "32px auto" }}>
+            <div class="db-empty-title">No events match.</div>
+            <div class="db-empty-sub">Try a wider filter or wait for the next price check to fire.</div>
+          </div>
+        ` : items.map((e) => html`
+          <div key=${e.id} class=${"db-obs-row obs-sev-" + e.severity + (e.resolved_at ? " is-resolved" : "")}>
+            <span class="db-obs-dot" style=${{ background: sevDot(e.severity) }}></span>
+            <div class="db-obs-row-body">
+              <div class="db-obs-row-head">
+                <span class="db-obs-kind">${e.kind}</span>
+                <span class="db-obs-sev-tag">${e.severity}</span>
+                <span class="db-obs-ago">${fmtAgo(e.created_at)}</span>
+              </div>
+              <div class="db-obs-title">${e.title}</div>
+              ${e.message ? html`<div class="db-obs-message">${e.message}</div>` : ""}
+              ${e.payload && Object.keys(e.payload).length > 0 ? html`
+                <details class="db-obs-payload">
+                  <summary>payload</summary>
+                  <pre>${JSON.stringify(e.payload, null, 2)}</pre>
+                </details>
+              ` : ""}
+            </div>
+            ${!e.resolved_at && (e.severity === "warning" || e.severity === "error" || e.severity === "critical") ? html`
+              <button class="db-btn-ghost db-btn-sm db-obs-resolve" type="button" onClick=${() => resolveEvent(e.id)}>Resolve</button>
+            ` : ""}
+            ${e.resolved_at ? html`<span class="db-obs-resolved">resolved</span>` : ""}
+          </div>
+        `)}
+      </div>
+    ` : ""}
+
+    ${tab === "schedulers" ? html`
+      <div class="db-obs-schedulers">
+        <table class="db-table">
+          <thead>
+            <tr><th>Job</th><th>Cron</th><th>Timezone</th><th>Last run</th><th></th></tr>
+          </thead>
+          <tbody>
+            ${schedulers.length === 0 ? html`
+              <tr><td colspan="5" class="db-muted" style=${{ textAlign: "center", padding: "24px" }}>No jobs registered.</td></tr>
+            ` : schedulers.map((j) => html`
+              <tr key=${j.name}>
+                <td><code>${j.name}</code></td>
+                <td><code>${j.cron}</code></td>
+                <td>${j.tz}</td>
+                <td>${j.last_run ? fmtAgo(j.last_run) : "—"}</td>
+                <td class="db-table-td-right">
+                  <button class="db-btn-ghost db-btn-sm" type="button" onClick=${() => runJob(j.name)}>Run now</button>
+                </td>
+              </tr>
+            `)}
+          </tbody>
+        </table>
+        <p class="db-form-help" style=${{ marginTop: "16px" }}>
+          Jobs run in the FastAPI process. Failed runs emit <code>system.scheduler.run.missed</code> events visible in the live feed.
+        </p>
+      </div>
+    ` : ""}
   `;
 }
 

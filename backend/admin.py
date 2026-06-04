@@ -227,6 +227,64 @@ async def admin_set_setting(key: str, request: Request) -> dict:
     return diff["row"]
 
 
+# ─── observability (build 198) ───────────────────────────────────────────
+
+@router.get("/events")
+async def admin_events(
+    request: Request,
+    severity: Optional[str] = None,
+    kind_prefix: Optional[str] = None,
+    org_id: Optional[int] = None,
+    agent_id: Optional[int] = None,
+    only_open: bool = False,
+    limit: int = 200,
+    before_id: Optional[int] = None,
+) -> dict:
+    """Filtered event feed for the Observability page. Returns
+    `{items, counts}` so the page can render the KPI tiles + the list
+    in one round-trip on initial mount."""
+    await _admin_user(request)
+    from . import events as _ev
+    items = await _ev.list_events(
+        severity=severity, kind_prefix=kind_prefix,
+        org_id=org_id, agent_id=agent_id,
+        only_open=only_open, limit=limit, before_id=before_id,
+    )
+    counts = await _ev.event_counts()
+    return {"items": items, "counts": counts}
+
+
+@router.post("/events/{event_id}/resolve")
+async def admin_event_resolve(event_id: int, request: Request) -> dict:
+    """Mark one event as resolved. Idempotent — no-op if already resolved
+    or non-existent."""
+    user = await _admin_user(request)
+    from . import events as _ev
+    ok = await _ev.resolve_event(event_id, user_id=user["id"])
+    return {"ok": ok, "event_id": event_id}
+
+
+@router.get("/schedulers")
+async def admin_schedulers(request: Request) -> list[dict]:
+    """Registered scheduler jobs with their cron + last-run timestamps.
+    Backs the Schedulers tab on the Observability page."""
+    await _admin_user(request)
+    from . import scheduler
+    return scheduler.list_jobs()
+
+
+@router.post("/schedulers/{name}/run")
+async def admin_scheduler_run_now(name: str, request: Request) -> dict:
+    """Out-of-band 'Run now' trigger — useful for verifying the price
+    monitor without waiting for 05:00 IST."""
+    await _admin_user(request)
+    from . import scheduler
+    ok = await scheduler.run_now(name)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"job {name!r} not registered")
+    return {"ok": True, "name": name}
+
+
 # ─── helpers ─────────────────────────────────────────────────────────────
 
 async def _admin_user(request: Request) -> dict:
