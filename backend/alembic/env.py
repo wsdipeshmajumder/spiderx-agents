@@ -32,6 +32,30 @@ if _pg_url:
     elif _pg_url.startswith("postgresql+asyncpg://"):
         _pg_url = "postgresql+psycopg://" + _pg_url[len("postgresql+asyncpg://"):]
     config.set_main_option("sqlalchemy.url", _pg_url)
+else:
+    # No DB URL configured. Without this guard Alembic falls back to the
+    # placeholder `driver://user:pass@localhost/dbname` from alembic.ini
+    # and crashes with the cryptic "Can't load plugin:
+    # sqlalchemy.dialects:driver" — which buries the actual problem
+    # under a stack trace operators have to decode. Raise an explicit,
+    # actionable error instead.
+    raise RuntimeError(
+        "\n\n"
+        "╔════════════════════════════════════════════════════════════════╗\n"
+        "║  DATABASE_URL / PG_URL is not set.                             ║\n"
+        "║                                                                ║\n"
+        "║  Alembic can't connect without a Postgres URL. Fix in Railway: ║\n"
+        "║                                                                ║\n"
+        "║   1. New → Database → Add PostgreSQL                           ║\n"
+        "║   2. Open the spiderx-agents service → Variables               ║\n"
+        "║   3. Add:  DATABASE_URL = ${{Postgres.DATABASE_URL}}           ║\n"
+        "║      (use the Reference button — picks up the new plugin)      ║\n"
+        "║   4. Redeploy                                                  ║\n"
+        "║                                                                ║\n"
+        "║  For local dev: export DATABASE_URL=postgresql://...           ║\n"
+        "║                  or put it in .env at the repo root            ║\n"
+        "╚════════════════════════════════════════════════════════════════╝\n"
+    )
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
