@@ -55,11 +55,16 @@ async def _startup() -> None:
     # fire async on schedule; failures emit system.scheduler.run.missed
     # events but never crash the loop.
     try:
-        from . import scheduler, price_monitor
+        from . import scheduler, price_monitor, eod_digest
         # 05:00 IST daily — wholesale price-rate watchdog (Gemini + Twilio + Plivo)
         scheduler.register(
             "daily_price_check", "0 5 * * *",
             price_monitor.run_daily_price_check, tz="Asia/Kolkata",
+        )
+        # 19:00 IST daily — per-agent EOD digest email to org owners
+        scheduler.register(
+            "daily_eod_digest", "0 19 * * *",
+            eod_digest.run_daily_eod_digest, tz="Asia/Kolkata",
         )
         await scheduler.start()
         log.info("scheduler: started with %d job(s)", len(scheduler.list_jobs()))
@@ -82,7 +87,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 198
+APP_BUILD = 199
 
 
 # ────────────────────────── auth (stub) ──────────────────────────

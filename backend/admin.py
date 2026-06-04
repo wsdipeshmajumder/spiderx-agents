@@ -285,6 +285,100 @@ async def admin_scheduler_run_now(name: str, request: Request) -> dict:
     return {"ok": True, "name": name}
 
 
+# ─── pricing (build 199) ─────────────────────────────────────────────────
+
+
+@router.get("/pricing/current")
+async def admin_pricing_current(request: Request) -> dict:
+    """Current effective rates across every provider × rate_kind. Used
+    by the Pricing tab on the Observability page to show what's in
+    force + diff against the latest pricing.observed events."""
+    await _admin_user(request)
+    rates = await db.list_current_pricing()
+    # Pull last observed rate per (provider, rate_kind) from the events
+    # table so the UI can show "observed today vs effective".
+    from . import events as _ev
+    observed = await _ev.list_events(kind_prefix="pricing.observed", limit=50)
+    drifts = await _ev.list_events(kind_prefix="pricing.drift.detected", only_open=True, limit=50)
+    return {"rates": rates, "observed": observed, "drifts": drifts}
+
+
+@router.post("/pricing/roll-forward")
+async def admin_pricing_roll_forward(request: Request) -> dict:
+    """Promote an observed rate to be the new effective rate. Body:
+      { provider, rate_kind, model_id?, unit, usd_per_unit?, inr_per_unit?,
+        note?, observed_event_id?, resolve_drift_event_id? }
+
+    Closes the currently-in-force version + writes a new version + emits
+    a `pricing.rate.rolled_forward` event + resolves the originating
+    drift event (if `resolve_drift_event_id` is set). All in one
+    audited action — the only sanctioned path to mutate rates."""
+    user = await _admin_user(request)
+    body = await _json(request)
+    provider = (body.get("provider") or "").strip()
+    rate_kind = (body.get("rate_kind") or "").strip()
+    unit = (body.get("unit") or "").strip()
+    if not (provider and rate_kind and unit):
+        raise HTTPException(status_code=400, detail="provider, rate_kind, unit required")
+    usd = body.get("usd_per_unit")
+    inr = body.get("inr_per_unit")
+    if usd is None and inr is None:
+        raise HTTPException(status_code=400, detail="provide usd_per_unit OR inr_per_unit")
+    new_id = await db.roll_forward_rate(
+        provider=provider, rate_kind=rate_kind,
+        model_id=body.get("model_id"),
+        unit=unit,
+        usd_per_unit=float(usd) if usd is not None else None,
+        inr_per_unit=float(inr) if inr is not None else None,
+        rolled_by=user["id"],
+        note=(body.get("note") or "Rolled forward via admin UI"),
+        observed_event_id=body.get("observed_event_id"),
+    )
+    if not new_id:
+        raise HTTPException(status_code=500, detail="roll-forward failed — check server log")
+    from . import events as _ev
+    await _ev.emit(
+        "pricing.rate.rolled_forward", severity="info", source="user",
+        user_id=user["id"],
+        title=f"Rate rolled forward — {provider} {rate_kind}"
+              + (f" ({body.get('model_id')})" if body.get("model_id") else ""),
+        message=body.get("note"),
+        payload={
+            "provider": provider, "rate_kind": rate_kind,
+            "model_id": body.get("model_id"), "unit": unit,
+            "usd_per_unit": usd, "inr_per_unit": inr,
+            "new_version_id": new_id,
+        },
+    )
+    # If this roll was triggered to clear an open drift, resolve it
+    resolve_id = body.get("resolve_drift_event_id")
+    if resolve_id:
+        try:
+            await _ev.resolve_event(int(resolve_id), user_id=user["id"])
+        except Exception:  # noqa: BLE001
+            pass
+    return {"ok": True, "new_version_id": new_id}
+
+
+# ─── per-agent P&L (build 199) ───────────────────────────────────────────
+
+
+@router.get("/agent-pnl")
+async def admin_agent_pnl(request: Request, days: int = 30) -> dict:
+    """Per-agent COGS roll-up for the last N days. Surfaces minutes,
+    LLM cost (from agent_daily_stats), telephony estimate (computed
+    at read-time as minutes × current Plivo per-min rate), and total
+    COGS. Sorted by cost descending so the most expensive agents
+    surface first.
+
+    Revenue / margin TODO once `plans.monthly_inr` exists — for now
+    the P&L view is COGS-only, which is already enough to spot
+    loss-makers on a flat-monthly plan."""
+    await _admin_user(request)
+    rows = await db.agent_pnl_report(days=days)
+    return {"days": days, "agents": rows}
+
+
 # ─── helpers ─────────────────────────────────────────────────────────────
 
 async def _admin_user(request: Request) -> dict:

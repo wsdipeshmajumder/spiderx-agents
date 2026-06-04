@@ -727,6 +727,156 @@ def _parse_ts(v: Any) -> Optional[datetime]:
     return None
 
 
+# ─── pricing_versions (build 199) ────────────────────────────────────────
+
+
+async def agent_pnl_report(days: int = 30) -> list[dict[str, Any]]:
+    """Per-agent P&L roll-up for the last N days. Each row:
+      agent_id, name, slug, sector, locale, org_id, org_name,
+      published, calls_n, minutes, cost_paise_llm,
+      telephony_paise_estimate (computed at read-time using the
+      current effective Plivo rate × minutes — until build 200 stamps
+      it per-call), total_cogs_paise
+
+    Build 199's first cut: revenue/margin requires plans to have
+    `monthly_inr` and per-agent attribution to a plan — neither exists
+    yet. We surface COGS clearly so finance can already see the cost
+    side, and once plans get rate fields (build 200 candidate),
+    margin slots in as a single extra SELECT."""
+    days = max(1, min(int(days), 365))
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # Plivo outbound mobile is the proxy for telephony — most calls
+        # today are inbound via the web embed (no PSTN) but the rate is
+        # also Plivo's inbound, so it's a reasonable approximation.
+        plivo_per_min_inr = await conn.fetchval(
+            "SELECT inr_per_unit FROM pricing_versions "
+            "WHERE provider='plivo' AND rate_kind='pstn.outbound.mobile' "
+            "  AND effective_to IS NULL"
+        ) or 0.60
+        rows = await conn.fetch(
+            """
+            SELECT
+              a.id          AS agent_id,
+              a.name        AS name,
+              a.slug        AS slug,
+              a.sector      AS sector,
+              a.locale      AS locale,
+              a.org_id      AS org_id,
+              o.name        AS org_name,
+              a.published   AS published,
+              COALESCE(ads.calls, 0)        AS calls_n,
+              COALESCE(ads.minutes, 0)      AS minutes,
+              COALESCE(ads.cost_paise, 0)   AS cost_paise_llm
+            FROM agents a
+            LEFT JOIN orgs o ON o.id = a.org_id
+            LEFT JOIN (
+              SELECT agent_id,
+                     SUM(calls)      AS calls,
+                     SUM(minutes)    AS minutes,
+                     SUM(cost_paise) AS cost_paise
+              FROM agent_daily_stats
+              WHERE day >= CURRENT_DATE - ($1::int - 1)
+              GROUP BY agent_id
+            ) ads ON ads.agent_id = a.id
+            ORDER BY COALESCE(ads.cost_paise, 0) DESC, a.id ASC
+            """,
+            days,
+        )
+    out = []
+    for r in rows:
+        minutes = float(r["minutes"] or 0)
+        cost_llm = int(r["cost_paise_llm"] or 0)
+        # Telephony estimate: phone-routed calls only. Web/test calls
+        # don't touch PSTN, so this is an upper-bound estimate until
+        # build 200 stamps per-call telephony cost.
+        telephony_paise = int(minutes * float(plivo_per_min_inr) * 100)
+        total_cogs = cost_llm + telephony_paise
+        out.append({
+            "agent_id": int(r["agent_id"]),
+            "name": r["name"],
+            "slug": r["slug"],
+            "sector": r["sector"],
+            "locale": r["locale"],
+            "org_id": int(r["org_id"]) if r["org_id"] else None,
+            "org_name": r["org_name"],
+            "published": bool(r["published"]),
+            "calls_n": int(r["calls_n"] or 0),
+            "minutes": round(minutes, 2),
+            "cost_paise_llm": cost_llm,
+            "telephony_paise_estimate": telephony_paise,
+            "total_cogs_paise": total_cogs,
+            "cogs_per_min_paise": (
+                int(round(total_cogs / minutes)) if minutes > 0 else 0
+            ),
+        })
+    return out
+
+
+async def list_current_pricing() -> list[dict[str, Any]]:
+    """All rates currently in effect (effective_to IS NULL).
+    Powers the Pricing tab's main table on the Observability page."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rs = await conn.fetch(
+            "SELECT id, provider, rate_kind, model_id, unit, usd_per_unit, "
+            "       inr_per_unit, effective_from, note "
+            "FROM pricing_versions WHERE effective_to IS NULL "
+            "ORDER BY provider, rate_kind, model_id NULLS FIRST"
+        )
+    out = []
+    for r in rs:
+        d = dict(r)
+        for k in ("effective_from",):
+            if d.get(k):
+                d[k] = d[k].isoformat()
+        out.append(d)
+    return out
+
+
+async def roll_forward_rate(
+    *, provider: str, rate_kind: str, model_id: Optional[str],
+    unit: str, usd_per_unit: Optional[float], inr_per_unit: Optional[float],
+    rolled_by: int, note: Optional[str] = None,
+    observed_event_id: Optional[int] = None,
+    fx_usd_to_inr: float = 83.5,
+) -> int:
+    """Two writes in one txn: close the currently-in-force version for
+    (provider, rate_kind, model_id) by setting effective_to = NOW(),
+    then insert a new version with effective_from = NOW(). Returns
+    the new version's id.
+
+    Cross-fills usd ↔ inr so reads don't have to do FX. Caller is
+    responsible for emitting the `pricing.rate.rolled_forward` event
+    after a successful write (we don't import events here to avoid a
+    circular-import risk with the db facade)."""
+    usd_final = usd_per_unit if usd_per_unit is not None else (
+        (inr_per_unit / fx_usd_to_inr) if inr_per_unit else None
+    )
+    inr_final = inr_per_unit if inr_per_unit is not None else (
+        (usd_per_unit * fx_usd_to_inr) if usd_per_unit else None
+    )
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "UPDATE pricing_versions SET effective_to = NOW() "
+                "WHERE provider = $1 AND rate_kind = $2 "
+                "  AND (model_id = $3 OR (model_id IS NULL AND $3::text IS NULL)) "
+                "  AND effective_to IS NULL",
+                provider, rate_kind, model_id,
+            )
+            new_id = await conn.fetchval(
+                "INSERT INTO pricing_versions "
+                "(provider, rate_kind, model_id, unit, usd_per_unit, inr_per_unit, "
+                " rolled_by, note, observed_event_id) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id",
+                provider, rate_kind, model_id, unit,
+                usd_final, inr_final, rolled_by, note, observed_event_id,
+            )
+    return int(new_id) if new_id else 0
+
+
 async def get_call_detail(agent_id: int, call_id: int) -> Optional[dict[str, Any]]:
     """Full call row for the Call Details modal (build 188). Includes
     transcript + extracted + final_message, which the list endpoint omits

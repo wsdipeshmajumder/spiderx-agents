@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 198;
+const SXAI_BUILD = 199;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -9078,7 +9078,8 @@ function AdminShell({ section, currentUser, onNav }) {
     {
       key: "calls-group", label: "Calls",
       items: [
-        { key: "calls", label: "All calls" },
+        { key: "calls",     label: "All calls" },
+        { key: "agent-pnl", label: "Agent P&L" },
       ],
     },
     {
@@ -9160,6 +9161,7 @@ function AdminShell({ section, currentUser, onNav }) {
             : sec === "orgs" ? html`<${AdminOrgs} />`
             : sec === "users" ? html`<${AdminUsers} />`
             : sec === "calls" ? html`<${AdminCalls} />`
+            : sec === "agent-pnl" ? html`<${AdminAgentPnl} />`
             : sec === "audit" ? html`<${AdminAudit} />`
             : sec === "observability" ? html`<${AdminObservability} />`
             : sec === "settings" ? html`<${AdminSettings} />`
@@ -9274,6 +9276,7 @@ function AdminObservability() {
     <div class="db-obs-tabs">
       <button class=${"db-obs-tab" + (tab === "feed" ? " is-active" : "")} onClick=${() => setTab("feed")}>Live feed</button>
       <button class=${"db-obs-tab" + (tab === "schedulers" ? " is-active" : "")} onClick=${() => setTab("schedulers")}>Schedulers</button>
+      <button class=${"db-obs-tab" + (tab === "pricing" ? " is-active" : "")} onClick=${() => setTab("pricing")}>Pricing</button>
     </div>
 
     ${tab === "feed" ? html`
@@ -9364,6 +9367,301 @@ function AdminObservability() {
         </p>
       </div>
     ` : ""}
+
+    ${tab === "pricing" ? html`<${AdminPricingTab} />` : ""}
+  `;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// AdminAgentPnl — /admin/agent-pnl. Build 199.
+// Per-agent COGS roll-up. Hits /api/admin/agent-pnl?days=N and renders
+// a table sorted by total cost descending. Each row drills through to
+// the agent's overview page. Future build: revenue + margin columns
+// once plans.monthly_inr exists.
+// ─────────────────────────────────────────────────────────────────────────
+function AdminAgentPnl() {
+  const [data, setData] = useState(null);
+  const [days, setDays] = useState(30);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    setData(null); setErr("");
+    fetch(`/api/admin/agent-pnl?days=${days}`)
+      .then((r) => r.ok ? r.json() : Promise.reject(new Error("status " + r.status)))
+      .then(setData).catch((e) => setErr(String(e.message || e)));
+  }, [days]);
+  if (err) return html`<div class="db-form-help" style=${{ color: "#b91c1c" }}>Couldn't load: ${err}</div>`;
+  if (!data) return html`<div class="db-loading">Loading P&L…</div>`;
+  const agents = data.agents || [];
+  const totals = agents.reduce((acc, a) => {
+    acc.calls += a.calls_n;
+    acc.minutes += a.minutes;
+    acc.cost_llm += a.cost_paise_llm;
+    acc.telephony += a.telephony_paise_estimate;
+    acc.cogs += a.total_cogs_paise;
+    return acc;
+  }, { calls: 0, minutes: 0, cost_llm: 0, telephony: 0, cogs: 0 });
+
+  return html`
+    <h1>Agent P&L <span class="db-pill-soft">last ${days}d</span></h1>
+    <p class="db-admin-sub">Per-agent COGS for the period — LLM cost (frozen at call time) + telephony estimate (today's Plivo rate × minutes). Revenue / margin will land once <code>plans</code> carries rate fields.</p>
+
+    <div class="db-pnl-range">
+      Range:
+      ${[7, 30, 60, 90].map((d) => html`
+        <button key=${d} class=${"db-pnl-range-btn" + (d === days ? " is-active" : "")}
+                onClick=${() => setDays(d)}>${d}d</button>
+      `)}
+    </div>
+
+    <div class="db-admin-grid db-pnl-totals">
+      <div class="db-admin-tile">
+        <div class="db-admin-tile-label">Agents with traffic</div>
+        <div class="db-admin-tile-value">${agents.filter((a) => a.calls_n > 0).length}</div>
+      </div>
+      <div class="db-admin-tile">
+        <div class="db-admin-tile-label">Calls</div>
+        <div class="db-admin-tile-value">${totals.calls}</div>
+      </div>
+      <div class="db-admin-tile">
+        <div class="db-admin-tile-label">Minutes</div>
+        <div class="db-admin-tile-value">${totals.minutes.toFixed(1)}</div>
+      </div>
+      <div class="db-admin-tile">
+        <div class="db-admin-tile-label">LLM cost</div>
+        <div class="db-admin-tile-value">₹${(totals.cost_llm/100).toFixed(2)}</div>
+      </div>
+      <div class="db-admin-tile">
+        <div class="db-admin-tile-label">Telephony est.</div>
+        <div class="db-admin-tile-value">₹${(totals.telephony/100).toFixed(2)}</div>
+      </div>
+      <div class="db-admin-tile">
+        <div class="db-admin-tile-label">Total COGS</div>
+        <div class="db-admin-tile-value">₹${(totals.cogs/100).toFixed(2)}</div>
+      </div>
+    </div>
+
+    <table class="db-table db-pnl-table">
+      <thead>
+        <tr>
+          <th>Agent</th>
+          <th>Org</th>
+          <th>Status</th>
+          <th class="db-table-th-right">Calls</th>
+          <th class="db-table-th-right">Minutes</th>
+          <th class="db-table-th-right">LLM ₹</th>
+          <th class="db-table-th-right">Telephony ₹</th>
+          <th class="db-table-th-right"><b>COGS ₹</b></th>
+          <th class="db-table-th-right">COGS / min</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${agents.length === 0 ? html`
+          <tr><td colspan="9" class="db-muted" style=${{ textAlign: "center", padding: "24px" }}>No agents yet.</td></tr>
+        ` : agents.map((a) => html`
+          <tr key=${a.agent_id}>
+            <td>
+              <a href=${`/agent/${a.slug || a.agent_id}`}
+                 class="db-link" style=${{ fontWeight: 500 }}>${a.name}</a>
+              <div style=${{ fontSize: "11.5px", color: "#9095a3" }}>${a.sector || "—"} · ${a.locale || "—"}</div>
+            </td>
+            <td>${a.org_name || html`<span class="db-muted">—</span>`}</td>
+            <td>
+              ${a.published
+                ? html`<span class="db-tag db-tag-green">live</span>`
+                : html`<span class="db-tag db-tag-grey">draft</span>`}
+            </td>
+            <td class="db-table-td-right">${a.calls_n}</td>
+            <td class="db-table-td-right">${a.minutes.toFixed(1)}</td>
+            <td class="db-table-td-right">₹${(a.cost_paise_llm/100).toFixed(2)}</td>
+            <td class="db-table-td-right">₹${(a.telephony_paise_estimate/100).toFixed(2)}</td>
+            <td class="db-table-td-right"><b>₹${(a.total_cogs_paise/100).toFixed(2)}</b></td>
+            <td class="db-table-td-right db-muted">
+              ${a.cogs_per_min_paise > 0 ? html`₹${(a.cogs_per_min_paise/100).toFixed(2)}` : "—"}
+            </td>
+          </tr>
+        `)}
+      </tbody>
+    </table>
+
+    <p class="db-form-help" style=${{ marginTop: "12px" }}>
+      Telephony estimate uses today's Plivo per-min rate × minutes. Web/test
+      calls don't actually touch PSTN, so the real number is somewhere
+      between LLM-only and this estimate — build 200 will stamp the true
+      telephony cost on every call row.
+    </p>
+  `;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// AdminPricingTab — /admin/observability (Pricing tab). Build 199.
+// Shows: current effective rates (from pricing_versions) joined with the
+// latest observed-rate event per (provider, rate_kind) so the operator
+// can see "what we charge against" vs "what wholesale really is right
+// now". An open `pricing.drift.detected` event surfaces as a yellow/red
+// row with a "Roll forward to observed" action that closes the current
+// version + writes a new one + resolves the drift event in one txn.
+// ─────────────────────────────────────────────────────────────────────────
+function AdminPricingTab() {
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const load = () => {
+    fetch("/api/admin/pricing/current")
+      .then((r) => r.ok ? r.json() : Promise.reject(new Error("status " + r.status)))
+      .then(setData).catch((e) => setMsg(String(e.message || e)));
+  };
+  useEffect(() => { load(); }, []);
+  if (!data) return html`<div class="db-loading">Loading pricing…</div>`;
+  const rates = data.rates || [];
+  const observed = data.observed || [];
+  const drifts = data.drifts || [];
+
+  // Build a lookup: for each (provider+rate_kind+model_id), what was the
+  // most-recent observed value? Walks observed events newest-first and
+  // keeps the first hit per key (since the events were already sorted
+  // DESC by id from the API).
+  const obsByKey = {};
+  for (const ev of observed) {
+    const p = ev.payload || {};
+    const provider = p.provider;
+    const model = p.model || null;
+    if (!provider) continue;
+    // The price-monitor emits separate rows per (in/out) for LLM and a
+    // single row per (in/out) for telephony. Detect by payload shape.
+    if (p.observed_usd_per_1m) {
+      const inKey = `${provider}|llm.audio.in|${model || ""}`;
+      const outKey = `${provider}|llm.audio.out|${model || ""}`;
+      if (!obsByKey[inKey]) obsByKey[inKey] = { usd: p.observed_usd_per_1m.in, at: ev.created_at, ev };
+      if (!obsByKey[outKey]) obsByKey[outKey] = { usd: p.observed_usd_per_1m.out, at: ev.created_at, ev };
+    } else if (p.observed_usd_per_min || p.outbound_mobile_usd_per_min) {
+      // Twilio's snapshot path uses outbound_mobile_usd_per_min; the
+      // live API path uses observed_usd_per_min. Accept both.
+      const k = `${provider}|pstn.outbound.mobile|`;
+      if (!obsByKey[k]) obsByKey[k] = {
+        usd: p.observed_usd_per_min || p.outbound_mobile_usd_per_min,
+        at: ev.created_at, ev,
+      };
+    } else if (p.observed_inr_per_min) {
+      const k = `${provider}|pstn.outbound.mobile|`;
+      if (!obsByKey[k]) obsByKey[k] = { inr: p.observed_inr_per_min, at: ev.created_at, ev };
+    }
+  }
+
+  const driftByKey = {};
+  for (const ev of drifts) {
+    const p = ev.payload || {};
+    const provider = p.provider;
+    if (!provider) continue;
+    if (p.model) {
+      driftByKey[`${provider}|llm.audio.in|${p.model}`] = ev;
+      driftByKey[`${provider}|llm.audio.out|${p.model}`] = ev;
+    } else {
+      driftByKey[`${provider}|pstn.outbound.mobile|`] = ev;
+    }
+  }
+
+  const rollForward = async (rate, obs) => {
+    if (!obs) return;
+    if (busy) return;
+    setBusy(true);
+    setMsg("");
+    try {
+      const body = {
+        provider: rate.provider,
+        rate_kind: rate.rate_kind,
+        model_id: rate.model_id,
+        unit: rate.unit,
+        usd_per_unit: obs.usd ?? null,
+        inr_per_unit: obs.inr ?? null,
+        note: `Promoted observed rate (${obs.at})`,
+        observed_event_id: obs.ev?.id,
+        resolve_drift_event_id: driftByKey[`${rate.provider}|${rate.rate_kind}|${rate.model_id || ""}`]?.id,
+      };
+      const r = await fetch("/api/admin/pricing/roll-forward", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error("status " + r.status);
+      setMsg(`Rolled forward ✓ — new version id ${(await r.json()).new_version_id}`);
+      load();
+    } catch (e) {
+      setMsg(`Failed: ${e.message || e}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return html`
+    <p class="db-form-help" style=${{ marginBottom: "12px" }}>
+      Currently-in-force wholesale rates. Compare against the latest observed
+      rate from the daily price-check; "Roll forward" closes the old version
+      and writes a new one (audit-tracked, one button).
+    </p>
+    ${msg ? html`<div class="db-form-help" style=${{
+      color: msg.startsWith("Failed") ? "#b91c1c" : "#166534",
+      marginBottom: "10px",
+    }}>${msg}</div>` : ""}
+    <table class="db-table db-pricing-table">
+      <thead>
+        <tr>
+          <th>Provider</th>
+          <th>Rate</th>
+          <th>Model</th>
+          <th>Unit</th>
+          <th>Effective</th>
+          <th>Observed</th>
+          <th>Drift</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rates.map((r) => {
+          const key = `${r.provider}|${r.rate_kind}|${r.model_id || ""}`;
+          const obs = obsByKey[key];
+          const drift = driftByKey[key];
+          const effective = r.usd_per_unit ? `$${Number(r.usd_per_unit).toFixed(4)}` : `₹${Number(r.inr_per_unit).toFixed(2)}`;
+          const observedDisp = !obs ? "—" :
+            obs.usd != null ? `$${Number(obs.usd).toFixed(4)}` :
+            obs.inr != null ? `₹${Number(obs.inr).toFixed(2)}` : "—";
+          let driftPct = null;
+          if (obs && (obs.usd != null) && Number(r.usd_per_unit) > 0) {
+            driftPct = (obs.usd - Number(r.usd_per_unit)) / Number(r.usd_per_unit) * 100;
+          } else if (obs && (obs.inr != null) && Number(r.inr_per_unit) > 0) {
+            driftPct = (obs.inr - Number(r.inr_per_unit)) / Number(r.inr_per_unit) * 100;
+          }
+          const rowClass = !drift ? "" : (drift.severity === "critical" ? "row-critical" : "row-warning");
+          return html`
+            <tr key=${r.id} class=${rowClass}>
+              <td><span class="db-pricing-provider db-pricing-provider-${r.provider}">${r.provider}</span></td>
+              <td><code>${r.rate_kind}</code></td>
+              <td>${r.model_id ? html`<code>${r.model_id}</code>` : "—"}</td>
+              <td class="db-muted">${r.unit}</td>
+              <td><b>${effective}</b></td>
+              <td>${observedDisp}</td>
+              <td>
+                ${driftPct == null ? "—"
+                  : html`<span class=${"db-pricing-drift" + (Math.abs(driftPct) > 1 ? " is-drifty" : "")}>${driftPct.toFixed(2)}%</span>`}
+              </td>
+              <td class="db-table-td-right">
+                ${obs && drift ? html`
+                  <button class="db-btn-primary db-btn-sm" type="button"
+                          disabled=${busy}
+                          onClick=${() => rollForward(r, obs)}>
+                    Roll forward
+                  </button>
+                ` : ""}
+              </td>
+            </tr>
+          `;
+        })}
+      </tbody>
+    </table>
+    <p class="db-form-help" style=${{ marginTop: "16px" }}>
+      Roll-forward never re-prices historical calls. Old call rows keep
+      their <code>cost_paise</code> frozen at the rate that was in force
+      when the call landed.
+    </p>
   `;
 }
 
