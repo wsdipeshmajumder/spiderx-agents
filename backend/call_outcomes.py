@@ -337,6 +337,15 @@ def catalogue_for(agent: dict[str, Any]) -> list[dict[str, Any]]:
     overrides = _normalize_overrides(agent.get("outcome_overrides"))
     removed = overrides["removed"]
     edited = overrides["edited"]
+    # Build 209 — custom-kind weight resolver. Built-ins use the static
+    # `_KIND_WEIGHT` map; customs alias one of those, so we resolve via
+    # the alias_kind. Closes over `overrides` so the catalogue resolver
+    # doesn't have to refetch.
+    custom_kind_alias = {ck["id"]: ck["alias_kind"] for ck in overrides["custom_kinds"]}
+    def _weight_for_kind(k: str) -> float:
+        if k in _KIND_WEIGHT:
+            return _KIND_WEIGHT[k]
+        return _KIND_WEIGHT.get(custom_kind_alias.get(k, ""), 0.0)
     # Dedup by id (keep first occurrence) — preserves order. Also drops
     # `removed` ids in the same pass to keep the catalogue tight.
     seen: set[str] = set()
@@ -354,8 +363,9 @@ def catalogue_for(agent: dict[str, Any]) -> list[dict[str, Any]]:
                     merged[k] = ed[k]
             # Re-stamp the success_weight from the (possibly edited) kind so
             # a "Lead captured" reclassified to `success` rolls into the
-            # right bucket on the report.
-            merged["success_weight"] = _KIND_WEIGHT.get(merged["kind"], 0.0)
+            # right bucket on the report. Build 209 — custom kinds also
+            # resolve here via their alias_kind.
+            merged["success_weight"] = _weight_for_kind(merged["kind"])
             merged["is_edited"] = True
             it = merged
         out.append(it)
@@ -371,13 +381,13 @@ def catalogue_for(agent: dict[str, Any]) -> list[dict[str, Any]]:
             "label":          added["label"],
             "kind":           added["kind"],
             "description":    added.get("description") or "",
-            "success_weight": _KIND_WEIGHT.get(added["kind"], 0.0),
+            "success_weight": _weight_for_kind(added["kind"]),
             "is_custom":      True,
         })
     return out
 
 
-_ALLOWED_KINDS = {"success", "qualified", "info", "failure"}
+_BUILTIN_KINDS = {"success", "qualified", "info", "failure"}
 
 
 def _normalize_overrides(raw: Any) -> dict[str, Any]:
@@ -385,10 +395,55 @@ def _normalize_overrides(raw: Any) -> dict[str, Any]:
 
     Defensive — operators can't directly write this blob but a future
     bulk-import / API path might. Bad fields are dropped silently so a
-    malformed override row never crashes the catalogue resolution path."""
-    out = {"edited": {}, "added": [], "removed": set()}
+    malformed override row never crashes the catalogue resolution path.
+
+    Build 209 — additionally accepts `custom_kinds` (a list of per-agent
+    kind definitions). Each custom kind has:
+      id          slug, max 40 chars (the value stored on outcomes)
+      label       what the operator + the dashboard show, max 60 chars
+      alias_kind  one of the 4 built-ins — defines the downstream
+                  bucket (Wins counter, success_weight, dashboard
+                  grouping). The OPERATOR sees their custom label
+                  everywhere; the BACKEND uses the alias for math.
+      emoji       optional UI prefix, max 8 chars
+    """
+    out = {"edited": {}, "added": [], "removed": set(), "custom_kinds": []}
     if not isinstance(raw, dict):
         return out
+
+    # ─── custom_kinds (build 209) ────────────────────────────────────────
+    # Resolve these FIRST so the set of allowed kinds includes them
+    # when we validate edited / added rows below.
+    ck = raw.get("custom_kinds")
+    if isinstance(ck, list):
+        seen_ids: set[str] = set()
+        for row in ck:
+            if not isinstance(row, dict):
+                continue
+            cid = row.get("id")
+            label = row.get("label")
+            alias = row.get("alias_kind")
+            if not (isinstance(cid, str) and cid.strip()):
+                continue
+            if not (isinstance(label, str) and label.strip()):
+                continue
+            if alias not in _BUILTIN_KINDS:
+                continue
+            slug = cid.strip().lower().replace(" ", "_")[:40]
+            if not slug or slug in seen_ids or slug in _BUILTIN_KINDS:
+                # Don't let a custom kind shadow a built-in — that
+                # would silently change the meaning of "success" etc.
+                continue
+            seen_ids.add(slug)
+            out["custom_kinds"].append({
+                "id":         slug,
+                "label":      label.strip()[:60],
+                "alias_kind": alias,
+                "emoji":      (row.get("emoji") or "").strip()[:8] if isinstance(row.get("emoji"), str) else "",
+            })
+
+    allowed_kinds = _BUILTIN_KINDS | {k["id"] for k in out["custom_kinds"]}
+
     ed = raw.get("edited")
     if isinstance(ed, dict):
         for oid, fields in ed.items():
@@ -399,7 +454,7 @@ def _normalize_overrides(raw: Any) -> dict[str, Any]:
             if isinstance(label, str) and label.strip():
                 clean["label"] = label.strip()[:80]
             kind = fields.get("kind")
-            if isinstance(kind, str) and kind in _ALLOWED_KINDS:
+            if isinstance(kind, str) and kind in allowed_kinds:
                 clean["kind"] = kind
             desc = fields.get("description")
             if isinstance(desc, str):
@@ -416,7 +471,7 @@ def _normalize_overrides(raw: Any) -> dict[str, Any]:
             kind = row.get("kind")
             if not (isinstance(oid, str) and oid.strip()): continue
             if not (isinstance(label, str) and label.strip()): continue
-            if kind not in _ALLOWED_KINDS: continue
+            if kind not in allowed_kinds: continue
             out["added"].append({
                 "id":          oid.strip().lower().replace(" ", "_")[:60],
                 "label":       label.strip()[:80],
@@ -427,6 +482,30 @@ def _normalize_overrides(raw: Any) -> dict[str, Any]:
     if isinstance(rem, list):
         out["removed"] = {x for x in rem if isinstance(x, str)}
     return out
+
+
+# Back-compat alias — older internal call sites referenced _ALLOWED_KINDS
+# as a constant. Today it's the *built-in* set; per-agent custom kinds
+# are added on top during `_normalize_overrides`. Kept so anything
+# importing this name continues to resolve.
+_ALLOWED_KINDS = _BUILTIN_KINDS
+
+
+def kind_weight_for(agent: dict[str, Any], kind: str) -> float:
+    """Build 209 — resolve the success_weight for a kind on an agent.
+
+    Built-in kinds pull from `_KIND_WEIGHT` directly. Custom kinds
+    fall through to their declared `alias_kind` — so "Demo booked"
+    aliased to `success` carries the success weight 1.0 in every
+    downstream rollup without the dashboard having to know about
+    every custom kind a customer invented."""
+    if kind in _KIND_WEIGHT:
+        return _KIND_WEIGHT[kind]
+    overrides = _normalize_overrides(agent.get("outcome_overrides"))
+    for ck in overrides["custom_kinds"]:
+        if ck["id"] == kind:
+            return _KIND_WEIGHT.get(ck["alias_kind"], 0.0)
+    return 0.0
 
 
 def merge_with_agent_outcomes(agent: dict[str, Any]) -> list[str]:
@@ -464,6 +543,18 @@ def assemble_report(agent: dict[str, Any], analytics: dict[str, Any]) -> dict[st
                               for row in by_outcome_raw}
     total = sum(counts.values())
 
+    # Build 209 — custom kinds alias one of the 4 built-ins for rollup
+    # math. Build a kind → bucket map so an outcome tagged with a
+    # custom kind "demo_booked" (aliased to success) still rolls into
+    # the success row in by_kind. Lookup falls through to the kind
+    # itself if unknown — keeps legacy / orphan rows visible.
+    overrides_for_agent = _normalize_overrides(agent.get("outcome_overrides"))
+    custom_kind_to_bucket = {ck["id"]: ck["alias_kind"] for ck in overrides_for_agent["custom_kinds"]}
+    def _bucket_for(kind: str) -> str:
+        if kind in _BUILTIN_KINDS:
+            return kind
+        return custom_kind_to_bucket.get(kind, kind)
+
     rows: list[dict[str, Any]] = []
     weighted = 0.0
     by_kind: dict[str, int] = {"success": 0, "qualified": 0, "info": 0, "failure": 0}
@@ -472,7 +563,11 @@ def assemble_report(agent: dict[str, Any], analytics: dict[str, Any]) -> dict[st
         n = counts.get(c["id"], 0)
         share = (n / total * 100.0) if total else 0.0
         weighted += n * float(c.get("success_weight", 0.0))
-        by_kind[c["kind"]] = by_kind.get(c["kind"], 0) + n
+        # Bucket into the 4 default columns via alias resolution so the
+        # dashboard's Wins/Qualified/Info/Failure counters stay accurate
+        # even when the operator has added custom kinds.
+        bucket = _bucket_for(c["kind"])
+        by_kind[bucket] = by_kind.get(bucket, 0) + n
         rows.append({**c, "count": n, "share": round(share, 1)})
         seen.add(c["id"])
 
@@ -511,6 +606,10 @@ def assemble_report(agent: dict[str, Any], analytics: dict[str, Any]) -> dict[st
         "outcomes": rows,
         "by_kind": by_kind,
         "orphan_outcomes": orphan,
+        # Build 209 — per-agent custom kinds. The dashboard renders the
+        # operator's labels everywhere; downstream rollups use the
+        # alias_kind via `by_kind` above. Empty list when none defined.
+        "custom_kinds": list(overrides_for_agent["custom_kinds"]),
         "success_rate": success_rate,
         "total_calls": total,
         # Surface the effective weights + defaults so the page can render

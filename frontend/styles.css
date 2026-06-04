@@ -6893,8 +6893,68 @@ button.db-stat:disabled { cursor: default; opacity: 0.7; }
 .oc-edit-field textarea.db-input { resize: vertical; min-height: 48px; font-family: inherit; }
 
 .oc-edit-addrow { display: flex; gap: 8px; margin-top: 12px; align-items: center; }
+/* Build 209 — relocated capsules to right under the page description.
+   No top margin so they sit tight against the panel sub-text; bottom
+   margin separates them from the outcomes list below. */
+.oc-edit-addrow-top { margin-top: 4px; margin-bottom: 14px; flex-wrap: wrap; }
 .oc-edit-add { color: #6366f1; }
 .oc-edit-reset { margin-left: auto; color: #6a6f7e; }
+
+/* Build 209 — custom-kinds panel. Between the action row and the
+   outcomes list when the operator has any custom kinds OR is mid-add. */
+.oc-kinds-panel {
+  background: #f7f8fc;
+  border: 1px solid #e6e7ec;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+}
+.oc-kinds-list {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.oc-kind-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #ffffff;
+  border: 1px solid #d8dbe4;
+  border-radius: 999px;
+  padding: 4px 4px 4px 10px;
+  font-size: 12.5px;
+  color: #1f2230;
+}
+.oc-kind-chip-emoji { font-size: 13px; }
+.oc-kind-chip-label { font-weight: 600; }
+.oc-kind-chip-alias { color: #9095a3; font-size: 11.5px; }
+.oc-kind-chip-x {
+  width: 18px; height: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: 0;
+  border-radius: 50%;
+  font-size: 14px; line-height: 1;
+  color: #9095a3; cursor: pointer;
+  padding: 0;
+}
+.oc-kind-chip-x:hover { background: #f5f6fa; color: #1f2230; }
+
+.oc-kind-add {
+  display: grid;
+  grid-template-columns: 70px 1fr 200px auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #e6e7ec;
+}
+.oc-kind-add-field { display: flex; flex-direction: column; gap: 4px; }
+.oc-kind-add-field .db-input { font-size: 13px; padding: 6px 10px; }
+.oc-kind-add-actions { padding-bottom: 1px; }
+@media (max-width: 640px) {
+  .oc-kind-add { grid-template-columns: 1fr; }
+  .oc-kind-add-actions { justify-self: end; }
+}
+:root[data-theme="dark"] .oc-kinds-panel { background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.08); }
+:root[data-theme="dark"] .oc-kind-chip { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.12); color: #e8e9ef; }
+:root[data-theme="dark"] .oc-kind-chip-x:hover { background: rgba(255,255,255,0.06); color: #e8e9ef; }
+
 .oc-edit-addcard {
   margin-top: 12px;
   padding: 14px 16px;

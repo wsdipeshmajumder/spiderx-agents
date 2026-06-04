@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 214;
+const SXAI_BUILD = 215;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -4672,6 +4672,23 @@ const _OC_KIND_OPTIONS = [
   { value: "info",      label: "💬 Info-only", help: "Informational — answered an FAQ, gave hours / price." },
   { value: "failure",   label: "⚠️  Failure",  help: "Unwanted result — abandoned, voicemail, complaint left open." },
 ];
+// Build 209 — merge per-agent custom kinds onto the dropdown options.
+// Each custom kind renders with its emoji + label and the dropdown
+// hint mentions which built-in bucket it rolls up into.
+function _ocKindOptionsWith(customs) {
+  const list = [..._OC_KIND_OPTIONS];
+  for (const ck of (customs || [])) {
+    if (!ck || !ck.id) continue;
+    const prefix = (ck.emoji || "🎯").trim();
+    list.push({
+      value: ck.id,
+      label: `${prefix} ${ck.label}`,
+      help:  `Custom — behaves like ${ck.alias_kind}.`,
+      is_custom: true,
+    });
+  }
+  return list;
+}
 function _slugifyOutcomeId(s) {
   return String(s || "")
     .trim().toLowerCase()
@@ -4689,6 +4706,14 @@ function OutcomeCatalogueEditor({ agent, outcomes, onSaved }) {
   const [edited,  setEdited]  = useState(() => ({ ...(initial.edited  || {}) }));
   const [removed, setRemoved] = useState(() => new Set((initial.removed || [])));
   const [added,   setAdded]   = useState(() => [...(initial.added || [])]);
+  // Build 209 — per-agent custom kinds. Operator-defined buckets that
+  // sit alongside the 4 built-ins (Success / Qualified / Info / Failure).
+  // Each carries an `alias_kind` so downstream rollups (Wins counter,
+  // success_weight, EOD digest) treat it correctly without the rest
+  // of the system needing to know about every custom kind.
+  const [customKinds, setCustomKinds] = useState(() => [...(initial.custom_kinds || [])]);
+  const [kindDraft, setKindDraft] = useState({ label: "", emoji: "🎯", alias_kind: "success" });
+  const [addingKind, setAddingKind] = useState(false);
   const [adding,  setAdding]  = useState(false);
   const [newRow,  setNewRow]  = useState({ id: "", label: "", kind: "success", description: "" });
   const [busy,    setBusy]    = useState(false);
@@ -4702,8 +4727,53 @@ function OutcomeCatalogueEditor({ agent, outcomes, onSaved }) {
     removed.size !== (initial.removed || []).length ||
     [...removed].some((id) => !(initial.removed || []).includes(id)) ||
     added.length !== (initial.added || []).length ||
-    JSON.stringify(added) !== JSON.stringify(initial.added || [])
+    JSON.stringify(added) !== JSON.stringify(initial.added || []) ||
+    JSON.stringify(customKinds) !== JSON.stringify(initial.custom_kinds || [])
   );
+
+  // Build 209 — dropdown options including the per-agent customs.
+  // Recompute on every render so a freshly-added kind is immediately
+  // pickable for the row below.
+  const kindOptions = _ocKindOptionsWith(customKinds);
+  const builtinKinds = new Set(_OC_KIND_OPTIONS.map((k) => k.value));
+
+  // Add a custom kind from the draft. Validates uniqueness and a
+  // non-empty label; resets the draft on success.
+  const addCustomKind = () => {
+    const label = (kindDraft.label || "").trim();
+    if (!label) { setMsg("Need a label for the new kind."); return; }
+    const id = _slugifyOutcomeId(label).slice(0, 40);
+    if (!id) { setMsg("Label must contain letters or numbers."); return; }
+    if (builtinKinds.has(id)) { setMsg(`"${id}" is a built-in kind — pick a different label.`); return; }
+    if (customKinds.some((k) => k.id === id)) { setMsg(`"${id}" already exists.`); return; }
+    setCustomKinds((prev) => [...prev, {
+      id, label,
+      emoji: (kindDraft.emoji || "🎯").trim().slice(0, 8),
+      alias_kind: kindDraft.alias_kind,
+    }]);
+    setKindDraft({ label: "", emoji: "🎯", alias_kind: "success" });
+    setAddingKind(false);
+    setMsg("");
+  };
+
+  // Remove a custom kind. Any outcome currently using it falls back to
+  // the alias_kind so the dashboard doesn't break.
+  const removeCustomKind = (id) => {
+    const target = customKinds.find((k) => k.id === id);
+    if (!target) return;
+    setCustomKinds((prev) => prev.filter((k) => k.id !== id));
+    // Reclassify edits that used this kind so save() emits valid kinds.
+    setEdited((prev) => {
+      const next = { ...prev };
+      for (const oid of Object.keys(next)) {
+        if (next[oid] && next[oid].kind === id) {
+          next[oid] = { ...next[oid], kind: target.alias_kind };
+        }
+      }
+      return next;
+    });
+    setAdded((prev) => prev.map((r) => r.kind === id ? { ...r, kind: target.alias_kind } : r));
+  };
 
   // Per-row helpers — `outcome` is one row from the resolved catalogue.
   const isHidden = (id) => removed.has(id);
@@ -4770,6 +4840,7 @@ function OutcomeCatalogueEditor({ agent, outcomes, onSaved }) {
         edited,
         added,
         removed: [...removed],
+        custom_kinds: customKinds,  // build 209
       };
       const r = await fetch(`/api/agents/${agent.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -4790,6 +4861,7 @@ function OutcomeCatalogueEditor({ agent, outcomes, onSaved }) {
     setEdited({ ...(initial.edited || {}) });
     setRemoved(new Set(initial.removed || []));
     setAdded([...(initial.added || [])]);
+    setCustomKinds([...(initial.custom_kinds || [])]);
     setMsg("");
   };
 
@@ -4802,7 +4874,7 @@ function OutcomeCatalogueEditor({ agent, outcomes, onSaved }) {
         body: JSON.stringify({ outcome_overrides: null }),  // null → defaults
       });
       if (!r.ok) throw new Error("server " + r.status);
-      setEdited({}); setRemoved(new Set()); setAdded([]);
+      setEdited({}); setRemoved(new Set()); setAdded([]); setCustomKinds([]);
       setMsg("Reset to defaults ✓");
       onSaved && onSaved();
       setTimeout(() => setMsg(""), 2000);
@@ -4859,7 +4931,7 @@ function OutcomeCatalogueEditor({ agent, outcomes, onSaved }) {
                     onChange=${(e) => isCustom
                       ? setAdded((prev) => prev.map((r) => r.id === o.id ? { ...r, kind: e.target.value } : r))
                       : setField(o.id, "kind", e.target.value)}>
-              ${_OC_KIND_OPTIONS.map((k) => html`
+              ${kindOptions.map((k) => html`
                 <option key=${k.value} value=${k.value}>${k.label}</option>
               `)}
             </select>
@@ -4887,6 +4959,73 @@ function OutcomeCatalogueEditor({ agent, outcomes, onSaved }) {
         </p>
       </div>
 
+      <!-- Build 209: action capsules moved UP from the bottom of the
+           list so the operator sees the "+ Add" / "Reset" affordances
+           the moment they open the editor, without scrolling past the
+           full catalogue first. -->
+      <div class="oc-edit-addrow oc-edit-addrow-top">
+        <button class="db-btn-ghost db-btn-sm oc-edit-add" type="button"
+                onClick=${() => setAdding((v) => !v)}>
+          ${adding ? "Close" : "+ Add a custom outcome"}
+        </button>
+        <button class="db-btn-ghost db-btn-sm oc-edit-add" type="button"
+                onClick=${() => setAddingKind((v) => !v)}>
+          ${addingKind ? "Close" : "+ Add a custom kind"}
+        </button>
+        <button class="db-btn-ghost db-btn-sm oc-edit-reset" type="button"
+                onClick=${resetAll} disabled=${busy}>Reset all to defaults</button>
+      </div>
+
+      <!-- Build 209: per-agent custom kinds panel. Renders the saved
+           customs as chip-style rows + an inline mini-form when the
+           operator hits "+ Add a custom kind". Each custom kind
+           aliases one of the built-ins so downstream rollups stay
+           sane (Wins counter, success_weight, etc.). -->
+      ${(customKinds.length > 0 || addingKind) ? html`
+        <div class="oc-kinds-panel">
+          ${customKinds.length > 0 ? html`
+            <div class="oc-kinds-list">
+              ${customKinds.map((ck) => html`
+                <span key=${ck.id} class="oc-kind-chip" title=${`Behaves like ${ck.alias_kind}`}>
+                  <span class="oc-kind-chip-emoji">${ck.emoji || "🎯"}</span>
+                  <span class="oc-kind-chip-label">${ck.label}</span>
+                  <span class="oc-kind-chip-alias">· like ${ck.alias_kind}</span>
+                  <button class="oc-kind-chip-x" type="button" title="Remove this custom kind"
+                          onClick=${() => removeCustomKind(ck.id)}>×</button>
+                </span>
+              `)}
+            </div>
+          ` : ""}
+          ${addingKind ? html`
+            <div class="oc-kind-add">
+              <label class="oc-kind-add-field oc-kind-add-emoji">
+                <span class="oc-edit-flabel">Icon</span>
+                <input class="db-input" type="text" maxlength="4"
+                       value=${kindDraft.emoji}
+                       onInput=${(e) => setKindDraft((d) => ({ ...d, emoji: e.target.value }))} />
+              </label>
+              <label class="oc-kind-add-field oc-kind-add-label">
+                <span class="oc-edit-flabel">Label</span>
+                <input class="db-input" type="text" maxlength="60"
+                       placeholder="e.g. Demo booked"
+                       value=${kindDraft.label}
+                       onInput=${(e) => setKindDraft((d) => ({ ...d, label: e.target.value }))} />
+              </label>
+              <label class="oc-kind-add-field">
+                <span class="oc-edit-flabel">Behaves like</span>
+                <select class="db-input" value=${kindDraft.alias_kind}
+                        onChange=${(e) => setKindDraft((d) => ({ ...d, alias_kind: e.target.value }))}>
+                  ${_OC_KIND_OPTIONS.map((k) => html`<option key=${k.value} value=${k.value}>${k.label}</option>`)}
+                </select>
+              </label>
+              <div class="oc-kind-add-actions">
+                <button class="db-btn-primary db-btn-sm" type="button" onClick=${addCustomKind}>Add kind</button>
+              </div>
+            </div>
+          ` : ""}
+        </div>
+      ` : ""}
+
       <ul class="oc-edit-list">
         ${outcomes.map((o) => renderRow(o, !!o.is_custom))}
         ${unsavedAdds.map((o) => renderRow(o, true))}
@@ -4907,7 +5046,7 @@ function OutcomeCatalogueEditor({ agent, outcomes, onSaved }) {
               <span class="oc-edit-flabel">Kind</span>
               <select class="db-input" value=${newRow.kind}
                       onChange=${(e) => setNewRow((r) => ({ ...r, kind: e.target.value }))}>
-                ${_OC_KIND_OPTIONS.map((k) => html`<option key=${k.value} value=${k.value}>${k.label}</option>`)}
+                ${kindOptions.map((k) => html`<option key=${k.value} value=${k.value}>${k.label}</option>`)}
               </select>
             </label>
           </div>
@@ -4931,14 +5070,7 @@ function OutcomeCatalogueEditor({ agent, outcomes, onSaved }) {
                     onClick=${() => { setAdding(false); setNewRow({ id: "", label: "", kind: "success", description: "" }); }}>Cancel</button>
           </div>
         </div>
-      ` : html`
-        <div class="oc-edit-addrow">
-          <button class="db-btn-ghost db-btn-sm oc-edit-add" type="button"
-                  onClick=${() => setAdding(true)}>+ Add a custom outcome</button>
-          <button class="db-btn-ghost db-btn-sm oc-edit-reset" type="button"
-                  onClick=${resetAll} disabled=${busy}>Reset all to defaults</button>
-        </div>
-      `}
+      ` : ""}
 
       ${dirty || msg ? html`
         <div class="oc-edit-footer">
@@ -5004,6 +5136,11 @@ function OutcomeDigestSchedule({ agent, onSaved }) {
   const [draft, setDraft] = useState(initial);
   const [busy,  setBusy]  = useState(false);
   const [msg,   setMsg]   = useState("");
+  // Build 215 — preview state. `preview` holds the server-rendered
+  // {html, subject, calls_n, minutes, ...} so the modal can show the
+  // EXACT email the scheduler would mail with these draft settings.
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [preview,     setPreview]     = useState(null);
 
   const dirty = (
     draft.cadence      !== initial.cadence ||
@@ -5012,6 +5149,27 @@ function OutcomeDigestSchedule({ agent, onSaved }) {
     draft.day_of_month !== initial.day_of_month
   );
   const isOff = draft.cadence === "off";
+
+  const openPreview = async () => {
+    setPreviewBusy(true);
+    try {
+      const blob = { cadence: draft.cadence, window_days: draft.window_days };
+      if (draft.cadence === "weekly")  blob.day_of_week  = draft.day_of_week;
+      if (draft.cadence === "monthly") blob.day_of_month = draft.day_of_month;
+      const r = await fetch(`/api/agents/${agent.id}/digest/preview`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(blob),
+      });
+      if (!r.ok) throw new Error("server " + r.status);
+      const data = await r.json();
+      setPreview(data);
+    } catch (e) {
+      setMsg("Preview failed — try again.");
+      setTimeout(() => setMsg(""), 2200);
+    } finally {
+      setPreviewBusy(false);
+    }
+  };
 
   // When cadence flips → daily / weekly / monthly, snap window_days
   // to the obvious match if the operator hadn't explicitly chosen one.

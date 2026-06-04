@@ -97,7 +97,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 214
+APP_BUILD = 215
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1430,6 +1430,37 @@ async def get_agent_outcome_report(agent_id: int, days: int = 30, request: Reque
     d = max(1, min(int(days), 365))
     analytics = await db.agent_analytics(agent_id, days=d)
     return call_outcomes.assemble_report(agent, analytics)
+
+
+@app.post("/api/agents/{agent_id}/digest/preview")
+async def post_agent_digest_preview(agent_id: int, request: Request) -> dict:
+    """Render the outcome-digest email the way the daily scheduler
+    would, using DRAFT settings posted in the body. No email is sent.
+
+    Body: `{cadence, window_days, day_of_week, day_of_month}` — same
+    shape `agents.digest_settings` takes. Bad / missing values default
+    to `effective_settings`'s defaults so the preview never errors.
+
+    Response: `{ok, html, subject, calls_n, minutes, window_label,
+    cadence_label, day_iso, recipients_count, would_send_today}`.
+    The frontend renders `html` inside a sandboxed iframe so the
+    operator can eyeball EXACTLY what their owners will receive.
+    """
+    from . import eod_digest, email_stub as _es
+    user = await current_user(request)
+    agent = await _require_agent_owned(agent_id, user)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    base_url = _es._public_base_url()
+    out = await eod_digest.render_agent_digest_preview(
+        agent=agent, settings=body, base_url=base_url,
+    )
+    out["ok"] = True
+    return out
 
 
 @app.get("/api/agents/{agent_id}/conventions")
