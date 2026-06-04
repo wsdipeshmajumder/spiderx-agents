@@ -81,6 +81,7 @@ get_agent_org         = db_pg.get_agent_org
 insert_call               = db_pg.insert_call
 list_calls_for_agent      = db_pg.list_calls_for_agent
 get_call_detail           = db_pg.get_call_detail
+update_call_recording_path = db_pg.update_call_recording_path
 list_current_pricing      = db_pg.list_current_pricing
 roll_forward_rate         = db_pg.roll_forward_rate
 agent_pnl_report          = db_pg.agent_pnl_report

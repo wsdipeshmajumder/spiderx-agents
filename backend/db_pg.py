@@ -594,6 +594,20 @@ async def insert_call(record: dict[str, Any]) -> int:
             org_id = row["org_id"] if row else None
             user_id = row["user_id"] if row else None
             ended_ts = _parse_ts(record.get("ended_at"))
+            # Build 206: recording fields land in the same INSERT so a
+            # call row carries its audio metadata from row-1 onwards.
+            # If `recording_started_at` was set by the bridge (writer
+            # opened on session start), we compute `recording_expires_at`
+            # = +180 days here in the WRITE PATH — keeping retention
+            # math in one place (`recordings.expires_at_for`) so the
+            # scheduler purge and the write path can never disagree.
+            from . import recordings as _rec  # local import — fresh on every call
+            rec_started = _parse_ts(record.get("recording_started_at"))
+            rec_expires = (
+                _rec.expires_at_for(rec_started)
+                if rec_started is not None
+                else None
+            )
             cid = await conn.fetchval(
                 """
                 INSERT INTO calls (
@@ -601,13 +615,17 @@ async def insert_call(record: dict[str, Any]) -> int:
                     outcome, reason, summary, final_message,
                     extracted, transcript,
                     input_tokens, output_tokens, cached_tokens, model_id, cost_paise,
-                    sentiment, lead_quality, lead_signals
+                    sentiment, lead_quality, lead_signals,
+                    recording_path, recording_format, recording_size_bytes,
+                    recording_started_at, recording_expires_at
                 ) VALUES (
                     $1, $2, COALESCE($3, now()), COALESCE($4, now()), $5,
                     $6, $7, $8, $9,
                     $10, $11,
                     $12, $13, $14, $15, $16,
-                    $17, $18, $19
+                    $17, $18, $19,
+                    $20, $21, $22,
+                    $23, $24
                 ) RETURNING id
                 """,
                 int(record["agent_id"]),
@@ -628,6 +646,11 @@ async def insert_call(record: dict[str, Any]) -> int:
                 record.get("sentiment"),
                 record.get("lead_quality"),
                 record.get("lead_signals"),
+                record.get("recording_path"),
+                record.get("recording_format"),
+                record.get("recording_size_bytes"),
+                rec_started,
+                rec_expires,
             )
             # Phase 9b denormalisation — keep agents.last_call_at + calls_count
             # in lockstep with the calls table. `list_agents` reads these
@@ -906,7 +929,9 @@ async def get_call_detail(agent_id: int, call_id: int) -> Optional[dict[str, Any
         r = await conn.fetchrow(
             "SELECT id, agent_id, started_at, ended_at, duration_s, outcome, reason, "
             "       summary, final_message, extracted, transcript, "
-            "       sentiment, lead_quality, lead_signals "
+            "       sentiment, lead_quality, lead_signals, "
+            "       recording_path, recording_format, recording_size_bytes, "
+            "       recording_started_at, recording_expires_at, recording_purged_at "
             "FROM calls WHERE id = $1 AND agent_id = $2",
             int(call_id), int(agent_id),
         )
@@ -1530,6 +1555,25 @@ async def admin_recent_calls(
     async with pool.acquire() as conn:
         rs = await conn.fetch(sql, *params)
     return _records_to_list(rs)
+
+
+async def update_call_recording_path(call_id: int, new_rel_path: str) -> None:
+    """Point a calls row at the FINAL on-disk recording directory.
+
+    end_call inserts the row with the temp-token path (`<agent_id>/<token>`),
+    then renames the directory to the canonical `<agent_id>/<call_id>`
+    form once it has the real id back from insert_call. This is the
+    single tiny UPDATE that keeps the DB pointer in lockstep with the
+    rename. No-op if `new_rel_path` is None / empty so a recording
+    failure doesn't wipe the column."""
+    if not new_rel_path:
+        return
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE calls SET recording_path = $1 WHERE id = $2",
+            new_rel_path, int(call_id),
+        )
 
 
 async def admin_orgs_lookup() -> list[dict[str, Any]]:

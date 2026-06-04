@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 205;
+const SXAI_BUILD = 206;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -5081,13 +5081,28 @@ function CallDetailModal({ loading, data, agent, onClose }) {
                 <div class="call-detail-meta-cell">
                   <div class="call-detail-meta-label">▶️ Recording</div>
                   ${data.recording_available
-                    ? html`<audio controls src=${data.recording_url} class="call-detail-audio"></audio>`
+                    ? html`
+                      <div class="call-detail-rec-row">
+                        <audio controls src=${data.recording_caller_url} class="call-detail-audio" title="Caller channel"></audio>
+                        <audio controls src=${data.recording_agent_url}  class="call-detail-audio" title="Agent channel"></audio>
+                      </div>
+                    `
                     : html`
                       <button class="db-btn-primary call-detail-rec-btn" type="button" disabled
-                              title=${data.recording_status || "Audio recording coming soon — the transcript below is the source of truth."}>
-                        <span>▶</span><span>Play Recording</span>
+                              title=${data.recording_status || ""}>
+                        <span>▶</span><span>Not available</span>
                       </button>
                     `}
+                  ${data.recording_expires_at && !data.recording_purged_at ? html`
+                    <div class="call-detail-rec-meta">
+                      Retained until <b>${fmtDate(data.recording_expires_at).split(",")[0]}</b> · 180-day policy
+                    </div>
+                  ` : ""}
+                  ${data.recording_purged_at ? html`
+                    <div class="call-detail-rec-meta call-detail-rec-meta-purged">
+                      Purged ${fmtDate(data.recording_purged_at)}
+                    </div>
+                  ` : ""}
                 </div>
               </div>
 

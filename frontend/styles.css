@@ -11616,6 +11616,22 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
 .call-detail-rec-btn:disabled { cursor: not-allowed; opacity: 0.55; }
 .call-detail-rec-btn > span:first-child { font-size: 11px; }
 .call-detail-audio { width: 100%; max-width: 320px; }
+/* Build 206 — two-channel recording rows in Call Details. Caller + agent
+   play as separate <audio> tags so the operator can scrub one channel
+   without the other (no cross-talk in QA review). The retention meta
+   line sits right below at 11px secondary tone. */
+.call-detail-rec-row { display: flex; flex-direction: column; gap: 6px; }
+.call-detail-rec-row .call-detail-audio { max-width: 280px; height: 32px; }
+.call-detail-rec-meta {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #6a6f7d;
+  line-height: 1.4;
+}
+.call-detail-rec-meta b { color: #1f2230; font-weight: 600; }
+.call-detail-rec-meta-purged { color: #b91c1c; }
+:root[data-theme="dark"] .call-detail-rec-meta { color: #9095a3; }
+:root[data-theme="dark"] .call-detail-rec-meta b { color: #e8e9ef; }
 
 .call-detail-section { margin: 16px 0; }
 .call-detail-section-label { font-size: 13px; font-weight: 600; color: #1f2230; margin-bottom: 8px; }

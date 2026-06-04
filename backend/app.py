@@ -66,6 +66,16 @@ async def _startup() -> None:
             "daily_eod_digest", "0 19 * * *",
             eod_digest.run_daily_eod_digest, tz="Asia/Kolkata",
         )
+        # 03:00 IST daily — purge call recordings past their 180-day
+        # retention window (build 206). Runs at 03:00 so it's well
+        # clear of the EOD digest job (19:00) and the price-check
+        # (05:00) — keeps disk-IO peaks from overlapping with email
+        # SMTP + scraping windows.
+        from . import recordings as _rec
+        scheduler.register(
+            "daily_recording_purge", "0 3 * * *",
+            _rec.run_daily_recording_purge, tz="Asia/Kolkata",
+        )
         await scheduler.start()
         log.info("scheduler: started with %d job(s)", len(scheduler.list_jobs()))
     except Exception as e:  # noqa: BLE001
@@ -87,7 +97,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 205
+APP_BUILD = 206
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1188,6 +1198,24 @@ async def agent_call_detail(agent_id: int, call_id: int, request: Request) -> di
             # Plain-text legacy — render as a single model turn so the
             # operator at least sees what was captured.
             turns = [{"role": "model", "text": raw_tx.strip()}]
+    # Build 206 — surface recording metadata. Three states:
+    #   • recording_path is None → recording was off or write failed
+    #   • recording_purged_at is set → file was deleted past retention
+    #   • otherwise → available for download via the per-call endpoint
+    rec_path  = row.get("recording_path")
+    rec_purged = row.get("recording_purged_at")
+    rec_avail  = bool(rec_path) and not rec_purged
+    if rec_avail:
+        rec_status = (
+            f"Recording retained until {row['recording_expires_at']}"
+            if row.get("recording_expires_at") else "Recording available"
+        )
+    elif rec_purged:
+        rec_status = "Recording was purged at end of the 180-day retention window."
+    elif rec_path:
+        rec_status = "Recording captured but file is missing on disk."
+    else:
+        rec_status = "Recording was not captured for this call."
     return {
         "id": row.get("id"),
         "agent_id": row.get("agent_id"),
@@ -1203,9 +1231,57 @@ async def agent_call_detail(agent_id: int, call_id: int, request: Request) -> di
         "lead_quality": row.get("lead_quality"),
         "lead_signals": row.get("lead_signals"),
         "transcript_turns": turns,
-        "recording_available": False,
-        "recording_status": "Audio recording is coming in a future update — for now the transcript is the source of truth.",
+        "recording_available": rec_avail,
+        "recording_status": rec_status,
+        "recording_expires_at": (
+            str(row["recording_expires_at"]) if row.get("recording_expires_at") else None
+        ),
+        "recording_started_at": (
+            str(row["recording_started_at"]) if row.get("recording_started_at") else None
+        ),
+        "recording_purged_at": (
+            str(row["recording_purged_at"]) if row.get("recording_purged_at") else None
+        ),
+        "recording_size_bytes": row.get("recording_size_bytes"),
+        # URLs the dashboard can hit to stream the audio. Both 404 if the
+        # file isn't on disk; the UI hides the buttons in that case.
+        "recording_caller_url": f"/api/agents/{row.get('agent_id')}/calls/{row.get('id')}/recording/caller.wav" if rec_avail else None,
+        "recording_agent_url":  f"/api/agents/{row.get('agent_id')}/calls/{row.get('id')}/recording/agent.wav"  if rec_avail else None,
     }
+
+
+@app.get("/api/agents/{agent_id}/calls/{call_id}/recording/{stream:path}")
+async def agent_call_recording(
+    agent_id: int, call_id: int, stream: str, request: Request,
+):
+    """Stream one of the two channels of a call recording.
+
+    `stream` is `caller.wav` or `agent.wav` — anything else 404s, which
+    closes the door on path traversal via the URL. The auth gate on
+    the call detail endpoint applies here too: the agent must be
+    owned by the requesting user's org.
+
+    The file is served straight off disk via FileResponse — no
+    streaming generator, no S3 signed-URL dance. When the recordings
+    volume gets big enough to need a CDN, this endpoint flips to
+    returning a redirect; the URL the dashboard uses stays the same.
+    """
+    if stream not in {"caller.wav", "agent.wav"}:
+        raise HTTPException(status_code=404, detail="unknown stream")
+    await _require_agent_owned(agent_id, await current_user(request))
+    row = await db.get_call_detail(agent_id, call_id)
+    if not row or not row.get("recording_path") or row.get("recording_purged_at"):
+        raise HTTPException(status_code=404, detail="recording not available")
+    from . import recordings as _rec
+    target = _rec.RECORDING_ROOT / str(row["recording_path"]) / stream
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="recording file missing")
+    from fastapi.responses import FileResponse
+    return FileResponse(
+        path=str(target),
+        media_type="audio/wav",
+        filename=f"call-{call_id}-{stream}",
+    )
 
 
 @app.patch("/api/agents/{agent_id}")

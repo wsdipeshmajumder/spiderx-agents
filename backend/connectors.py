@@ -531,7 +531,30 @@ async def handle(connector_id: str, args: dict[str, Any], agent: dict[str, Any])
                 "sentiment":     sentiment,
                 "lead_quality":  lead_quality,
                 "lead_signals":  lead_signals,
+                # Build 206 — recording-started marker. Filled below from the
+                # writer's actual open time. We pre-compute `recording_started_at`
+                # here so insert_call can stamp `recording_expires_at` (+180d)
+                # in the same INSERT, keeping retention math co-located.
+                "recording_started_at": agent.get("_recording_started_iso"),
             }
+            # Build 206 — finalize the call recording writer (if one was
+            # opened on session start). We do this BEFORE insert_call so
+            # the writer's path/size metadata can land in the same row.
+            # The writer doesn't know the real calls.id yet — pass None
+            # and rename later from the temp-token dir.
+            writer = agent.get("_recording_writer")
+            if writer is not None:
+                try:
+                    meta = writer.finalize(call_id=None)
+                    record["recording_path"]       = meta.get("recording_path")
+                    record["recording_format"]     = meta.get("recording_format")
+                    record["recording_size_bytes"] = meta.get("recording_size_bytes")
+                    if meta.get("recording_started_at"):
+                        record["recording_started_at"] = (
+                            meta["recording_started_at"].isoformat()
+                        )
+                except Exception as e:  # noqa: BLE001
+                    log.warning("end_call: recording finalize failed: %s", e)
             call_id = None
             try:
                 # db.insert_call became async at the Phase-1 cutover; await it
@@ -539,6 +562,25 @@ async def handle(connector_id: str, args: dict[str, Any], agent: dict[str, Any])
                 call_id = await db.insert_call(record)
             except Exception as e:  # noqa: BLE001
                 log.exception("end_call: db.insert_call failed: %s", e)
+            # Build 206 — now that we have the real call_id, rename the
+            # recording directory from the temp token to call_id form so
+            # the on-disk layout matches the DB row. Best-effort.
+            if writer is not None and call_id and record.get("recording_path"):
+                try:
+                    from . import recordings as _rec
+                    old_rel = record["recording_path"]
+                    new_rel = _rec.relative_path_for(int(agent["id"]), int(call_id))
+                    old_abs = _rec.RECORDING_ROOT / old_rel
+                    new_abs = _rec.RECORDING_ROOT / new_rel
+                    if old_abs.exists() and not new_abs.exists():
+                        new_abs.parent.mkdir(parents=True, exist_ok=True)
+                        old_abs.rename(new_abs)
+                        # Update the freshly-inserted row to point at the
+                        # final path. The audio files are now under the
+                        # canonical layout the daily purge job scans.
+                        await db.update_call_recording_path(int(call_id), new_rel)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("end_call: recording rename failed: %s", e)
 
             # Fire the agent's webhook (optional, fire-and-forget).
             webhook_url = agent.get("webhook_url")

@@ -1213,6 +1213,34 @@ def _agent_system_prompt(agent: dict[str, Any]) -> str:
     else:
         small_talk_block = '    - "How can I help?"'
 
+    # Build 206 — recording disclosure. If the operator has the
+    # `recording_disclosed` toggle ON (default true), the agent is told
+    # to drop a one-line notice right after her greeting. Many India /
+    # EU jurisdictions require a verbal disclosure when a call is being
+    # recorded; the legal-burden of saying it lives with US, not the
+    # operator. Block is OMITTED entirely if disclosure is off — keeps
+    # the prompt tight and avoids a confusing "disclosure is off but
+    # the agent might still say it" gap.
+    recording_disclosure_block = ""
+    if agent.get("recording_disclosed", True) and agent.get("recording_enabled", True):
+        recording_disclosure_block = (
+            "\n━━━━━━━━━━━━━ PRIVACY DISCLOSURE (REQUIRED) ━━━━━━━━━━━━━\n"
+            "This call is being recorded for quality and training purposes,\n"
+            "with a 180-day retention window. RIGHT after your greeting on\n"
+            "the FIRST exchange of the call (and only the first), state this\n"
+            "in ONE natural sentence — not stiff legalese. Examples that\n"
+            "work (pick one, vary tone to match the locale):\n"
+            "  • \"Just so you know, this call is recorded for quality.\"\n"
+            "  • \"Quick note — calls here are recorded for training, alright?\"\n"
+            "  • en-IN: \"Bata du, yeh call quality ke liye record ho rahi hai.\"\n"
+            "Then carry on with the caller's reason for calling. Do NOT\n"
+            "ask for consent — this is notice, not opt-in. Do NOT repeat\n"
+            "the disclosure on later turns. If the caller asks about\n"
+            "recording / retention / their data, answer plainly: yes\n"
+            "we record for quality + training, kept 180 days, then\n"
+            "deleted. For anything past that — offer to put them through.\n"
+        )
+
     a_star = f"""━━━━━━━━━━━━━ A-STAR FRONT-OFFICE STANDARDS ━━━━━━━━━━━━━
 You are {name}. You are not "an AI". You are the warmest, sharpest receptionist any caller has had this week. The caller is on the phone right now. Sound like a real human, not a script.
 
@@ -1302,7 +1330,7 @@ Wrapping up — ALWAYS call `end_call`:
   • After calling end_call, say ONE short closing line ("Take care!", "Thanks, bye!") and stop. Do not keep the line open.
   • If end_call returns `rejected: true` (disconnect-safety blocked a too-early imprecise outcome), do not insist — pick a clearer outcome or keep the call alive for another exchange.
 """
-    return a_star
+    return a_star + recording_disclosure_block
 
 
 # ────────────────────────────── tools ────────────────────────────────────
@@ -2702,6 +2730,14 @@ class _SessionState:
         # sessions are tracked via the calls/insert_call path above —
         # this ledger only covers what that path misses.
         self.llm_session: Optional[dict] = None
+        # Build 206 — call recording. Set by run_session when an
+        # agent-kind session opens AND that agent has
+        # `recording_enabled` true. The audio pumps tap this and
+        # forward every inbound + outbound chunk to the writer's
+        # WAV files. None for builder sessions and for any agent
+        # that opted out. Failure to open the writer leaves this as
+        # None (writer's open() returns False, the bridge swallows).
+        self.recording_writer = None  # Optional[recordings.RecordingWriter]
 
 
 _SENTENCE_SPLIT_RE = re.compile(r'(?<=[.?!।؟])\s+')
@@ -2882,6 +2918,10 @@ async def _pump_client_to_gemini(
                              state.audio_in_chunks, peak)
                     last_stats = now
                     peak = 0
+                # Build 206 — tap inbound mic chunk for the call recording
+                # writer. Best-effort; the writer's own methods swallow.
+                if state.recording_writer is not None:
+                    state.recording_writer.write_caller(msg["bytes"])
                 try:
                     await session.send_realtime_input(
                         audio=types.Blob(data=msg["bytes"], mime_type="audio/pcm;rate=16000")
@@ -3005,6 +3045,10 @@ async def _pump_gemini_to_client(
                             # AUDIO modality — PCM chunks for the client
                             # audio engine.
                             state.audio_out_chunks += 1
+                            # Build 206 — tap the outbound TTS chunk for the
+                            # call recording writer (agent channel).
+                            if state.recording_writer is not None:
+                                state.recording_writer.write_agent(part.inline_data.data)
                             await _send_bytes(ws, part.inline_data.data)
                         # DELIBERATELY do not emit part.text here.
                         # Originally added to cover a TEXT-modality
@@ -3537,6 +3581,34 @@ async def run_session(
             import time as _t
             agent["_call_started_at"] = _t.monotonic()
             agent["_call_started_iso"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+            # Build 206 — open the call recording writer if the agent has
+            # `recording_enabled` (default true for every agent). Failures
+            # leave `state.recording_writer = None` so the audio pumps
+            # become a no-op for taps — the call itself runs untouched.
+            # The token used for the temp directory is the same iso start
+            # marker we stamped above; finalize() will rename it to the
+            # real calls.id once insert_call returns.
+            if agent.get("recording_enabled", True):
+                try:
+                    from . import recordings as _rec
+                    token = f"sess-{agent['_call_started_iso'].replace(':','').replace('-','').replace('+','')}"
+                    writer = _rec.RecordingWriter(token, int(agent["id"]))
+                    if writer.open():
+                        state.recording_writer = writer
+                        # Stash the temp token + started_at on the agent
+                        # dict so the end_call / WS-close flush paths can
+                        # call writer.finalize(call_id) AFTER insert_call
+                        # gives us a real id. Two paths reach insert_call;
+                        # both pick up these handles via the agent dict.
+                        agent["_recording_writer"] = writer
+                        agent["_recording_started_iso"] = agent["_call_started_iso"]
+                        log.info(
+                            "recording: opened agent=%s token=%s",
+                            agent.get("id"), token,
+                        )
+                except Exception as e:  # noqa: BLE001
+                    log.warning("recording: open failed (non-fatal): %s", e)
 
             system_prompt = _agent_system_prompt(agent)
             # Per-agent voice_tweaks override the session-wide tweaks for test
@@ -5066,8 +5138,47 @@ async def run_session(
                                         "sentiment":     None,
                                         "lead_quality":  None,
                                         "lead_signals":  None,
+                                        "recording_started_at": agent.get("_recording_started_iso"),
                                     }
+                                    # Build 206 — finalize the recording
+                                    # writer for the abandoned-call path
+                                    # too, so a caller who hung up still
+                                    # leaves a row pointing at whatever
+                                    # audio we DID capture (often just
+                                    # the agent's greeting + a few
+                                    # caller utterances).
+                                    _writer = agent.get("_recording_writer")
+                                    if _writer is not None:
+                                        try:
+                                            _meta = _writer.finalize(call_id=None)
+                                            record["recording_path"]       = _meta.get("recording_path")
+                                            record["recording_format"]     = _meta.get("recording_format")
+                                            record["recording_size_bytes"] = _meta.get("recording_size_bytes")
+                                            if _meta.get("recording_started_at"):
+                                                record["recording_started_at"] = (
+                                                    _meta["recording_started_at"].isoformat()
+                                                )
+                                        except Exception as e:  # noqa: BLE001
+                                            log.warning(
+                                                "ws-close: recording finalize failed: %s", e,
+                                            )
                                     cid = await db.insert_call(record)
+                                    # Build 206 — rename temp-token dir → call_id dir
+                                    if _writer is not None and cid and record.get("recording_path"):
+                                        try:
+                                            from . import recordings as _rec
+                                            _old_rel = record["recording_path"]
+                                            _new_rel = _rec.relative_path_for(int(agent["id"]), int(cid))
+                                            _old_abs = _rec.RECORDING_ROOT / _old_rel
+                                            _new_abs = _rec.RECORDING_ROOT / _new_rel
+                                            if _old_abs.exists() and not _new_abs.exists():
+                                                _new_abs.parent.mkdir(parents=True, exist_ok=True)
+                                                _old_abs.rename(_new_abs)
+                                                await db.update_call_recording_path(int(cid), _new_rel)
+                                        except Exception as e:  # noqa: BLE001
+                                            log.warning(
+                                                "ws-close: recording rename failed: %s", e,
+                                            )
                                     log.info(
                                         "ws-close auto-commit: agent_id=%s call_id=%s turns=%d duration=%.1fs (kind=%s)",
                                         agent.get("id"), cid, len(tx_turns), duration_s, kind,
