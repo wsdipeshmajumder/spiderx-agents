@@ -110,6 +110,9 @@ def _build_agent_section(*, agent: dict, calls: list[dict],
     top_calls = sorted_calls[:3]
 
     grey = {"bg": "#f5f6fa", "fg": "#1f2230"}
+    # Build 205: dropped per-agent "LLM cost" tile from the digest —
+    # operator-facing surface, finance metrics belong on the admin
+    # P&L view. Calls / Minutes / Wins stay.
     widgets_row = (
         '<table cellpadding="0" cellspacing="0" border="0" width="100%" '
         '       style="margin:12px 0 14px;"><tr>'
@@ -117,8 +120,6 @@ def _build_agent_section(*, agent: dict, calls: list[dict],
         + _widget_td("Minutes", f"{total_mins:.1f}", {"bg": "#e0f2fe", "fg": "#075985"})
         + _widget_td("Wins", str(by_kind["success"] + by_kind["qualified"]),
                      {"bg": "#dcfce7", "fg": "#166534"})
-        + _widget_td("LLM cost", f"₹{cost_paise_today/100:.2f}",
-                     {"bg": "#fef3c7", "fg": "#92400e"})
         + '</tr></table>'
     )
 
@@ -229,6 +230,10 @@ def _build_org_digest_html(*, org_name: str, day_iso: str,
     )
 
     grey = {"bg": "#f5f6fa", "fg": "#1f2230"}
+    # Build 205: dropped the "LLM cost" tile from the org tiles row —
+    # same reasoning as the cost-MTD section below: misleading number
+    # (LLM only, no telephony / DID) on a surface that shouldn't carry
+    # finance metrics. Calls / Minutes / Active agents stay.
     org_tiles_html = (
         '<tr><td style="padding:6px 18px 0;">'
         '<table cellpadding="0" cellspacing="0" border="0" width="100%" '
@@ -238,9 +243,6 @@ def _build_org_digest_html(*, org_name: str, day_iso: str,
                      {"bg": "#e0f2fe", "fg": "#075985"})
         + _widget_td("Active agents", str(n_agents),
                      {"bg": "#ede9fe", "fg": "#6d28d9"})
-        + _widget_td("LLM cost",
-                     f'₹{org_totals["cost_today"]/100:.2f}',
-                     {"bg": "#fef3c7", "fg": "#92400e"})
         + '</tr></table>'
         '</td></tr>'
     )
@@ -248,19 +250,14 @@ def _build_org_digest_html(*, org_name: str, day_iso: str,
     # Per-agent sections — already HTML strings
     agents_html = "".join(s["html"] for s in agent_summaries)
 
-    cost_html = (
-        '<tr><td style="padding:14px 24px 16px;border-top:1px solid #eef0f4;">'
-        '<div style="font-size:13px;font-weight:600;color:#1f2230;margin-bottom:4px;">'
-        'Cost month-to-date (org)</div>'
-        f'<div style="font-size:14px;color:#1f2230;">'
-        f'  Today: <b>₹{org_totals["cost_today"]/100:.2f}</b> · '
-        f'  Month-to-date: <b>₹{org_totals["cost_mtd"]/100:.2f}</b>'
-        f'</div>'
-        '<div style="font-size:11.5px;color:#9095a3;margin-top:4px;">'
-        '  LLM only — telephony + DID rental excluded.'
-        '</div>'
-        '</td></tr>'
-    )
+    # Build 205: the operator-facing digest used to surface an "LLM-only,
+    # telephony + DID rental excluded" cost strip here. That number was
+    # misleading (it under-reports actual COGS) AND the email isn't the
+    # right surface for finance metrics anyway — that lives on the
+    # super-admin P&L view. Section dropped; the cost roll-up still gets
+    # written to the events table (`cost.org.monthly.computed`) for
+    # internal observability, just not pushed to the org owner's inbox.
+    cost_html = ""
 
     cta_html = (
         '<tr><td align="left" style="padding:14px 24px 22px;">'
@@ -461,15 +458,17 @@ async def _digest_one_org(*, org_id: int, agent_ids: list[int],
         org_totals=totals, base_url=base_url,
     )
     n_agents = len(agent_summaries)
+    # Build 205: dropped cost lines from the plain-text body and the
+    # subject. The org owner doesn't want a "LLM-only" cost number in
+    # their inbox — it under-reports real COGS (no telephony / DID),
+    # and that surface isn't where finance reviews margins anyway.
     txt_body = (
         f"Daily digest for {org_name} — {day_iso}\n\n"
         f"  {totals['calls']} call(s) across {n_agents} agent(s)\n"
-        f"  Minutes:        {totals['minutes']:.1f}\n"
-        f"  Cost today:     ₹{totals['cost_today']/100:.2f}\n"
-        f"  Month-to-date:  ₹{totals['cost_mtd']/100:.2f}\n\n"
+        f"  Minutes:        {totals['minutes']:.1f}\n\n"
         + "".join(
             f"  • {s['agent_name']}: {s['calls']} call(s), "
-            f"{s['minutes']:.1f} min, ₹{s['cost_today']/100:.2f}\n"
+            f"{s['minutes']:.1f} min\n"
             for s in agent_summaries
         )
         + f"\nOpen the dashboard: {base_url}/agents\n"
@@ -478,7 +477,7 @@ async def _digest_one_org(*, org_id: int, agent_ids: list[int],
     subject = (
         f"[{org_name}] {totals['calls']} call"
         f"{'' if totals['calls'] == 1 else 's'} today across {n_agents} agent"
-        f"{'' if n_agents == 1 else 's'} — ₹{totals['cost_today']/100:.2f}"
+        f"{'' if n_agents == 1 else 's'}"
     )
 
     for m in owners:
