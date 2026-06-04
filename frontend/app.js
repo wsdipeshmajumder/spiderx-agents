@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 211;
+const SXAI_BUILD = 212;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1937,6 +1937,13 @@ function industryToPath(id) {
 function LandingHero({ agents, locale, onBuild, onOpenAgents, blobSize, blobMode, engineRef, onPressStart, onPressEnd, onPressCancel, initialIndustry, onIndustryChange }) {
   const isReturning = (agents || []).length > 0;
   const [showLocale, setShowLocale] = useState(false);
+  // Build 212 — ref the picker wrap so the outside-click handler can
+  // tell "inside" from "outside". Previously a click on a button BEHIND
+  // the picker would close it AND trigger that button's onClick — the
+  // user observed "click outside the picker → page navigates to
+  // /agent/rohan/profile". Using mousedown + a contains() check stops
+  // the close handler from leaking the click downstream.
+  const localePickerRef = useRef(null);
   const [prompt, setPrompt] = useState("");
   // Selected industry preset (null = "Any industry"). Seeded from the
   // route (/for-<slug> resolves to initialIndustry) and kept in sync if
@@ -1993,9 +2000,25 @@ function LandingHero({ agents, locale, onBuild, onOpenAgents, blobSize, blobMode
   };
   useEffect(() => {
     if (!showLocale) return;
-    const close = () => setShowLocale(false);
-    setTimeout(() => window.addEventListener("click", close, { once: true }), 0);
-    return () => window.removeEventListener("click", close);
+    // mousedown fires BEFORE click, so we can swallow the event before
+    // it reaches whatever button is sitting under the popover. Only
+    // trigger close if the click landed OUTSIDE the picker wrap —
+    // clicks INSIDE (menu items, the toggle button itself) are handled
+    // by their own onClick handlers.
+    const onDown = (e) => {
+      const wrap = localePickerRef.current;
+      if (wrap && wrap.contains(e.target)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setShowLocale(false);
+    };
+    const onKey = (e) => { if (e.key === "Escape") setShowLocale(false); };
+    document.addEventListener("mousedown", onDown, true);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown, true);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [showLocale]);
 
   // The list a user can actually pick from. Keep tight (≤8) so the popover
@@ -2025,7 +2048,7 @@ function LandingHero({ agents, locale, onBuild, onOpenAgents, blobSize, blobMode
 
   return html`
     <section class="lp" aria-labelledby="lp-headline">
-      <div class="lp-locale-wrap">
+      <div class="lp-locale-wrap" ref=${localePickerRef}>
         <button class="lp-locale" type="button" aria-haspopup="listbox" aria-expanded=${showLocale}
                 onClick=${(e) => { e.stopPropagation(); setShowLocale((s) => !s); }}>
           <span class="lp-locale-flag" aria-hidden="true">${locale.countryFlag}</span>
@@ -3050,9 +3073,23 @@ function WizardView({ industry, locale, initialText, presets, onClose, onSwitchT
     } else {
       const inputType = q.type === "email" ? "email" : q.type === "phone" ? "tel" : "text";
       const shown = Array.isArray(v) ? v.join(", ") : (v == null ? "" : v);
+      // Build 212 — defensive against browser autofill cross-pollination:
+      //   • `name` is q.id so each input has a unique identifier
+      //   • `autoComplete="off"` blocks Chrome from grouping the fields
+      //     under a single "address book" entry and overwriting siblings
+      //   • The wrapping div already keys by q.id; the explicit `key`
+      //     here protects against any DOM-node reuse when step content
+      //     reflows during re-render.
+      // Symptom that prompted this: typing in "business_name" was
+      // observed overwriting "services_offered" with the same text.
       control = html`<input
+        key=${"wiz-input-" + q.id}
         class=${"wiz-input" + (err ? " wiz-input-err" : "") + (prefilled[q.id] ? " wiz-input-prefilled" : "")}
         type=${inputType}
+        name=${q.id}
+        autoComplete="off"
+        autoCorrect="off"
+        spellCheck="false"
         value=${shown}
         placeholder=${q.hint || ""}
         onInput=${(e) => setAnswer(q.id, e.target.value)} />`;
