@@ -7026,6 +7026,60 @@ button.db-stat:disabled { cursor: default; opacity: 0.7; }
 }
 :root[data-theme="dark"] .oc-digest-preview { background: #14182a; border-color: #2f3550; color: #93c5fd; }
 :root[data-theme="dark"] .oc-digest-footer { border-top-color: #2a2f3e; }
+
+/* DigestPreviewModal (build 215) — server-rendered email inside a
+   sandboxed iframe so the operator sees byte-for-byte what owners
+   will receive. */
+.db-digest-preview-modal {
+  max-width: 760px;
+  width: 92%;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+}
+.db-digest-preview-modal .db-modal-head h2 { margin: 0 0 4px; font-size: 18px; }
+.db-digest-preview-sub {
+  font-size: 12px;
+  color: #6a6f7d;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.db-digest-not-today { color: #b45309; font-weight: 600; }
+.db-digest-preview-meta {
+  padding: 10px 22px;
+  background: #f7f8fc;
+  border-bottom: 1px solid #e6e7ec;
+  font-size: 13px;
+}
+.db-digest-preview-meta-row { display: flex; gap: 10px; }
+.db-digest-preview-meta-label {
+  font-weight: 600;
+  color: #6a6f7d;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+  align-self: center;
+  min-width: 60px;
+}
+.db-digest-preview-meta-value { font-weight: 500; color: #1f2230; word-break: break-word; }
+.db-digest-preview-frame-wrap {
+  flex: 1;
+  min-height: 320px;
+  overflow: hidden;
+  background: #eef0f4;
+}
+.db-digest-preview-frame {
+  width: 100%;
+  height: 100%;
+  min-height: 480px;
+  border: 0;
+  background: #eef0f4;
+}
+:root[data-theme="dark"] .db-digest-preview-sub { color: #9095a3; }
+:root[data-theme="dark"] .db-digest-preview-meta { background: #14171f; border-bottom-color: #2a2f3e; }
+:root[data-theme="dark"] .db-digest-preview-meta-label { color: #9095a3; }
+:root[data-theme="dark"] .db-digest-preview-meta-value { color: #e8e9ef; }
+
 :root[data-theme="dark"] .oc-kpi, :root[data-theme="dark"] .oc-row, :root[data-theme="dark"] .oc-catalogue-row { background: #14171f; border-color: #2a2f3e; }
 :root[data-theme="dark"] .oc-kpi-value, :root[data-theme="dark"] .oc-row-name, :root[data-theme="dark"] .oc-row-count, :root[data-theme="dark"] .oc-catalogue-label { color: #f1f3f8; }
 :root[data-theme="dark"] .oc-kpi-label, :root[data-theme="dark"] .oc-kpi-sub, :root[data-theme="dark"] .oc-row-desc, :root[data-theme="dark"] .oc-row-share, :root[data-theme="dark"] .oc-catalogue-desc { color: #9aa0ad; }

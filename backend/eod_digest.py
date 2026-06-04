@@ -397,6 +397,122 @@ def _build_org_digest_html(*, org_name: str, day_iso: str,
     )
 
 
+# ─── Preview (build 215) ─────────────────────────────────────────────────
+
+
+async def render_agent_digest_preview(
+    agent: dict, settings: dict, base_url: str,
+) -> dict:
+    """Render the digest email for a single agent using `settings` as
+    if it were the saved schedule. Returns {html, subject, calls_n,
+    minutes, window_label, recipients_count, day_iso} — no email is
+    sent, this is purely for the dashboard "Preview" affordance.
+
+    Same code path as the scheduler's per-agent section so the
+    preview is byte-faithful to what the org owner will actually
+    receive. The org wrapper (tiles, cost strip, footer) is the same
+    one the daily job uses, just with a one-agent agent_summaries
+    list instead of the full org.
+    """
+    from . import db_pg as _dbp
+    from zoneinfo import ZoneInfo
+
+    ist = ZoneInfo("Asia/Kolkata")
+    now_ist = datetime.now(ist)
+    day_start_ist = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
+    month_start_utc = day_start_ist.replace(day=1).astimezone(timezone.utc)
+    day_iso = day_start_ist.strftime("%A, %d %B %Y")
+
+    # Override settings with the draft — preview shows what the saved
+    # schedule WOULD look like, not what the agent currently has.
+    sx = effective_settings({"digest_settings": settings})
+    win_start_utc, win_end_utc = window_for(sx, day_start_ist)
+    aid = int(agent["id"])
+
+    pool = await _dbp.get_pool()
+    async with pool.acquire() as conn:
+        cs = await conn.fetch(
+            "SELECT id, started_at, ended_at, duration_s, outcome, reason, "
+            "       summary, lead_quality, sentiment, lead_signals "
+            "FROM calls "
+            "WHERE agent_id = $1 AND started_at >= $2 AND started_at < $3 "
+            "ORDER BY started_at DESC",
+            aid, win_start_utc, win_end_utc,
+        )
+        today_cost = await conn.fetchval(
+            "SELECT COALESCE(SUM(cost_paise), 0) FROM agent_daily_stats "
+            "WHERE agent_id = $1 AND day = $2::date",
+            aid, day_start_ist.date(),
+        ) or 0
+
+    calls = [dict(r) for r in cs]
+    for c in calls:
+        if c.get("started_at"):
+            c["started_at"] = c["started_at"].isoformat()
+
+    win_label = window_human_label(sx)
+    n_calls = len(calls)
+    total_mins = sum(float(c.get("duration_s") or 0) for c in calls) / 60.0
+
+    # Render the per-agent section (uses the same builder as the
+    # scheduler so any tweak there shows up here automatically).
+    section_html = _build_agent_section(
+        agent=agent, calls=calls,
+        cost_paise_today=int(today_cost),
+        base_url=base_url,
+        window_label=win_label,
+    ) if calls else (
+        # Empty-window preview — explain what will (not) happen rather
+        # than rendering an empty box. Operator picked weekly+7d but
+        # the agent had no calls all week, etc.
+        '<tr><td style="padding:24px;border-top:1px solid #eef0f4;text-align:center;color:#6a6f7d;font-size:13px;">'
+        f'No calls in the {html.escape(win_label)} for this agent.<br>'
+        f'<span style="font-size:12px;">Preview shows what subscribers would see — the live digest skips agents with zero calls in their window.</span>'
+        '</td></tr>'
+    )
+
+    # Resolve org name + recipient count (we don't send, just count).
+    members = await _dbp.list_org_members(int(agent.get("org_id") or 0)) or []
+    owners = [m for m in members if m.get("role") == "owner"] or members
+    org = await _dbp.get_org_for_user(owners[0]["user_id"]) if owners else None
+    org_name = (org or {}).get("name") or "your team"
+
+    totals = {
+        "calls": n_calls,
+        "minutes": total_mins,
+        "cost_today": int(today_cost),
+        "cost_mtd": 0,
+    }
+    html_body = _build_org_digest_html(
+        org_name=org_name, day_iso=day_iso,
+        agent_summaries=[{
+            "agent_id": aid, "agent_name": agent.get("name"),
+            "html": section_html, "calls": n_calls, "minutes": total_mins,
+            "cost_today": int(today_cost), "cost_mtd": 0,
+        }],
+        org_totals=totals, base_url=base_url,
+    )
+
+    cadence_label = {"daily": "Daily", "weekly": "Weekly",
+                     "monthly": "Monthly", "off": "Off"}.get(sx["cadence"], "Daily")
+    subject = (
+        f"[{org_name}] {n_calls} call{'' if n_calls == 1 else 's'} · "
+        f"{agent.get('name')} · {win_label}"
+    )
+
+    return {
+        "html": html_body,
+        "subject": subject,
+        "calls_n": n_calls,
+        "minutes": round(total_mins, 1),
+        "window_label": win_label,
+        "cadence_label": cadence_label,
+        "day_iso": day_iso,
+        "recipients_count": len([m for m in owners if (m.get("email") or "").strip()]),
+        "would_send_today": should_send_today(sx, now_ist),
+    }
+
+
 # ─── scheduler entry ─────────────────────────────────────────────────────
 
 

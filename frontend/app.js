@@ -5136,11 +5136,13 @@ function OutcomeDigestSchedule({ agent, onSaved }) {
   const [draft, setDraft] = useState(initial);
   const [busy,  setBusy]  = useState(false);
   const [msg,   setMsg]   = useState("");
-  // Build 215 — preview state. `preview` holds the server-rendered
+  // Build 215 — preview state. `previewData` holds the server-rendered
   // {html, subject, calls_n, minutes, ...} so the modal can show the
   // EXACT email the scheduler would mail with these draft settings.
+  // (Named with the Data suffix because `preview` is already the
+  // plain-English schedule label string lower in this component.)
   const [previewBusy, setPreviewBusy] = useState(false);
-  const [preview,     setPreview]     = useState(null);
+  const [previewData, setPreviewData] = useState(null);
 
   const dirty = (
     draft.cadence      !== initial.cadence ||
@@ -5162,7 +5164,7 @@ function OutcomeDigestSchedule({ agent, onSaved }) {
       });
       if (!r.ok) throw new Error("server " + r.status);
       const data = await r.json();
-      setPreview(data);
+      setPreviewData(data);
     } catch (e) {
       setMsg("Preview failed — try again.");
       setTimeout(() => setMsg(""), 2200);
@@ -5287,20 +5289,95 @@ function OutcomeDigestSchedule({ agent, onSaved }) {
         <span>${preview}</span>
       </div>
 
-      ${dirty || msg ? html`
-        <div class="oc-digest-footer">
-          <div class=${"oc-edit-msg" + (msg.startsWith("Couldn't") ? " is-err" : " is-ok")}>
-            ${msg || "You have unsaved changes."}
-          </div>
-          <div>
+      <!-- Build 215 — Preview button is ALWAYS shown (not gated on dirty)
+           so the operator can audit the current saved schedule too,
+           not just unsaved drafts. -->
+      <div class="oc-digest-footer">
+        <div class=${"oc-edit-msg" + (msg.startsWith("Couldn't") || msg.startsWith("Preview") ? " is-err" : " is-ok")}>
+          ${msg || (dirty ? "You have unsaved changes." : "")}
+        </div>
+        <div>
+          <button class="db-btn-ghost db-btn-sm" type="button"
+                  onClick=${openPreview} disabled=${previewBusy || isOff}
+                  title=${isOff ? "Digest is off — nothing to preview" : "See the exact email that would go out"}>
+            ${previewBusy ? "Rendering…" : "👁 Preview email"}
+          </button>
+          ${dirty ? html`
             <button class="db-btn-ghost db-btn-sm" type="button" onClick=${discard} disabled=${busy}>Discard</button>
             <button class="db-btn-primary db-btn-sm" type="button" onClick=${save} disabled=${busy || !dirty}>
               ${busy ? "Saving…" : "Save schedule"}
             </button>
-          </div>
+          ` : ""}
         </div>
+      </div>
+
+      ${previewData ? html`
+        <${DigestPreviewModal} data=${previewData}
+                                draft=${draft}
+                                onClose=${() => setPreviewData(null)} />
       ` : ""}
     </section>
+  `;
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────
+// DigestPreviewModal (build 215) — shows the server-rendered HTML
+// inside a sandboxed iframe so the operator sees byte-for-byte what
+// owners will receive. The summary strip across the top echoes the
+// subject + recipient count + window + whether today's schedule
+// would actually fire — useful when previewing a "weekly on Monday"
+// draft on a Friday ("would_send_today: false → no email today").
+// ─────────────────────────────────────────────────────────────────────────
+function DigestPreviewModal({ data, draft, onClose }) {
+  // Esc-to-close + body-scroll-lock while open.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  return html`
+    <div class="db-modal-backdrop" onClick=${onClose}>
+      <div class="db-modal db-digest-preview-modal" onClick=${(e) => e.stopPropagation()}>
+        <header class="db-modal-head">
+          <div>
+            <h2>Email preview</h2>
+            <div class="db-digest-preview-sub">
+              ${data.cadence_label} · ${data.window_label} ·
+              ${data.calls_n} call${data.calls_n === 1 ? "" : "s"} ·
+              ${data.recipients_count} recipient${data.recipients_count === 1 ? "" : "s"}
+              ${!data.would_send_today ? html`
+                <span class="db-digest-not-today" title="Today doesn't match the cadence for these draft settings">
+                  · skipped today
+                </span>
+              ` : ""}
+            </div>
+          </div>
+          <button class="db-modal-close" onClick=${onClose} aria-label="Close">×</button>
+        </header>
+        <div class="db-digest-preview-meta">
+          <div class="db-digest-preview-meta-row">
+            <span class="db-digest-preview-meta-label">Subject</span>
+            <span class="db-digest-preview-meta-value">${data.subject}</span>
+          </div>
+        </div>
+        <div class="db-digest-preview-frame-wrap">
+          <iframe class="db-digest-preview-frame"
+                  sandbox=""
+                  srcdoc=${data.html}
+                  title="Digest email preview"></iframe>
+        </div>
+        <div class="db-modal-actions">
+          <button class="db-btn-ghost" onClick=${onClose}>Close</button>
+        </div>
+      </div>
+    </div>
   `;
 }
 
