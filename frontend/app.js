@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 209;
+const SXAI_BUILD = 210;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -170,12 +170,72 @@ function userInitials(u) {
 // Each accessor (.subj / .obj / .poss / .reflexive) is a function so
 // the caller can request capitalised forms when the pronoun starts a
 // sentence ("He is..." vs "...with him").
+// Build 210 — prettify an unknown enum slug so the dashboard never
+// shows a raw value like `personal_services` to the operator. Used as
+// the fallback in every `labelFor(list, id)` lookup — if the id isn't
+// in the presets registry (sector renamed / removed), we still
+// produce "Personal Services" instead of the slug.
+function _prettifyEnumId(id) {
+  if (!id) return "—";
+  return String(id)
+    .replace(/[_\-]+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 const _FEMALE_VOICES_FE = new Set(["Aoede", "Leda", "Kore", "Zephyr"]);
 const _MALE_VOICES_FE   = new Set(["Charon", "Fenrir", "Puck", "Orus"]);
+// Build 210 — name-based gender inference. Voice was being trusted as
+// the second signal but Eva's save path sometimes stamps a female-voice
+// default on an obviously-male name (Rohan + Aoede → "her" copy across
+// every page). A short list of common South-Asian + English given
+// names corrects the most-visible cases. The operator-set
+// `variables.gender` still wins; the voice still backstops a name we
+// don't recognise.
+const _MALE_NAMES_FE = new Set([
+  "rohan","vikram","arjun","raj","rahul","amit","ravi","sam","sameer",
+  "ali","ahmed","aditya","akash","ajay","ankit","ankur","anil","abhi",
+  "abhishek","aman","aryan","ashok","atul","bharat","chetan","dev",
+  "deepak","dinesh","gaurav","gopal","harish","hari","ishaan","jay",
+  "kabir","karan","kartik","krishna","manav","manish","mohit","naveen",
+  "neeraj","nikhil","nitin","pavan","piyush","prashant","praveen","pratik",
+  "rajesh","rakesh","ramesh","rishabh","rishi","ritesh","rohit","sandeep",
+  "sanjay","santosh","sachin","saurabh","shashank","shyam","siddharth",
+  "sumit","sunil","suresh","tarun","umesh","varun","vinod","vivek","yash",
+  "alex","andrew","ben","ben","brian","chris","dan","daniel","david",
+  "ed","james","jack","jake","john","luke","mark","matt","mike","michael",
+  "nate","nick","paul","peter","ryan","steve","stephen","tom","will",
+  "fenrir","charon",
+]);
+const _FEMALE_NAMES_FE = new Set([
+  "priya","anjali","riya","maya","neha","pooja","kavita","kavya","kiran",
+  "lakshmi","lalita","meera","mira","nisha","payal","preeti","radhika",
+  "rashmi","rekha","ritika","sangeeta","sapna","seema","shilpa","shreya",
+  "simran","sneha","sonia","sunita","swati","tanvi","tara","trisha","uma",
+  "vandana","vidya","aanya","aarya","aisha","ananya","aparna","asha",
+  "deepika","diya","divya","fatima","gauri","hema","ishita","jyoti",
+  "kajal","kalpana","komal","leela","madhuri","manisha","mohini","nandini",
+  "naina","nehal","nitya","palak","pallavi","parul","poonam","priyanka",
+  "ragini","rani","reshma","richa","ridhi","ruchi","ruchika","sakshi",
+  "saloni","sandhya","saraswati","savita","shanti","sharmila","shobha",
+  "shradha","sita","smita","sushma","tanya","tina","varsha","veena","vinita",
+  "yamini","zoya","zoe","alice","amy","anna","beth","claire","emma",
+  "emily","eva","grace","jane","julia","kate","laura","lily","mary",
+  "olivia","sara","sarah","sophie","tina","aoede","leda","kore",
+]);
 function _resolveGender(agent) {
   if (!agent) return "neutral";
   const stored = String(agent.variables?.gender || "").trim().toLowerCase();
   if (stored === "female" || stored === "male" || stored === "neutral") return stored;
+  // Name-first inference — most operators don't set gender explicitly,
+  // and the agent's name is the strongest signal (Eva called him Rohan
+  // → he's a he, regardless of which TTS voice the save path picked).
+  const firstName = String(agent.name || "")
+    .trim()
+    .split(/\s+/)[0]
+    .toLowerCase()
+    .replace(/[^a-z]/g, "");
+  if (_MALE_NAMES_FE.has(firstName))   return "male";
+  if (_FEMALE_NAMES_FE.has(firstName)) return "female";
   const voice = String(agent.voice || "").trim();
   if (_FEMALE_VOICES_FE.has(voice)) return "female";
   if (_MALE_VOICES_FE.has(voice)) return "male";
@@ -486,7 +546,7 @@ function TheatricalUnveal({ agent, presets, onDone }) {
     return () => clearTimeout(t);
   }, [agent?.id]);
   if (!agent) return null;
-  const labelFor = (list, id) => (list || []).find((x) => x.id === id)?.label || id;
+  const labelFor = (list, id) => (list || []).find((x) => x.id === id)?.label || _prettifyEnumId(id);
   const sector = labelFor(presets?.sectors, agent.sector);
   const locale = labelFor(presets?.locales, agent.locale);
   return html`
@@ -567,7 +627,7 @@ function AgentCockpit({ agent, presets, onTest, onEdit, onGoLive, onDismiss, onT
     return { region: "your region", provider: "Twilio", note: "Twilio is the default — Plivo, Telnyx & Vonage also supported" };
   })();
 
-  const labelFor = (list, id) => (list || []).find((x) => x.id === id)?.label || id;
+  const labelFor = (list, id) => (list || []).find((x) => x.id === id)?.label || _prettifyEnumId(id);
   const sectorLabel = labelFor(presets?.sectors, agent.sector);
   const localeLabel = labelFor(presets?.locales, agent.locale);
   const connectors = (agent.connectors || []).map((id) => ({ id, label: labelFor(presets?.connectors, id) }));
@@ -4140,9 +4200,9 @@ function AgentExtraInfoPage({ agent, agents, presets, plan, onNav, refreshAgent 
       <div class="db-whatgoeswhere">
         <span class="db-whatgoeswhere-label">Where things live:</span>
         <span><b>Business profile</b> — hours, location, contact</span>
-        <span><b>Core purpose</b> — what she's built to do</span>
-        <span><b>Additional info</b> (here) — detailed knowledge she answers with</span>
-        <span><b>Knowledge base</b> — freeform notes &amp; source links</span>
+        <span><b>Core purpose</b> — what ${pronouns(agent).subj}'s built to do</span>
+        <span><b>Additional info</b> (here) — detailed knowledge ${pronouns(agent).subj} answers with</span>
+        <span><b>Knowledge base</b> — freeform notes & source links</span>
       </div>
       <div class="db-info-groups">
         ${groups.map((g) => {
@@ -4241,7 +4301,7 @@ function AgentExtraInfoPage({ agent, agents, presets, plan, onNav, refreshAgent 
 }
 
 function AgentOverviewPage({ agent, agents, presets, plan, stats, onTest, onGoLive, onEdit, onTestPhone, onNav }) {
-  const labelFor = (list, id) => (list || []).find((x) => x.id === id)?.label || id;
+  const labelFor = (list, id) => (list || []).find((x) => x.id === id)?.label || _prettifyEnumId(id);
   const sectorLabel = labelFor(presets?.sectors, agent.sector);
   const localeLabel = labelFor(presets?.locales, agent.locale);
   const greeting = (agent.greeting || "").trim();
@@ -5952,7 +6012,7 @@ function AgentKnowledgePage({ agent, agents, presets, plan, onNav, refreshAgent 
           <div>
             <div class="db-publish-status">Closed-source knowledge</div>
             <div class="db-publish-copy">
-              ${agent.name || "Your agent"} answers <strong>only</strong> from this page and the business profile — no browsing, no Google, no Wikipedia mid-call. That means: no hallucinated prices, no invented hours, no "let me check online for you". If a fact isn't here, she politely says so or hands the caller off.
+              ${agent.name || "Your agent"} answers <strong>only</strong> from this page and the business profile — no browsing, no Google, no Wikipedia mid-call. That means: no hallucinated prices, no invented hours, no "let me check online for you". If a fact isn't here, ${pronouns(agent).subj} politely says so or hands the caller off.
             </div>
           </div>
         </div>
@@ -5980,7 +6040,7 @@ function AgentKnowledgePage({ agent, agents, presets, plan, onNav, refreshAgent 
       ${kbTab === "notes" ? html`
         <section class="db-panel">
           <h3 class="db-panel-title">What ${agent.name || "your agent"} knows</h3>
-          <p class="db-panel-sub">Hours, prices, FAQs, policies — anything she should be able to answer. Paste freely; she cites only what's here. Anything imported from URLs or uploaded files lands here too, in a clearly-bounded KNOWLEDGE block — edit it like any other text.</p>
+          <p class="db-panel-sub">Hours, prices, FAQs, policies — anything ${pronouns(agent).subj} should be able to answer. Paste freely; ${pronouns(agent).subj} cites only what's here. Anything imported from URLs or uploaded files lands here too, in a clearly-bounded KNOWLEDGE block — edit it like any other text.</p>
           <${MarkdownEditor}
             value=${text}
             onChange=${(v) => setText(v)}
@@ -6639,17 +6699,21 @@ function PhoneAIConventionsPanel({ agent }) {
 function AgentGuardrailsPage({ agent, agents, presets, plan, onNav, refreshAgent }) {
   // Catalogue — single source of truth. Each item has a stable id, a short
   // label, an explanation, and a per-section bucket.
+  // Build 210 — gender-neutral phrasing in the static catalogue. The
+  // catalogue is module-scope (no `agent` in scope to feed to
+  // `pronouns()`), so we lean on "the agent" / passive voice so the
+  // copy reads correctly for every agent regardless of name/voice.
   const DEFAULTS = [
-    { id: "no_med_legal_fin",  label: "No medical, legal, or financial advice", help: "She'll defer to a clinician / lawyer / advisor instead of guessing." },
-    { id: "no_pii_aloud",      label: "Won't read card numbers, OTPs or passwords aloud", help: "Hard rule. She also won't ask the caller to read theirs back." },
-    { id: "human_handoff",     label: "Hands off to a human if the caller asks twice", help: "She offers to text you on WhatsApp / leave a callback." },
+    { id: "no_med_legal_fin",  label: "No medical, legal, or financial advice", help: "Defers to a clinician / lawyer / advisor instead of guessing." },
+    { id: "no_pii_aloud",      label: "Won't read card numbers, OTPs or passwords aloud", help: "Hard rule. Also won't ask the caller to read theirs back." },
+    { id: "human_handoff",     label: "Hands off to a human if the caller asks twice", help: "Offers to text you on WhatsApp / leave a callback." },
   ];
   const DOS = [
     { id: "confirm_booking",   label: "Repeat back the booking time before confirming",     help: "Tightens accuracy — \"so that's Friday 3 PM, is that right?\"" },
     { id: "sms_recap",         label: "Send an SMS recap after every booking",              help: "Caller gets a thread to refer back to." },
-    { id: "language_match",    label: "Switch to the caller's language if she detects one", help: "Hindi caller on a Hindi-English agent? She switches mid-call." },
+    { id: "language_match",    label: "Switch to the caller's language if detected",        help: "Hindi caller on a Hindi-English agent? The agent switches mid-call." },
     { id: "offer_transcript",  label: "Offer to email a transcript at end of call",         help: "Especially useful for support / intake calls." },
-    { id: "name_caller",       label: "Use the caller's name once she has it",              help: "Small thing, big warmth boost." },
+    { id: "name_caller",       label: "Use the caller's name once captured",                help: "Small thing, big warmth boost." },
   ];
   const DONTS = [
     { id: "no_price_promise",  label: "Don't quote prices that aren't in the knowledge base", help: "She'll say \"let me have someone get back to you\" instead." },
@@ -6742,7 +6806,7 @@ function AgentGuardrailsPage({ agent, agents, presets, plan, onNav, refreshAgent
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
             <div>
               <h3 class="db-panel-title">Don'ts — hard limits</h3>
-              <p class="db-panel-sub">Lines ${agent.name} won't cross. She politely redirects when a caller asks.</p>
+              <p class="db-panel-sub">Lines ${agent.name} won't cross. ${pronouns(agent).subjCap} politely redirects when a caller asks.</p>
             </div>
           </div>
           <ul class="db-rules">
@@ -6957,7 +7021,7 @@ function AgentProfilePage({ agent, agents, presets, plan, onNav, refreshAgent, o
   `;
 
   const aboutSection = Accord("about", "About the business", `${aboutFilled}/5`,
-    html`${agent.name} is an <strong>inbound</strong> phone agent — these details are what she'll lean on when callers ask.`,
+    html`${agent.name} is an <strong>inbound</strong> phone agent — these details are what ${pronouns(agent).subj}'ll lean on when callers ask.`,
     html`
       <div class="db-form-grid-2">
         <label class="db-form-field">
@@ -11653,7 +11717,7 @@ function AgentNumbersPage({ agent, agents, presets, plan, onNav, org }) {
 // New light-theme agents list — uses dashboard shell + .db-card primitives.
 function DashboardAgentsList({ agents, presets, plan, onBuildNew, onOpen, onDelete, onNav }) {
   const [q, setQ] = useState("");
-  const labelFor = (list, id) => (list || []).find((x) => x.id === id)?.label || id;
+  const labelFor = (list, id) => (list || []).find((x) => x.id === id)?.label || _prettifyEnumId(id);
   const filter = q.trim().toLowerCase();
   // Searching now also matches against the business name we surface in the
   // header — a user typing "BrightSmile" should find the agent regardless of
@@ -11790,7 +11854,7 @@ function DashboardAgentsList({ agents, presets, plan, onBuildNew, onOpen, onDele
 
 function AgentsListPage({ agents, presets, onBuildNew, onOpen, onDelete }) {
   const [q, setQ] = useState("");
-  const labelFor = (list, id) => (list || []).find((x) => x.id === id)?.label || id;
+  const labelFor = (list, id) => (list || []).find((x) => x.id === id)?.label || _prettifyEnumId(id);
   const filter = q.trim().toLowerCase();
   const filtered = filter
     ? agents.filter((a) => [a.name, a.sector, a.locale, a.persona].some((s) => (s || "").toLowerCase().includes(filter)))
