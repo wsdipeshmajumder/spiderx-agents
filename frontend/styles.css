@@ -6995,6 +6995,51 @@ button.db-stat:disabled { cursor: default; opacity: 0.7; }
 :root[data-theme="dark"] .oc-edit-addcard-title { color: #a5b4fc; }
 :root[data-theme="dark"] .oc-edit-footer { background: linear-gradient(180deg, rgba(20,23,31,0.6) 0%, #14171f 60%); border-top-color: #2a2f3e; }
 
+/* Top-of-page "Email schedule" CTA (build 215b) — pink-purple
+   gradient button in the page actions row that scrolls the operator
+   to the schedule card at the bottom. Hard to miss; shows the current
+   schedule inline as a pill so a quick glance answers "is it on?". */
+.oc-actions-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.oc-schedule-cta {
+  display: inline-flex; align-items: center; gap: 8px;
+  font: inherit; font-size: 13px; font-weight: 600;
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ec4899 0%, #a855f7 100%);
+  color: #ffffff;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(168, 85, 247, 0.25);
+  white-space: nowrap;
+  transition: filter 0.12s ease, transform 0.06s ease;
+}
+.oc-schedule-cta:hover  { filter: brightness(1.06); }
+.oc-schedule-cta:active { transform: translateY(1px); }
+.oc-schedule-cta-icon { font-size: 14px; line-height: 1; }
+.oc-schedule-cta-text { letter-spacing: -0.005em; }
+.oc-schedule-cta-pill {
+  display: inline-flex; align-items: center;
+  font-size: 11px; font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+  letter-spacing: 0.02em;
+}
+.oc-schedule-cta-pill-off { background: rgba(255, 255, 255, 0.16); opacity: 0.85; }
+
+/* Pulse animation — when the CTA scrolls the user to the schedule
+   card, briefly highlight the card so the eye lands on it. */
+@keyframes oc-card-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0); }
+  20%  { box-shadow: 0 0 0 4px rgba(168, 85, 247, 0.35); }
+  100% { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0); }
+}
+.oc-digest-card.is-pulsing {
+  animation: oc-card-pulse 1.6s ease-out;
+  border-color: #a855f7;
+}
+
 /* Email digest schedule card (build 214) */
 .oc-digest-card { padding: 18px 22px 16px; margin-top: 16px; }
 .oc-digest-grid {

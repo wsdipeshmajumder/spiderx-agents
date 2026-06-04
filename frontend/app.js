@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 215;
+const SXAI_BUILD = 216;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -5122,6 +5122,34 @@ const _WEEKDAYS = [
   { value: 6, label: "Sunday" },
 ];
 
+// OutcomeDigestSummary (build 215b) — tiny pill rendered inside the
+// "Email schedule" CTA at the top of the Call outcomes page. Shows the
+// current cadence + window in 1-2 words so the operator can read their
+// current setting without scrolling — "Daily · 24h", "Weekly · Mon · 7d",
+// "Off", etc. Reads agent.digest_settings; falls back to the daily
+// default if the blob is empty.
+function OutcomeDigestSummary({ settings }) {
+  const raw = (settings && typeof settings === "object") ? settings : {};
+  const cad = raw.cadence || "daily";
+  if (cad === "off") {
+    return html`<span class="oc-schedule-cta-pill oc-schedule-cta-pill-off">Off</span>`;
+  }
+  const win = Number(raw.window_days) || 1;
+  const winLabel = win === 1 ? "24h" : `${win}d`;
+  let cadLabel;
+  if (cad === "weekly") {
+    const dows = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+    const dow = Number.isInteger(raw.day_of_week) ? raw.day_of_week : 0;
+    cadLabel = `Weekly · ${dows[dow] || "Mon"}`;
+  } else if (cad === "monthly") {
+    const dom = Number.isInteger(raw.day_of_month) ? raw.day_of_month : 1;
+    cadLabel = `Monthly · ${dom}`;
+  } else {
+    cadLabel = "Daily";
+  }
+  return html`<span class="oc-schedule-cta-pill">${cadLabel} · ${winLabel}</span>`;
+}
+
 function OutcomeDigestSchedule({ agent, onSaved }) {
   const raw = (agent.digest_settings && typeof agent.digest_settings === "object")
     ? agent.digest_settings : {};
@@ -5227,7 +5255,7 @@ function OutcomeDigestSchedule({ agent, onSaved }) {
   })();
 
   return html`
-    <section class="db-panel oc-digest-card">
+    <section class="db-panel oc-digest-card" id="oc-digest-schedule-card">
       <div class="oc-drawer-head">
         <h3 class="db-panel-title">Email digest</h3>
         <p class="db-panel-sub">
@@ -5798,12 +5826,31 @@ function AgentCallOutcomesPage({ agent, agents, presets, plan, onNav }) {
       title="Call outcomes"
       subtitle=${`What's the result of every call — sector ${agent.sector || "—"} · locale ${agent.locale || "—"}.`}
       actions=${html`
-        <div class="oc-range">
-          ${ranges.map((r) => html`
-            <button key=${r.v} type="button"
-                    class=${"oc-range-btn" + (days === r.v ? " is-active" : "")}
-                    onClick=${() => setDays(r.v)}>${r.label}</button>
-          `)}
+        <div class="oc-actions-row">
+          <!-- Build 215b — prominent schedule CTA in the page actions so
+               operators can't miss the feature. Clicking scrolls to the
+               card at the bottom + adds a brief pulse so the eye lands
+               on it without the operator hunting around. -->
+          <button class="oc-schedule-cta" type="button"
+                  title="Set when this agent's outcome digest is emailed (daily / weekly / monthly) + preview"
+                  onClick=${() => {
+                    const el = document.getElementById("oc-digest-schedule-card");
+                    if (!el) return;
+                    el.scrollIntoView({ behavior: "smooth", block: "center" });
+                    el.classList.add("is-pulsing");
+                    setTimeout(() => el.classList.remove("is-pulsing"), 1800);
+                  }}>
+            <span class="oc-schedule-cta-icon" aria-hidden="true">📧</span>
+            <span class="oc-schedule-cta-text">Email schedule</span>
+            <${OutcomeDigestSummary} settings=${agent.digest_settings} />
+          </button>
+          <div class="oc-range">
+            ${ranges.map((r) => html`
+              <button key=${r.v} type="button"
+                      class=${"oc-range-btn" + (days === r.v ? " is-active" : "")}
+                      onClick=${() => setDays(r.v)}>${r.label}</button>
+            `)}
+          </div>
         </div>
       `}
       onNav=${onNav}
