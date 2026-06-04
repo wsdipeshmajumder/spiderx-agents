@@ -10651,7 +10651,62 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * PRICING TAB (build 199) — currently-in-force rates + drift indicators
+ * Build 203: header row with manual "Check rates now" trigger.
  * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Header row above the pricing table: blurb left, last-checked +
+   trigger button right. Wraps on narrow widths so the table stays
+   the focal point on mobile. */
+.ax-pricing-head {
+  display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+  margin: 4px 0 14px;
+}
+.ax-pricing-check {
+  display: flex; gap: 12px; align-items: center;
+  flex-shrink: 0;
+}
+.ax-pricing-check-meta {
+  font-size: 12px;
+  color: #6a6f7d;
+  white-space: nowrap;
+}
+.ax-pricing-check-meta b { color: #1f2230; font-weight: 600; }
+.ax-pricing-check-cron { color: #9095a3; }
+.ax-pricing-check-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #ec4899 0%, #a855f7 100%);
+  color: #ffffff;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+  transition: filter 0.12s ease;
+}
+.ax-pricing-check-btn:hover:not(:disabled) { filter: brightness(1.06); }
+.ax-pricing-check-btn:active:not(:disabled) { transform: translateY(1px); }
+.ax-pricing-check-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+/* Small inline spinner — pure CSS rotation, no extra DOM. */
+.ax-pricing-spin {
+  display: inline-block;
+  width: 13px; height: 13px;
+  border: 2px solid rgba(255,255,255,0.4);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: ax-spin 0.85s linear infinite;
+}
+@keyframes ax-spin { to { transform: rotate(360deg); } }
+
+:root[data-theme="dark"] .ax-pricing-check-meta { color: #a1a4ad; }
+:root[data-theme="dark"] .ax-pricing-check-meta b { color: #e8e9ef; }
+:root[data-theme="dark"] .ax-pricing-check-cron { color: #6a6f7d; }
+
 .db-pricing-table tr.row-warning  td { background: rgba(245, 158, 11, 0.06); }
 .db-pricing-table tr.row-critical td { background: rgba(220, 38, 38, 0.08); }
 .db-pricing-provider {

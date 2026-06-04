@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 202;
+const SXAI_BUILD = 203;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -9997,12 +9997,63 @@ function AdminPricingTab() {
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  // Build 203: manual price-check. The daily_price_check scheduler
+  // runs at 05:00 IST automatically, but ops needs an on-demand
+  // path — "I just rolled forward Plivo's INR rate, let me re-check
+  // before EOD." We re-use the existing scheduler run-now endpoint
+  // (POST /admin/schedulers/{name}/run) so there's one canonical
+  // trigger path; the button is just a UX shortcut on this page.
+  const [checking, setChecking] = useState(false);
+  const [lastCheck, setLastCheck] = useState(null);
   const load = () => {
     fetch("/api/admin/pricing/current")
       .then((r) => r.ok ? r.json() : Promise.reject(new Error("status " + r.status)))
       .then(setData).catch((e) => setMsg(String(e.message || e)));
+    // Pull the scheduler's last-run so the header can show a fresh
+    // "Last checked Xm ago" badge that matches the Schedulers tab.
+    fetch("/api/admin/schedulers")
+      .then((r) => r.ok ? r.json() : [])
+      .then((rows) => {
+        const job = (Array.isArray(rows) ? rows : []).find((j) => j.name === "daily_price_check");
+        setLastCheck(job?.last_run || null);
+      })
+      .catch(() => {});
   };
   useEffect(() => { load(); }, []);
+
+  // Trigger the price-monitor scrape on-demand. The job runs Gemini +
+  // Twilio + Plivo scrapes serially, which can take 5-15s, so we
+  // show a spinner and disable the button until the POST returns.
+  // When it finishes, `pricing.observed` + `pricing.drift.detected`
+  // events have been emitted, so reloading the table immediately
+  // surfaces the new observed values and any new drifts.
+  const checkRatesNow = async () => {
+    if (checking) return;
+    setChecking(true);
+    setMsg("Checking wholesale rates from Gemini, Twilio and Plivo…");
+    try {
+      const r = await fetch("/api/admin/schedulers/daily_price_check/run", { method: "POST" });
+      if (!r.ok) throw new Error("status " + r.status);
+      setMsg("Checked ✓ — observed rates refreshed.");
+      load();
+    } catch (e) {
+      setMsg(`Failed: ${e.message || e}`);
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  // "12m ago" / "3h ago" — same helper shape as the Observability
+  // page's fmtAgo but local to keep the component self-contained.
+  const fmtAgo = (iso) => {
+    if (!iso) return "never";
+    const d = new Date(iso);
+    const s = Math.round((Date.now() - d.getTime()) / 1000);
+    if (s < 60) return `${s}s ago`;
+    if (s < 3600) return `${Math.round(s/60)}m ago`;
+    if (s < 86400) return `${Math.round(s/3600)}h ago`;
+    return `${Math.round(s/86400)}d ago`;
+  };
   if (!data) return html`<div class="db-loading">Loading pricing…</div>`;
   const rates = data.rates || [];
   const observed = data.observed || [];
@@ -10085,11 +10136,35 @@ function AdminPricingTab() {
   };
 
   return html`
-    <p class="db-form-help" style=${{ marginBottom: "12px" }}>
-      Currently-in-force wholesale rates. Compare against the latest observed
-      rate from the daily price-check; "Roll forward" closes the old version
-      and writes a new one (audit-tracked, one button).
-    </p>
+    <!-- Header row: title-side blurb + on-demand price-check button -->
+    <div class="ax-pricing-head">
+      <p class="db-form-help" style=${{ margin: 0, flex: 1 }}>
+        Currently-in-force wholesale rates. Compare against the latest observed
+        rate from the daily price-check; "Roll forward" closes the old version
+        and writes a new one (audit-tracked, one button).
+      </p>
+      <div class="ax-pricing-check">
+        <span class="ax-pricing-check-meta">
+          Last checked <b>${fmtAgo(lastCheck)}</b>
+          <span class="ax-pricing-check-cron"> · auto-runs 05:00 IST</span>
+        </span>
+        <button class="ax-pricing-check-btn" type="button"
+                disabled=${checking}
+                onClick=${checkRatesNow}
+                title="Run the price-monitor scrape now (Gemini + Twilio + Plivo)">
+          ${checking ? html`
+            <span class="ax-pricing-spin" aria-hidden="true"></span>
+            <span>Checking…</span>
+          ` : html`
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M21 12a9 9 0 1 1-3.36-7" />
+              <path d="M21 4v6h-6" />
+            </svg>
+            <span>Check rates now</span>
+          `}
+        </button>
+      </div>
+    </div>
     ${msg ? html`<div class="db-form-help" style=${{
       color: msg.startsWith("Failed") ? "#b91c1c" : "#166534",
       marginBottom: "10px",
