@@ -3584,10 +3584,12 @@ async def run_session(
 
             # Build 206 — open the call recording writer if the agent has
             # `recording_enabled` (default true for every agent). Failures
-            # leave `state.recording_writer = None` so the audio pumps
-            # become a no-op for taps — the call itself runs untouched.
-            # The token used for the temp directory is the same iso start
-            # marker we stamped above; finalize() will rename it to the
+            # are swallowed; the call itself runs untouched. We attach
+            # the writer to `agent["_recording_writer"]` ONLY — `state`
+            # isn't defined yet here (it's instantiated inside the
+            # reconnect loop below), so we re-attach onto every new
+            # state in that loop. The token directory is the
+            # `_call_started_iso` marker; finalize() renames it to the
             # real calls.id once insert_call returns.
             if agent.get("recording_enabled", True):
                 try:
@@ -3595,12 +3597,6 @@ async def run_session(
                     token = f"sess-{agent['_call_started_iso'].replace(':','').replace('-','').replace('+','')}"
                     writer = _rec.RecordingWriter(token, int(agent["id"]))
                     if writer.open():
-                        state.recording_writer = writer
-                        # Stash the temp token + started_at on the agent
-                        # dict so the end_call / WS-close flush paths can
-                        # call writer.finalize(call_id) AFTER insert_call
-                        # gives us a real id. Two paths reach insert_call;
-                        # both pick up these handles via the agent dict.
                         agent["_recording_writer"] = writer
                         agent["_recording_started_iso"] = agent["_call_started_iso"]
                         log.info(
@@ -4992,6 +4988,13 @@ async def run_session(
                         # agent for the end_call rollup.
                         state.agent_dict = agent if kind != "builder" else None
                         state.model_id = usable_model
+                        # Build 206 — the recording writer is opened once at
+                        # session setup (above), but `state` gets re-created
+                        # on every reconnect inside this loop. Re-attach the
+                        # writer (stored on the agent dict) so the audio
+                        # pumps below see it after a reconnect.
+                        if kind != "builder" and agent is not None:
+                            state.recording_writer = agent.get("_recording_writer")
                         # Phase 7 — point the receive pump at the WS-scope
                         # ledger so tokens accumulate even in builder mode.
                         # Set the current kind so the flush path knows what
