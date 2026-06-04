@@ -6934,6 +6934,38 @@ button.db-stat:disabled { cursor: default; opacity: 0.7; }
 :root[data-theme="dark"] .oc-edit-addcard { background: #14182a; border-color: #3730a3; }
 :root[data-theme="dark"] .oc-edit-addcard-title { color: #a5b4fc; }
 :root[data-theme="dark"] .oc-edit-footer { background: linear-gradient(180deg, rgba(20,23,31,0.6) 0%, #14171f 60%); border-top-color: #2a2f3e; }
+
+/* Email digest schedule card (build 214) */
+.oc-digest-card { padding: 18px 22px 16px; margin-top: 16px; }
+.oc-digest-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 12px 0 14px;
+}
+.oc-digest-field { display: flex; flex-direction: column; gap: 4px; }
+.oc-digest-preview {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px;
+  background: #f0f7ff;
+  border: 1px solid #cfe3ff;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #1e40af;
+  font-weight: 500;
+}
+.oc-digest-footer {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #e6e7ec;
+}
+.oc-digest-footer button + button { margin-left: 6px; }
+@media (max-width: 640px) {
+  .oc-digest-footer { flex-direction: column; align-items: stretch; }
+}
+:root[data-theme="dark"] .oc-digest-preview { background: #14182a; border-color: #2f3550; color: #93c5fd; }
+:root[data-theme="dark"] .oc-digest-footer { border-top-color: #2a2f3e; }
 :root[data-theme="dark"] .oc-kpi, :root[data-theme="dark"] .oc-row, :root[data-theme="dark"] .oc-catalogue-row { background: #14171f; border-color: #2a2f3e; }
 :root[data-theme="dark"] .oc-kpi-value, :root[data-theme="dark"] .oc-row-name, :root[data-theme="dark"] .oc-row-count, :root[data-theme="dark"] .oc-catalogue-label { color: #f1f3f8; }
 :root[data-theme="dark"] .oc-kpi-label, :root[data-theme="dark"] .oc-kpi-sub, :root[data-theme="dark"] .oc-row-desc, :root[data-theme="dark"] .oc-row-share, :root[data-theme="dark"] .oc-catalogue-desc { color: #9aa0ad; }

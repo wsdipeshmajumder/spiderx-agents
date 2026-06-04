@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 213;
+const SXAI_BUILD = 214;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -4957,6 +4957,196 @@ function OutcomeCatalogueEditor({ agent, outcomes, onSaved }) {
   `;
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// OutcomeDigestSchedule (build 214) — when does this agent's outcome
+// digest email fire, and what window does it cover?
+//
+// Defaults match pre-214 behaviour: daily, last-24-hour window. Operator
+// can flip to weekly (pick a weekday) or monthly (pick a day-of-month),
+// resize the window (24h / 7d / 30d), or turn the digest off entirely.
+//
+// Persists to `agents.digest_settings` JSONB via the standard PATCH
+// /api/agents/{id}. The daily 19:00 IST scheduler reads this on every
+// run and decides whether to include this agent in today's org email.
+// ─────────────────────────────────────────────────────────────────────────
+const _DIGEST_CADENCES = [
+  { value: "daily",   label: "Daily",   help: "Email arrives every day at 19:00 IST." },
+  { value: "weekly",  label: "Weekly",  help: "One email per week, on the day you pick." },
+  { value: "monthly", label: "Monthly", help: "One email per month, on the day-of-month you pick." },
+  { value: "off",     label: "Off",     help: "Don't email an outcome digest for this agent." },
+];
+const _DIGEST_WINDOWS = [
+  { value: 1,  label: "Last 24 hours" },
+  { value: 7,  label: "Last 7 days" },
+  { value: 30, label: "Last 30 days" },
+];
+const _WEEKDAYS = [
+  { value: 0, label: "Monday" },
+  { value: 1, label: "Tuesday" },
+  { value: 2, label: "Wednesday" },
+  { value: 3, label: "Thursday" },
+  { value: 4, label: "Friday" },
+  { value: 5, label: "Saturday" },
+  { value: 6, label: "Sunday" },
+];
+
+function OutcomeDigestSchedule({ agent, onSaved }) {
+  const raw = (agent.digest_settings && typeof agent.digest_settings === "object")
+    ? agent.digest_settings : {};
+  // Defaults must match backend `effective_settings` so a never-touched
+  // agent's UI reads the same as the scheduler's behaviour.
+  const initial = {
+    cadence:      _DIGEST_CADENCES.some((c) => c.value === raw.cadence) ? raw.cadence : "daily",
+    window_days:  _DIGEST_WINDOWS.some((w) => w.value === Number(raw.window_days)) ? Number(raw.window_days) : 1,
+    day_of_week:  Number.isInteger(raw.day_of_week)  ? raw.day_of_week  : 0,
+    day_of_month: Number.isInteger(raw.day_of_month) ? raw.day_of_month : 1,
+  };
+  const [draft, setDraft] = useState(initial);
+  const [busy,  setBusy]  = useState(false);
+  const [msg,   setMsg]   = useState("");
+
+  const dirty = (
+    draft.cadence      !== initial.cadence ||
+    draft.window_days  !== initial.window_days ||
+    draft.day_of_week  !== initial.day_of_week ||
+    draft.day_of_month !== initial.day_of_month
+  );
+  const isOff = draft.cadence === "off";
+
+  // When cadence flips → daily / weekly / monthly, snap window_days
+  // to the obvious match if the operator hadn't explicitly chosen one.
+  // Daily → 24 h, Weekly → 7 d, Monthly → 30 d. Operator can still
+  // override — this is just a sane starting point.
+  const setCadence = (val) => {
+    setDraft((d) => {
+      const next = { ...d, cadence: val };
+      if (val === "daily"   && d.window_days !== 1)  next.window_days = 1;
+      if (val === "weekly"  && d.window_days !== 7)  next.window_days = 7;
+      if (val === "monthly" && d.window_days !== 30) next.window_days = 30;
+      return next;
+    });
+  };
+
+  const save = async () => {
+    setBusy(true); setMsg("");
+    try {
+      const blob = { cadence: draft.cadence, window_days: draft.window_days };
+      if (draft.cadence === "weekly")  blob.day_of_week  = draft.day_of_week;
+      if (draft.cadence === "monthly") blob.day_of_month = draft.day_of_month;
+      const r = await fetch(`/api/agents/${agent.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ digest_settings: blob }),
+      });
+      if (!r.ok) throw new Error("server " + r.status);
+      setMsg("Saved ✓");
+      onSaved && onSaved();
+      setTimeout(() => setMsg(""), 1800);
+    } catch (e) {
+      setMsg("Couldn't save — try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const discard = () => { setDraft(initial); setMsg(""); };
+
+  // Plain-English preview ("Weekly on Monday, last 7 days") so the
+  // operator sees what the scheduler will actually do.
+  const preview = (() => {
+    if (draft.cadence === "off") return "Digest emails are off for this agent.";
+    const winLabel = _DIGEST_WINDOWS.find((w) => w.value === draft.window_days)?.label.toLowerCase() || "last 24 hours";
+    if (draft.cadence === "weekly") {
+      const dow = _WEEKDAYS.find((d) => d.value === draft.day_of_week)?.label || "Monday";
+      return `Weekly on ${dow}, covering the ${winLabel}.`;
+    }
+    if (draft.cadence === "monthly") {
+      const dom = draft.day_of_month;
+      const suffix = (n) => (n >= 11 && n <= 13) ? "th" : (["th","st","nd","rd"][n % 10] || "th");
+      return `Monthly on the ${dom}${suffix(dom)}, covering the ${winLabel}.`;
+    }
+    return `Daily at 19:00 IST, covering the ${winLabel}.`;
+  })();
+
+  return html`
+    <section class="db-panel oc-digest-card">
+      <div class="oc-drawer-head">
+        <h3 class="db-panel-title">Email digest</h3>
+        <p class="db-panel-sub">
+          When does this agent's outcome digest land in your inbox, and
+          what window does it summarise? Owners on the org always receive
+          it; turning it off skips this agent entirely.
+        </p>
+      </div>
+
+      <div class="oc-digest-grid">
+        <label class="oc-digest-field">
+          <span class="oc-edit-flabel">Cadence</span>
+          <select class="db-input" value=${draft.cadence}
+                  onChange=${(e) => setCadence(e.target.value)}>
+            ${_DIGEST_CADENCES.map((c) => html`
+              <option key=${c.value} value=${c.value}>${c.label}</option>
+            `)}
+          </select>
+        </label>
+
+        <label class="oc-digest-field" style=${{ opacity: isOff ? 0.4 : 1 }}>
+          <span class="oc-edit-flabel">Window</span>
+          <select class="db-input" value=${String(draft.window_days)}
+                  disabled=${isOff}
+                  onChange=${(e) => setDraft((d) => ({ ...d, window_days: Number(e.target.value) }))}>
+            ${_DIGEST_WINDOWS.map((w) => html`
+              <option key=${w.value} value=${w.value}>${w.label}</option>
+            `)}
+          </select>
+        </label>
+
+        ${draft.cadence === "weekly" ? html`
+          <label class="oc-digest-field">
+            <span class="oc-edit-flabel">Day of week</span>
+            <select class="db-input" value=${String(draft.day_of_week)}
+                    onChange=${(e) => setDraft((d) => ({ ...d, day_of_week: Number(e.target.value) }))}>
+              ${_WEEKDAYS.map((w) => html`
+                <option key=${w.value} value=${w.value}>${w.label}</option>
+              `)}
+            </select>
+          </label>
+        ` : ""}
+
+        ${draft.cadence === "monthly" ? html`
+          <label class="oc-digest-field">
+            <span class="oc-edit-flabel">Day of month</span>
+            <select class="db-input" value=${String(draft.day_of_month)}
+                    onChange=${(e) => setDraft((d) => ({ ...d, day_of_month: Number(e.target.value) }))}>
+              ${Array.from({ length: 28 }, (_, i) => i + 1).map((d) => html`
+                <option key=${d} value=${d}>${d}${(d >= 11 && d <= 13) ? "th" : (["th","st","nd","rd"][d % 10] || "th")}</option>
+              `)}
+            </select>
+          </label>
+        ` : ""}
+      </div>
+
+      <div class="oc-digest-preview">
+        <span aria-hidden="true">📧</span>
+        <span>${preview}</span>
+      </div>
+
+      ${dirty || msg ? html`
+        <div class="oc-digest-footer">
+          <div class=${"oc-edit-msg" + (msg.startsWith("Couldn't") ? " is-err" : " is-ok")}>
+            ${msg || "You have unsaved changes."}
+          </div>
+          <div>
+            <button class="db-btn-ghost db-btn-sm" type="button" onClick=${discard} disabled=${busy}>Discard</button>
+            <button class="db-btn-primary db-btn-sm" type="button" onClick=${save} disabled=${busy || !dirty}>
+              ${busy ? "Saving…" : "Save schedule"}
+            </button>
+          </div>
+        </div>
+      ` : ""}
+    </section>
+  `;
+}
+
+
 // AgentCallOutcomesPage — /agent/<slug>/outcomes. The "results" page that
 // answers "how well is this agent doing?". Call logs is WHAT happened on
 // each call; Call outcomes is what was the RESULT, aggregated and bucketed.
@@ -5346,6 +5536,9 @@ function AgentCallOutcomesPage({ agent, agents, presets, plan, onNav }) {
       ` : ""}
 
       ${err ? html`<p class="db-form-help" style=${{ color: "#b91c1c" }}>Couldn't load report: ${err}</p>` : ""}
+
+      <!-- Email digest schedule (build 214) -->
+      <${OutcomeDigestSchedule} agent=${agent} onSaved=${loadReport} />
 
       <!-- Quiet "Advanced" footer link — opens the weights drawer for
            operators who DO want to retune how each kind contributes to

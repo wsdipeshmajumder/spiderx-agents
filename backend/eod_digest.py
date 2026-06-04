@@ -41,6 +41,97 @@ _KIND_COLOR = {
 }
 
 
+# ─── Per-agent digest schedule (build 214) ────────────────────────────────
+
+
+_VALID_CADENCES = {"daily", "weekly", "monthly", "off"}
+_VALID_WINDOWS = {1, 7, 30}
+
+# Default settings when an agent's `digest_settings` is empty / unset —
+# matches pre-214 behaviour (daily 24-hour window) so unconfigured
+# agents keep getting the email they got before.
+DEFAULT_DIGEST_SETTINGS = {
+    "cadence":      "daily",
+    "window_days":  1,
+    "day_of_week":  0,   # 0=Monday (used only when cadence=weekly)
+    "day_of_month": 1,   # used only when cadence=monthly
+}
+
+
+def effective_settings(agent: dict) -> dict:
+    """Resolve an agent's digest settings, layering operator overrides
+    on top of the defaults. Defensive — bad/missing values silently
+    coerce to the default so a malformed write can't crash the
+    scheduler loop."""
+    raw = agent.get("digest_settings") if isinstance(agent.get("digest_settings"), dict) else {}
+    out = dict(DEFAULT_DIGEST_SETTINGS)
+    cad = raw.get("cadence")
+    if isinstance(cad, str) and cad in _VALID_CADENCES:
+        out["cadence"] = cad
+    wd = raw.get("window_days")
+    try:
+        wd = int(wd)
+        if wd in _VALID_WINDOWS:
+            out["window_days"] = wd
+    except (TypeError, ValueError):
+        pass
+    dow = raw.get("day_of_week")
+    try:
+        dow = int(dow)
+        if 0 <= dow <= 6:
+            out["day_of_week"] = dow
+    except (TypeError, ValueError):
+        pass
+    dom = raw.get("day_of_month")
+    try:
+        dom = int(dom)
+        if 1 <= dom <= 28:
+            out["day_of_month"] = dom
+    except (TypeError, ValueError):
+        pass
+    return out
+
+
+def should_send_today(settings: dict, today_ist: datetime) -> bool:
+    """Does today match this agent's digest cadence?
+
+    Daily   → every day
+    Weekly  → only on `day_of_week` (0 = Mon, 6 = Sun)
+    Monthly → only on `day_of_month` (1..28 — 28 to dodge short-month gotchas)
+    Off     → never
+    """
+    cad = settings.get("cadence")
+    if cad == "off":
+        return False
+    if cad == "weekly":
+        return today_ist.weekday() == int(settings.get("day_of_week") or 0)
+    if cad == "monthly":
+        return today_ist.day == int(settings.get("day_of_month") or 1)
+    # daily / unknown → daily
+    return True
+
+
+def window_for(settings: dict, day_start_ist: datetime) -> tuple[datetime, datetime]:
+    """The UTC (start, end) range an agent's digest should summarise.
+
+    Anchored to the END of today (IST midnight tomorrow → exclusive)
+    and walks back `window_days`. `window_days=1` = "today" exactly,
+    matching pre-214 behaviour.
+    """
+    win = int(settings.get("window_days") or 1)
+    end_ist = day_start_ist + timedelta(days=1)
+    start_ist = end_ist - timedelta(days=win)
+    return (start_ist.astimezone(timezone.utc), end_ist.astimezone(timezone.utc))
+
+
+def window_human_label(settings: dict) -> str:
+    """Human label for the digest header ('last 24 hours', 'last 7 days')."""
+    win = int(settings.get("window_days") or 1)
+    if win == 1:
+        return "last 24 hours"
+    return f"last {win} days"
+
+
 def _fmt_duration_short(seconds: float) -> str:
     s = int(seconds or 0)
     if s < 60:
@@ -74,9 +165,14 @@ def _widget_td(label: str, value: str, palette: dict) -> str:
 
 
 def _build_agent_section(*, agent: dict, calls: list[dict],
-                         cost_paise_today: int, base_url: str) -> str:
+                         cost_paise_today: int, base_url: str,
+                         window_label: str = "last 24 hours") -> str:
     """One agent's slice of the org digest. Self-contained — the org
-    template stitches multiple of these together."""
+    template stitches multiple of these together.
+
+    `window_label` (build 214) is rendered just under the agent's name
+    so a weekly-cadence reader instantly understands the section
+    covers "last 7 days", not today only."""
     from . import call_outcomes
     slug = agent.get("slug") or agent.get("id")
     agent_link = f"{base_url}/agent/{slug}"
@@ -199,6 +295,11 @@ def _build_agent_section(*, agent: dict, calls: list[dict],
         f'             text-decoration:none;float:right;">'
         f'      View {n_calls} call{("" if n_calls == 1 else "s")} →</a>'
         f'  </div>'
+        # Build 214 — window label under the name so a 7d / 30d
+        # section is unambiguous at a glance.
+        f'  <div style="font-size:11.5px;color:#9095a3;margin-top:2px;'
+        f'             text-transform:uppercase;letter-spacing:.04em;">'
+        f'    {html.escape(window_label)}</div>'
         f'  {widgets_row}'
         f'  {mix_html}'
         f'  {top_calls_html}'
@@ -319,21 +420,29 @@ async def run_daily_eod_digest() -> None:
     base_url = email_stub._public_base_url()
 
     pool = await _dbp.get_pool()
-    # First pull: distinct agents that had calls today, joined to their org.
+    # Build 214 — pull ALL agents (with their digest_settings) rather
+    # than "those with calls today". Per-agent schedules mean an agent
+    # with no calls in the last 24 h but a weekly cadence still gets a
+    # digest on Monday covering the last 7 days. We filter by
+    # should_send_today() in the inner loop instead.
     async with pool.acquire() as conn:
         agent_rows = await conn.fetch(
-            "SELECT DISTINCT c.agent_id, a.org_id "
-            "FROM calls c JOIN agents a ON a.id = c.agent_id "
-            "WHERE c.started_at >= $1 AND c.started_at < $2 "
-            "  AND a.org_id IS NOT NULL",
-            day_start_utc, day_end_utc,
+            "SELECT id, org_id, digest_settings FROM agents "
+            "WHERE org_id IS NOT NULL"
         )
-    # Group by org_id
+    # Group eligible agents by org_id. Only agents whose cadence fires
+    # today get included; "off" agents drop out here.
     org_to_agent_ids: dict[int, list[int]] = {}
     for r in agent_rows:
+        settings = effective_settings({"digest_settings": r["digest_settings"]})
+        if not should_send_today(settings, now_ist):
+            continue
         oid = int(r["org_id"])
-        org_to_agent_ids.setdefault(oid, []).append(int(r["agent_id"]))
-    log.info("eod_digest: %d org(s) had call activity today", len(org_to_agent_ids))
+        org_to_agent_ids.setdefault(oid, []).append(int(r["id"]))
+    log.info(
+        "eod_digest: %d org(s) have at least one agent due for a digest today",
+        len(org_to_agent_ids),
+    )
 
     for org_id, agent_ids in org_to_agent_ids.items():
         try:
@@ -375,6 +484,11 @@ async def _digest_one_org(*, org_id: int, agent_ids: list[int],
             agent = await db.get_agent(aid)
             if not agent:
                 continue
+            # Build 214 — each agent has its own window (24h / 7d / 30d).
+            # Pull calls from the agent's configured range, not the
+            # one-size-fits-all day_start..day_end.
+            settings = effective_settings(agent)
+            win_start_utc, win_end_utc = window_for(settings, day_start_ist)
             async with pool.acquire() as conn:
                 cs = await conn.fetch(
                     "SELECT id, started_at, ended_at, duration_s, outcome, reason, "
@@ -382,13 +496,20 @@ async def _digest_one_org(*, org_id: int, agent_ids: list[int],
                     "FROM calls "
                     "WHERE agent_id = $1 AND started_at >= $2 AND started_at < $3 "
                     "ORDER BY started_at DESC",
-                    aid, day_start_utc, day_end_utc,
+                    aid, win_start_utc, win_end_utc,
                 )
             calls = [dict(r) for r in cs]
             for c in calls:
                 if c.get("started_at"):
                     c["started_at"] = c["started_at"].isoformat()
             if not calls:
+                # No calls in this agent's window — skip its section but
+                # log so an operator can debug "I set weekly digest, why
+                # no email?" → answer: zero calls in last 7 days.
+                log.info(
+                    "eod_digest: agent_id=%s cadence=%s window=%dd → 0 calls, skipping",
+                    aid, settings["cadence"], settings["window_days"],
+                )
                 continue
 
             async with pool.acquire() as conn:
@@ -409,6 +530,7 @@ async def _digest_one_org(*, org_id: int, agent_ids: list[int],
                 agent=agent, calls=calls,
                 cost_paise_today=today_cost,
                 base_url=base_url,
+                window_label=window_human_label(settings),
             )
             agent_summaries.append({
                 "agent_id": aid,

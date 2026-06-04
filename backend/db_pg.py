@@ -364,7 +364,7 @@ _AGENT_SCALARS = ("name", "sector", "locale", "persona", "greeting",
 _AGENT_JSON = ("guardrails", "connectors", "sip_config", "voice_tweaks",
                "outcomes", "policy", "webhook_headers", "variables", "purpose",
                "small_talk", "extra_info", "info_groups", "outcome_weights",
-               "outcome_overrides")
+               "outcome_overrides", "digest_settings")
 # Per the baseline schema, these JSONB cols are NOT NULL with a structural
 # default. Callers (and the SQLite-compat contract) sometimes send `None` to
 # mean "clear" — we coerce to the column default so the constraint holds.
@@ -380,6 +380,10 @@ _AGENT_JSON_NOT_NULL = {
     # migration 0023. A `None` from the PATCH path means "clear" → reset
     # to empty blob so the catalogue resolves back to defaults.
     "outcome_overrides": {},
+    # Build 214 — digest_settings is NOT NULL DEFAULT '{}', migration
+    # 0024. None coerces to empty blob; effective_settings() in
+    # eod_digest fills the operational defaults at read time.
+    "digest_settings": {},
 }
 
 
