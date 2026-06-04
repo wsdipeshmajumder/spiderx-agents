@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 199;
+const SXAI_BUILD = 200;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -9053,46 +9053,59 @@ function AdminShell({ section, currentUser, onNav }) {
     `;
   }
 
-  // Build 198: grouped left sidebar replaces the build-3 horizontal tab
-  // strip. Five groups — Platform, People, Calls, Observability, Settings.
-  // SessionStorage-persisted open/closed per group key, same pattern the
-  // per-agent dashboard sidebar uses. The internal `key`s map to the
-  // existing /admin/<section> routes so existing bookmarks keep working.
+  // Build 200: sidebar redesigned to match the CEO's reference — a
+  // pinned "Dashboard" item at the top, then collapsible category
+  // sections in uppercase tracking-wider type (DAILY OPS / SYSTEM /
+  // ...), each with icon + label rows. The active item gets a
+  // pink/purple gradient highlight. SessionStorage persists open
+  // groups under `sxai.admin_nav_open`.
+  //
+  // Internal section keys are PRESERVED from build 198 so every
+  // existing /admin/<section> URL still resolves; only the chrome
+  // and grouping change.
+  const Icon = {
+    dashboard: html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>`,
+    orgs:      html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 21V9l9-6 9 6v12"/><path d="M9 21V12h6v9"/></svg>`,
+    users:     html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
+    shield:    html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
+    calls:     html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 16.92v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 2.08 4.18 2 2 0 0 1 4 2h3a2 2 0 0 1 2 1.72 13 13 0 0 0 .67 2.81 2 2 0 0 1-.45 2.11L8 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 13 13 0 0 0 2.81.67A2 2 0 0 1 22 16.92z"/></svg>`,
+    pnl:       html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v20M5 9h14M5 15h14"/></svg>`,
+    obs:       html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-7"/></svg>`,
+    audit:     html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h6"/></svg>`,
+    chart:     html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>`,
+    ledger:    html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`,
+    cog:       html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
+  };
+
+  // Pinned items (above the group sections, no header)
+  const pinned = [
+    { key: "summary", label: "Dashboard", icon: Icon.dashboard },
+  ];
+  // Grouped sections (collapsible). Visual order matches the reference.
   const groups = [
     {
-      key: "platform", label: "Platform",
+      key: "daily-ops", label: "Daily ops",
       items: [
-        { key: "summary",   label: "Overview" },
-        { key: "analytics", label: "Analytics" },
-        { key: "llm",       label: "LLM ledger" },
+        { key: "orgs",           label: "Organisations", icon: Icon.orgs },
+        { key: "users",          label: "Users",         icon: Icon.users },
+        { key: "calls",          label: "Calls",         icon: Icon.calls },
+        { key: "agent-pnl",      label: "Agent P&L",     icon: Icon.pnl },
+        { key: "observability",  label: "Observability", icon: Icon.obs },
       ],
     },
     {
-      key: "people", label: "People",
+      key: "platform-config", label: "Platform",
       items: [
-        { key: "orgs",          label: "Organisations" },
-        { key: "users",         label: "Users" },
-        { key: "super-admins",  label: "Super-admins" },
+        { key: "analytics",     label: "Analytics",      icon: Icon.chart },
+        { key: "llm",           label: "LLM ledger",     icon: Icon.ledger },
+        { key: "audit",         label: "Audit log",      icon: Icon.audit },
       ],
     },
     {
-      key: "calls-group", label: "Calls",
+      key: "system", label: "System",
       items: [
-        { key: "calls",     label: "All calls" },
-        { key: "agent-pnl", label: "Agent P&L" },
-      ],
-    },
-    {
-      key: "observability", label: "Observability",
-      items: [
-        { key: "observability", label: "Live feed" },
-        { key: "audit",         label: "Audit log" },
-      ],
-    },
-    {
-      key: "settings-group", label: "Settings",
-      items: [
-        { key: "settings", label: "Platform settings" },
+        { key: "super-admins",  label: "Super-admins",   icon: Icon.shield },
+        { key: "settings",      label: "Platform settings", icon: Icon.cog },
       ],
     },
   ];
@@ -9124,37 +9137,71 @@ function AdminShell({ section, currentUser, onNav }) {
   };
 
   return html`
-    <div class="db-admin-shell db-admin-shell-vsplit">
-      <header class="db-admin-topbar">
-        <div class="db-admin-brand">
-          <strong>SpiderX.AI</strong>
-          <span class="db-admin-badge">Platform admin</span>
-        </div>
-        <button class="db-btn-ghost" onClick=${() => onNav("/agents")}>Exit admin</button>
+    <div class="db-admin-shell db-admin-shell-vsplit ax-shell">
+      <header class="ax-topbar">
+        <a class="ax-brand" href="/agents" onClick=${(e) => { e.preventDefault(); onNav("/agents"); }}>
+          <span class="ax-brand-mark">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7">
+              <path d="M3 7l3-3h12l3 3v13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7z"/>
+              <path d="M3 7h18"/>
+            </svg>
+          </span>
+          <span class="ax-brand-word">SpiderX.AI</span>
+        </a>
+        <span class="ax-topbar-label">Platform admin</span>
+        <span class="ax-pill ax-pill-internal">
+          <span class="ax-pill-dot"></span>
+          INTERNAL
+        </span>
+        <div class="ax-topbar-spacer"></div>
+        <button class="ax-exit" onClick=${() => onNav("/agents")}>Exit admin</button>
       </header>
-      <div class="db-admin-body">
-        <aside class="db-admin-side">
-          ${groups.map((g) => html`
-            <div key=${g.key} class=${"db-nav-group" + (openGroups[g.key] ? " open" : "")}>
-              <button class="db-nav-group-head" onClick=${() => toggleGroup(g.key)}>
-                <span>${g.label}</span>
-                <svg class="db-nav-group-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
-              </button>
-              ${openGroups[g.key] ? html`
-                <div class="db-nav-group-items">
-                  ${g.items.map((it) => html`
-                    <button key=${it.key}
-                            class=${"db-nav-item" + (it.key === sec ? " active" : "")}
-                            onClick=${() => goSection(it.key)}>
-                      <span>${it.label}</span>
-                    </button>
-                  `)}
-                </div>
-              ` : ""}
+      <div class="db-admin-body ax-body">
+        <aside class="ax-side">
+          <div class="ax-side-scroll">
+            <!-- Pinned items (no section header) -->
+            <div class="ax-pinned">
+              ${pinned.map((it) => html`
+                <button key=${it.key}
+                        class=${"ax-nav-item" + (it.key === sec ? " is-active" : "")}
+                        onClick=${() => goSection(it.key)}>
+                  <span class="ax-nav-icon">${it.icon}</span>
+                  <span class="ax-nav-label">${it.label}</span>
+                </button>
+              `)}
             </div>
-          `)}
+            <!-- Grouped sections -->
+            ${groups.map((g) => html`
+              <div key=${g.key} class=${"ax-group" + (openGroups[g.key] ? " is-open" : "")}>
+                <button class="ax-group-head" onClick=${() => toggleGroup(g.key)}>
+                  <span class="ax-group-label">${g.label.toUpperCase()}</span>
+                  <svg class="ax-group-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+                </button>
+                ${openGroups[g.key] ? html`
+                  <div class="ax-group-items">
+                    ${g.items.map((it) => html`
+                      <button key=${it.key}
+                              class=${"ax-nav-item" + (it.key === sec ? " is-active" : "")}
+                              onClick=${() => goSection(it.key)}>
+                        <span class="ax-nav-icon">${it.icon}</span>
+                        <span class="ax-nav-label">${it.label}</span>
+                      </button>
+                    `)}
+                  </div>
+                ` : ""}
+              </div>
+            `)}
+          </div>
+          <!-- Footer: access status + user -->
+          <div class="ax-side-foot">
+            <div class="ax-access">
+              <span class="ax-access-dot"></span>
+              <span>ACCESS · OPEN</span>
+            </div>
+            <div class="ax-side-user">${currentUser?.email || "—"}</div>
+          </div>
         </aside>
-        <main class="db-admin-main db-admin-main-vsplit">
+        <main class="db-admin-main db-admin-main-vsplit ax-main">
           ${sec === "summary" ? html`<${AdminSummary} />`
             : sec === "analytics" ? html`<${AdminAnalytics} />`
             : sec === "llm" ? html`<${AdminLlmLedger} />`
@@ -9175,17 +9222,18 @@ function AdminShell({ section, currentUser, onNav }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// AdminObservability — /admin/observability. Build 198.
-// Live event feed + KPI tiles + filter chips + Schedulers panel.
-// Polls /api/admin/events every 15s; the cron-style schedulers panel
-// reads /api/admin/schedulers and has a "Run now" button per job.
+// AdminObservability — /admin/observability. Build 200 redesign.
+// Reference-design adaptation: title + status pill row, search + 2
+// dropdowns, data-table with KIND chip + SEVERITY pill + View → action.
+// Clicking any row opens a detail drawer with the full JSON payload.
 // ─────────────────────────────────────────────────────────────────────────
 function AdminObservability() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
-  const [filter, setFilter] = useState({ severity: "", kind_prefix: "" });
+  const [filter, setFilter] = useState({ severity: "", kind_prefix: "", q: "" });
   const [schedulers, setSchedulers] = useState([]);
-  const [tab, setTab] = useState("feed");  // feed | schedulers
+  const [tab, setTab] = useState("feed");  // feed | schedulers | pricing
+  const [detailEvent, setDetailEvent] = useState(null);
 
   const load = () => {
     const qs = new URLSearchParams();
@@ -9231,6 +9279,17 @@ function AdminObservability() {
     if (s < 86400) return `${Math.round(s/3600)}h ago`;
     return `${Math.round(s/86400)}d ago`;
   };
+  // fmtAbs — short absolute timestamp for the WHEN column. Matches the
+  // reference's "Jun 4, 2026 7 AM" style.
+  const fmtAbs = (iso) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleString(undefined, {
+      month: "short", day: "numeric", year: "numeric",
+      hour: "numeric", minute: "2-digit",
+    });
+  };
   const sevDot = (sev) => {
     const map = {
       info: "#94a3b8", warning: "#f59e0b",
@@ -9242,102 +9301,130 @@ function AdminObservability() {
   const counts = data?.counts || {};
   const items = data?.items || [];
 
+  // Local search filter (client-side over the already-loaded set). We
+  // filter on title + kind + message so a quick "rohan" or "drift"
+  // narrows the list without round-tripping the server.
+  const q = filter.q.trim().toLowerCase();
+  const visibleItems = !q ? items : items.filter((e) =>
+    (e.title || "").toLowerCase().includes(q)
+    || (e.kind || "").toLowerCase().includes(q)
+    || (e.message || "").toLowerCase().includes(q)
+  );
+
+  // Status pill — maps severity → bucket label matching the reference's
+  // "sent / deduped / failed" affordance. We use sev as the visible
+  // status so the page reads like the design.
+  const statusOf = (e) => {
+    if (e.severity === "error" || e.severity === "critical") return "failed";
+    if (e.resolved_at) return "resolved";
+    return "sent";
+  };
+
+  // Counts for the chip row across the FULL items set (not the search
+  // filter — those numbers are about platform health, not the current
+  // text query).
+  const sentN = items.filter((e) => statusOf(e) === "sent" || statusOf(e) === "resolved").length;
+  const failedN = items.filter((e) => statusOf(e) === "failed").length;
+  const dedupedN = 0;  // future: count rows with conflict (dedupe_key match)
+  const totalN = items.length;
+
   return html`
-    <h1>Observability <span class="db-pill-soft">${counts.total_24h || 0} events 24h</span></h1>
-    <p class="db-admin-sub">Every noteworthy thing the platform does writes a row here. Use the filters to scope to a kind or severity.</p>
+    <h1>Observability events</h1>
+    <p class="ax-sub">Every noteworthy thing the platform does writes a row here — sent, deduped or failed, newest first. Click any row to see the full JSON payload.</p>
 
-    <div class="db-admin-grid db-obs-tiles">
-      <div class="db-admin-tile">
-        <div class="db-admin-tile-label">Events 24h</div>
-        <div class="db-admin-tile-value">${counts.total_24h || 0}</div>
-      </div>
-      <div class="db-admin-tile">
-        <div class="db-admin-tile-label">Open critical</div>
-        <div class="db-admin-tile-value" style=${{ color: (counts.open_critical || 0) > 0 ? "#dc2626" : undefined }}>
-          ${counts.open_critical || 0}
-        </div>
-      </div>
-      <div class="db-admin-tile">
-        <div class="db-admin-tile-label">Rate drifts open</div>
-        <div class="db-admin-tile-value" style=${{ color: (counts.drifts_open || 0) > 0 ? "#f59e0b" : undefined }}>
-          ${counts.drifts_open || 0}
-        </div>
-      </div>
-      <div class="db-admin-tile">
-        <div class="db-admin-tile-label">Last price check</div>
-        <div class="db-admin-tile-value" style=${{ fontSize: "16px" }}>${fmtAgo(counts.last_price_check)}</div>
-      </div>
-      <div class="db-admin-tile">
-        <div class="db-admin-tile-label">Schedulers</div>
-        <div class="db-admin-tile-value" style=${{ fontSize: "16px" }}>${schedulers.length} registered</div>
-      </div>
+    <!-- Status pills — top of the page, reference-style -->
+    <div class="ax-statusrow">
+      <span class="ax-stat-pill ax-stat-total">${totalN} total</span>
+      <span class="ax-stat-pill"><span class="ax-stat-dot stat-sent"></span>${sentN} sent</span>
+      <span class="ax-stat-pill"><span class="ax-stat-dot stat-deduped"></span>${dedupedN} deduped</span>
+      <span class="ax-stat-pill"><span class="ax-stat-dot stat-failed"></span>${failedN} failed</span>
     </div>
 
-    <div class="db-obs-tabs">
-      <button class=${"db-obs-tab" + (tab === "feed" ? " is-active" : "")} onClick=${() => setTab("feed")}>Live feed</button>
-      <button class=${"db-obs-tab" + (tab === "schedulers" ? " is-active" : "")} onClick=${() => setTab("schedulers")}>Schedulers</button>
-      <button class=${"db-obs-tab" + (tab === "pricing" ? " is-active" : "")} onClick=${() => setTab("pricing")}>Pricing</button>
+    <!-- Search + filter dropdowns + count badge -->
+    <div class="ax-toolbar">
+      <input class="ax-search" type="search"
+             placeholder="Search by kind, title, message id, recipient…"
+             value=${filter.q}
+             onInput=${(e) => setFilter((f) => ({ ...f, q: e.target.value }))} />
+      <select class="ax-select" value=${filter.kind_prefix} onChange=${(e) => setFilter((f) => ({ ...f, kind_prefix: e.target.value }))}>
+        <option value="">All kinds</option>
+        <option value="agent">agent.*</option>
+        <option value="call">call.*</option>
+        <option value="cost">cost.*</option>
+        <option value="pricing">pricing.*</option>
+        <option value="notify">notify.*</option>
+        <option value="quality">quality.*</option>
+        <option value="system">system.*</option>
+      </select>
+      <select class="ax-select" value=${filter.severity} onChange=${(e) => setFilter((f) => ({ ...f, severity: e.target.value }))}>
+        <option value="">All severities</option>
+        <option value="info">info</option>
+        <option value="warning">warning</option>
+        <option value="error">error</option>
+        <option value="critical">critical</option>
+      </select>
+      <span class="ax-toolbar-count">${visibleItems.length} event${visibleItems.length === 1 ? "" : "s"}</span>
     </div>
+
+    <!-- Sub-tab bar — Live feed is the default; Schedulers + Pricing kept -->
+    <div class="ax-subtabs">
+      <button class=${"ax-subtab" + (tab === "feed" ? " is-active" : "")} onClick=${() => setTab("feed")}>Live feed</button>
+      <button class=${"ax-subtab" + (tab === "schedulers" ? " is-active" : "")} onClick=${() => setTab("schedulers")}>Schedulers</button>
+      <button class=${"ax-subtab" + (tab === "pricing" ? " is-active" : "")} onClick=${() => setTab("pricing")}>Pricing</button>
+    </div>
+
+    ${err ? html`<div class="db-form-help" style=${{ color: "#b91c1c", marginBottom: "10px" }}>Couldn't load: ${err}</div>` : ""}
 
     ${tab === "feed" ? html`
-      <div class="db-obs-filter-row">
-        <label class="db-obs-filter">
-          Severity:
-          <select value=${filter.severity} onChange=${(e) => setFilter((f) => ({ ...f, severity: e.target.value }))}>
-            <option value="">all</option>
-            <option value="info">info</option>
-            <option value="warning">warning</option>
-            <option value="error">error</option>
-            <option value="critical">critical</option>
-          </select>
-        </label>
-        <label class="db-obs-filter">
-          Kind:
-          <select value=${filter.kind_prefix} onChange=${(e) => setFilter((f) => ({ ...f, kind_prefix: e.target.value }))}>
-            <option value="">all</option>
-            <option value="agent">agent.*</option>
-            <option value="call">call.*</option>
-            <option value="cost">cost.*</option>
-            <option value="pricing">pricing.*</option>
-            <option value="notify">notify.*</option>
-            <option value="quality">quality.*</option>
-            <option value="system">system.*</option>
-          </select>
-        </label>
-        ${err ? html`<span class="db-form-help" style=${{ color: "#b91c1c", marginLeft: "12px" }}>Couldn't load: ${err}</span>` : ""}
+      <!-- Data table — left-bordered row per severity, KIND chip + STATUS
+           pill + View → action. Click anywhere on the row to open the
+           detail drawer. -->
+      <div class="ax-table-wrap">
+        <table class="ax-table">
+          <thead>
+            <tr>
+              <th>WHEN</th>
+              <th>KIND</th>
+              <th>TITLE</th>
+              <th>STATUS</th>
+              <th class="ax-th-right"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${visibleItems.length === 0 ? html`
+              <tr><td colspan="5" class="ax-empty-cell">No events match this filter.</td></tr>
+            ` : visibleItems.map((e) => {
+              const status = statusOf(e);
+              return html`
+                <tr key=${e.id} class=${"ax-row ax-row-" + e.severity + (e.resolved_at ? " is-resolved" : "")}
+                    onClick=${() => setDetailEvent(e)}>
+                  <td class="ax-cell-when">${fmtAbs(e.created_at)}</td>
+                  <td><span class=${"ax-kind-chip ax-kind-" + (e.kind.split(".")[0] || "x")}>${e.kind}</span></td>
+                  <td class="ax-cell-title">${e.title}</td>
+                  <td>
+                    <span class=${"ax-status-pill ax-status-" + status}>
+                      ${status === "failed" ? "✗" : status === "resolved" ? "✓" : "✓"} ${status.toUpperCase()}
+                    </span>
+                  </td>
+                  <td class="ax-th-right">
+                    <button class="ax-view" type="button"
+                            onClick=${(ev) => { ev.stopPropagation(); setDetailEvent(e); }}>
+                      View →
+                    </button>
+                  </td>
+                </tr>
+              `;
+            })}
+          </tbody>
+        </table>
       </div>
 
-      <div class="db-obs-feed">
-        ${items.length === 0 ? html`
-          <div class="db-empty" style=${{ margin: "32px auto" }}>
-            <div class="db-empty-title">No events match.</div>
-            <div class="db-empty-sub">Try a wider filter or wait for the next price check to fire.</div>
-          </div>
-        ` : items.map((e) => html`
-          <div key=${e.id} class=${"db-obs-row obs-sev-" + e.severity + (e.resolved_at ? " is-resolved" : "")}>
-            <span class="db-obs-dot" style=${{ background: sevDot(e.severity) }}></span>
-            <div class="db-obs-row-body">
-              <div class="db-obs-row-head">
-                <span class="db-obs-kind">${e.kind}</span>
-                <span class="db-obs-sev-tag">${e.severity}</span>
-                <span class="db-obs-ago">${fmtAgo(e.created_at)}</span>
-              </div>
-              <div class="db-obs-title">${e.title}</div>
-              ${e.message ? html`<div class="db-obs-message">${e.message}</div>` : ""}
-              ${e.payload && Object.keys(e.payload).length > 0 ? html`
-                <details class="db-obs-payload">
-                  <summary>payload</summary>
-                  <pre>${JSON.stringify(e.payload, null, 2)}</pre>
-                </details>
-              ` : ""}
-            </div>
-            ${!e.resolved_at && (e.severity === "warning" || e.severity === "error" || e.severity === "critical") ? html`
-              <button class="db-btn-ghost db-btn-sm db-obs-resolve" type="button" onClick=${() => resolveEvent(e.id)}>Resolve</button>
-            ` : ""}
-            ${e.resolved_at ? html`<span class="db-obs-resolved">resolved</span>` : ""}
-          </div>
-        `)}
-      </div>
+      ${detailEvent ? html`
+        <${EventDetailDrawer}
+          event=${detailEvent}
+          onClose=${() => setDetailEvent(null)}
+          onResolve=${async () => { await resolveEvent(detailEvent.id); setDetailEvent(null); }} />
+      ` : ""}
     ` : ""}
 
     ${tab === "schedulers" ? html`
@@ -9369,6 +9456,74 @@ function AdminObservability() {
     ` : ""}
 
     ${tab === "pricing" ? html`<${AdminPricingTab} />` : ""}
+  `;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// EventDetailDrawer — slides in from the right when a row's "View →"
+// is clicked. Shows the event header, message, payload as pretty JSON,
+// and a Resolve action for actionable severities. Click outside or the
+// × closes it.
+// ─────────────────────────────────────────────────────────────────────────
+function EventDetailDrawer({ event, onClose, onResolve }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const created = event.created_at ? new Date(event.created_at).toLocaleString() : "—";
+  const canResolve = !event.resolved_at && (event.severity === "warning" || event.severity === "error" || event.severity === "critical");
+  return html`
+    <div class="ax-drawer-backdrop" onClick=${onClose}>
+      <aside class="ax-drawer" onClick=${(e) => e.stopPropagation()}>
+        <header class="ax-drawer-head">
+          <div>
+            <div class="ax-drawer-eyebrow">Event #${event.id}</div>
+            <h3 class="ax-drawer-title">${event.title}</h3>
+          </div>
+          <button class="ax-drawer-close" type="button" aria-label="Close" onClick=${onClose}>×</button>
+        </header>
+        <div class="ax-drawer-body">
+          <dl class="ax-kv">
+            <dt>Kind</dt>
+            <dd><code>${event.kind}</code></dd>
+            <dt>Severity</dt>
+            <dd><span class=${"ax-status-pill ax-status-" + (event.severity === "error" || event.severity === "critical" ? "failed" : "sent")}>${event.severity}</span></dd>
+            <dt>Source</dt>
+            <dd>${event.source}</dd>
+            <dt>When</dt>
+            <dd>${created}</dd>
+            ${event.agent_id ? html`<dt>Agent ID</dt><dd>${event.agent_id}</dd>` : ""}
+            ${event.org_id ? html`<dt>Org ID</dt><dd>${event.org_id}</dd>` : ""}
+            ${event.user_id ? html`<dt>User ID</dt><dd>${event.user_id}</dd>` : ""}
+            ${event.dedupe_key ? html`<dt>Dedupe key</dt><dd><code>${event.dedupe_key}</code></dd>` : ""}
+            ${event.resolved_at ? html`<dt>Resolved</dt><dd>${new Date(event.resolved_at).toLocaleString()} (by user ${event.resolved_by || "?"})</dd>` : ""}
+          </dl>
+          ${event.message ? html`
+            <div class="ax-drawer-section">
+              <div class="ax-drawer-label">Message</div>
+              <div class="ax-drawer-msg">${event.message}</div>
+            </div>
+          ` : ""}
+          ${event.payload && Object.keys(event.payload).length > 0 ? html`
+            <div class="ax-drawer-section">
+              <div class="ax-drawer-label">Payload</div>
+              <pre class="ax-drawer-json">${JSON.stringify(event.payload, null, 2)}</pre>
+            </div>
+          ` : ""}
+        </div>
+        ${canResolve ? html`
+          <footer class="ax-drawer-foot">
+            <button class="db-btn-primary" type="button" onClick=${onResolve}>Resolve event</button>
+            <button class="db-btn-ghost" type="button" onClick=${onClose}>Close</button>
+          </footer>
+        ` : html`
+          <footer class="ax-drawer-foot">
+            <button class="db-btn-ghost" type="button" onClick=${onClose}>Close</button>
+          </footer>
+        `}
+      </aside>
+    </div>
   `;
 }
 
