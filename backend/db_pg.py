@@ -1423,10 +1423,13 @@ async def list_audit(limit: int = 100, offset: int = 0,
         params.append(target_kind); where.append(f"a.target_kind = ${len(params)}")
     if target_id is not None:
         params.append(target_id); where.append(f"a.target_id = ${len(params)}")
-    if start:
-        params.append(start); where.append(f"a.created_at >= ${len(params)}::timestamptz")
-    if end:
-        params.append(end); where.append(f"a.created_at < ${len(params)}::timestamptz")
+    # Build 209 — see admin_recent_calls for the asyncpg DataError fix
+    start_dt = _parse_ts(start)
+    end_dt   = _parse_ts(end)
+    if start_dt is not None:
+        params.append(start_dt); where.append(f"a.created_at >= ${len(params)}")
+    if end_dt is not None:
+        params.append(end_dt); where.append(f"a.created_at < ${len(params)}")
     sql = """
         SELECT a.id, a.actor_id, a.action, a.target_kind, a.target_id,
                a.diff, a.ip, a.user_agent, a.created_at,
@@ -1532,10 +1535,16 @@ async def admin_recent_calls(
             "OR lower(coalesce(c.extracted->>'callback_phone','')) LIKE ${pi})"
             .replace("{pi}", str(len(params)))
         )
-    if start:
-        params.append(start); where.append(f"c.started_at >= ${len(params)}::timestamptz")
-    if end:
-        params.append(end); where.append(f"c.started_at < ${len(params)}::timestamptz")
+    # Build 209 fix: asyncpg binds timestamptz columns from `datetime`
+    # only — passing a raw ISO string raises DataError at bind time
+    # (the `::timestamptz` cast in SQL doesn't help because asyncpg's
+    # type inference looks at the column, not the cast). Coerce here.
+    start_dt = _parse_ts(start)
+    end_dt   = _parse_ts(end)
+    if start_dt is not None:
+        params.append(start_dt); where.append(f"c.started_at >= ${len(params)}")
+    if end_dt is not None:
+        params.append(end_dt); where.append(f"c.started_at < ${len(params)}")
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
     params.append(int(limit))
     sql = f"""

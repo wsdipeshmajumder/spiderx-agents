@@ -151,11 +151,19 @@ def list_jobs() -> list[dict]:
 
 
 async def run_now(name: str) -> bool:
-    """Out-of-band "Run now" trigger from the Observability page."""
+    """Out-of-band "Run now" trigger from the Observability page.
+
+    Build 209 — stamp `_LAST_RUN` here too so the Schedulers tab's
+    "Last run" column (and the Pricing tab's "Last checked Nm ago"
+    pill) update immediately after a manual trigger. Without this
+    stamp the cron-loop path was the only thing that wrote
+    _LAST_RUN, leaving manual runs invisible to the UI.
+    """
     for j in _JOBS:
         if j["name"] == name:
             try:
                 await j["func"]()
+                _LAST_RUN[name] = datetime.now(j["tz"]).replace(second=0, microsecond=0)
                 return True
             except Exception:  # noqa: BLE001
                 log.exception("scheduler.run_now_failed name=%s", name)

@@ -142,12 +142,28 @@ async def list_events(
     if before_id is not None:
         where.append(f"id < ${len(args)+1}")
         args.append(int(before_id))
-    if start:
-        where.append(f"created_at >= ${len(args)+1}::timestamptz")
-        args.append(start)
-    if end:
-        where.append(f"created_at < ${len(args)+1}::timestamptz")
-        args.append(end)
+    # Build 209 — coerce ISO strings to datetime; asyncpg refuses raw
+    # strings for timestamptz columns even with a `::timestamptz` cast
+    # (type inference happens at bind time off the column type).
+    from datetime import datetime, timezone as _tz
+    def _to_dt(v):
+        if v is None or v == "":
+            return None
+        if isinstance(v, datetime):
+            return v if v.tzinfo else v.replace(tzinfo=_tz.utc)
+        try:
+            d = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+            return d if d.tzinfo else d.replace(tzinfo=_tz.utc)
+        except ValueError:
+            return None
+    start_dt = _to_dt(start)
+    end_dt   = _to_dt(end)
+    if start_dt is not None:
+        where.append(f"created_at >= ${len(args)+1}")
+        args.append(start_dt)
+    if end_dt is not None:
+        where.append(f"created_at < ${len(args)+1}")
+        args.append(end_dt)
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
     args.append(int(max(1, min(limit, 500))))
     sql = (

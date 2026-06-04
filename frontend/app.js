@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 208;
+const SXAI_BUILD = 209;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -9542,7 +9542,7 @@ function AdminShell({ section, currentUser, onNav }) {
           ${sec === "summary" ? html`<${AdminSummary} />`
             : sec === "analytics" ? html`<${AdminAnalytics} />`
             : sec === "llm" ? html`<${AdminLlmLedger} />`
-            : sec === "orgs" ? html`<${AdminOrgs} />`
+            : sec === "orgs" || sec === "organisations" ? html`<${AdminOrgs} />`
             : sec === "users" ? html`<${AdminUsers} />`
             : sec === "calls" ? html`<${AdminCalls} />`
             : sec === "agent-pnl" ? html`<${AdminAgentPnl} />`
@@ -9717,9 +9717,8 @@ function AdminObservability() {
       <button class=${"ax-subtab" + (tab === "pricing" ? " is-active" : "")} onClick=${() => setTab("pricing")}>Pricing</button>
     </div>
 
-    ${err ? html`<div class="db-form-help" style=${{ color: "#b91c1c", marginBottom: "10px" }}>Couldn't load: ${err}</div>` : ""}
-
     ${tab === "feed" ? html`
+      ${err ? html`<div class="db-form-help" style=${{ color: "#b91c1c", marginBottom: "10px" }}>Couldn't load: ${err}</div>` : ""}
       <!-- Data table — left-bordered row per severity, KIND chip + STATUS
            pill + View → action. Click anywhere on the row to open the
            detail drawer. -->
