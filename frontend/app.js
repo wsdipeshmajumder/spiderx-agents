@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 212;
+const SXAI_BUILD = 213;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -4648,6 +4648,315 @@ function AgentOverviewPage({ agent, agents, presets, plan, stats, onTest, onGoLi
   `;
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// OutcomeCatalogueEditor (build 213) — operator-facing CRUD over the
+// resolved outcome catalogue. Behind a "Customise outcomes" toggle on
+// the Call outcomes page. Lets the business:
+//   • Rename a default outcome ("Test drive booked" → "Showroom visit
+//     confirmed") — staff-shop language wins over the catalogue default.
+//   • Reclassify a default outcome to a different KIND (success /
+//     qualified / info / failure) — what's a "win" varies by business.
+//   • Add a fully-custom outcome that isn't in any sector catalogue.
+//   • Hide a default outcome that doesn't apply (a dental clinic
+//     inheriting test_drive_booked from a bad template).
+//
+// All edits live in one JSONB blob `agents.outcome_overrides` —
+// PATCHed via the existing /api/agents/{id} endpoint. The catalogue
+// resolution server-side applies the overrides at read time, so the
+// agent's runtime vocabulary, end_call validation, dashboard report,
+// and EOD digest all see the same final list with one source of truth.
+// ─────────────────────────────────────────────────────────────────────────
+const _OC_KIND_OPTIONS = [
+  { value: "success",   label: "🏆 Success",   help: "Primary KPI — agent fulfilled the call's purpose." },
+  { value: "qualified", label: "📞 Qualified", help: "Useful but not the win — captured lead, scheduled callback." },
+  { value: "info",      label: "💬 Info-only", help: "Informational — answered an FAQ, gave hours / price." },
+  { value: "failure",   label: "⚠️  Failure",  help: "Unwanted result — abandoned, voicemail, complaint left open." },
+];
+function _slugifyOutcomeId(s) {
+  return String(s || "")
+    .trim().toLowerCase()
+    .replace(/[^a-z0-9_\s-]+/g, "")
+    .replace(/[\s-]+/g, "_")
+    .slice(0, 60);
+}
+
+function OutcomeCatalogueEditor({ agent, outcomes, onSaved }) {
+  // Local draft state — keyed by outcome id so we don't lose unsaved
+  // edits when the parent re-renders the report.
+  const initial = (agent.outcome_overrides && typeof agent.outcome_overrides === "object")
+    ? agent.outcome_overrides
+    : {};
+  const [edited,  setEdited]  = useState(() => ({ ...(initial.edited  || {}) }));
+  const [removed, setRemoved] = useState(() => new Set((initial.removed || [])));
+  const [added,   setAdded]   = useState(() => [...(initial.added || [])]);
+  const [adding,  setAdding]  = useState(false);
+  const [newRow,  setNewRow]  = useState({ id: "", label: "", kind: "success", description: "" });
+  const [busy,    setBusy]    = useState(false);
+  const [msg,     setMsg]     = useState("");
+
+  // What changed since the last save? Drives the visibility of the
+  // sticky "Save / Discard" footer.
+  const dirty = (
+    Object.keys(edited).length !== Object.keys(initial.edited || {}).length ||
+    JSON.stringify(edited) !== JSON.stringify(initial.edited || {}) ||
+    removed.size !== (initial.removed || []).length ||
+    [...removed].some((id) => !(initial.removed || []).includes(id)) ||
+    added.length !== (initial.added || []).length ||
+    JSON.stringify(added) !== JSON.stringify(initial.added || [])
+  );
+
+  // Per-row helpers — `outcome` is one row from the resolved catalogue.
+  const isHidden = (id) => removed.has(id);
+  const editedRow = (id) => edited[id] || {};
+  const labelFor  = (o) => editedRow(o.id).label ?? o.label;
+  const kindFor   = (o) => editedRow(o.id).kind  ?? o.kind;
+
+  const setField = (id, key, val) => {
+    setEdited((prev) => {
+      const next = { ...prev, [id]: { ...(prev[id] || {}), [key]: val } };
+      // If both label + kind match the original catalogue value, drop
+      // the override entirely — keeps the blob small + the row's
+      // "edited" badge stays accurate.
+      const original = outcomes.find((o) => o.id === id) || {};
+      const merged = next[id];
+      if (
+        (merged.label == null || merged.label === original.label) &&
+        (merged.kind  == null || merged.kind  === original.kind) &&
+        (merged.description == null || merged.description === original.description)
+      ) {
+        const { [id]: _, ...rest } = next;
+        return rest;
+      }
+      return next;
+    });
+  };
+
+  const toggleRemoved = (id) => {
+    setRemoved((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const removeCustom = (id) => {
+    setAdded((prev) => prev.filter((r) => r.id !== id));
+  };
+
+  const addCustomRow = () => {
+    const id = _slugifyOutcomeId(newRow.id || newRow.label);
+    if (!id || !newRow.label.trim()) {
+      setMsg("Need an id and a label.");
+      return;
+    }
+    if (outcomes.some((o) => o.id === id) || added.some((a) => a.id === id)) {
+      setMsg(`"${id}" already exists — pick a different id.`);
+      return;
+    }
+    setAdded((prev) => [...prev, {
+      id, label: newRow.label.trim(),
+      kind: newRow.kind,
+      description: (newRow.description || "").trim(),
+    }]);
+    setNewRow({ id: "", label: "", kind: "success", description: "" });
+    setAdding(false);
+    setMsg("");
+  };
+
+  const save = async () => {
+    setBusy(true); setMsg("");
+    try {
+      const blob = {
+        edited,
+        added,
+        removed: [...removed],
+      };
+      const r = await fetch(`/api/agents/${agent.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ outcome_overrides: blob }),
+      });
+      if (!r.ok) throw new Error("server " + r.status);
+      setMsg("Saved ✓");
+      onSaved && onSaved();
+      setTimeout(() => setMsg(""), 1800);
+    } catch (e) {
+      setMsg("Couldn't save — try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const discard = () => {
+    setEdited({ ...(initial.edited || {}) });
+    setRemoved(new Set(initial.removed || []));
+    setAdded([...(initial.added || [])]);
+    setMsg("");
+  };
+
+  const resetAll = async () => {
+    if (busy) return;
+    setBusy(true); setMsg("");
+    try {
+      const r = await fetch(`/api/agents/${agent.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ outcome_overrides: null }),  // null → defaults
+      });
+      if (!r.ok) throw new Error("server " + r.status);
+      setEdited({}); setRemoved(new Set()); setAdded([]);
+      setMsg("Reset to defaults ✓");
+      onSaved && onSaved();
+      setTimeout(() => setMsg(""), 2000);
+    } catch (e) {
+      setMsg("Couldn't reset — try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Render a single editable row. Default (catalogue) rows can be
+  // edited or hidden; custom rows can be fully edited or fully
+  // removed. Edits land in `edited[id]`; hides go into `removed`.
+  const renderRow = (o, isCustom) => {
+    const hidden = !isCustom && isHidden(o.id);
+    const isEdited = !isCustom && (
+      editedRow(o.id).label != null || editedRow(o.id).kind != null
+    );
+    return html`
+      <li key=${o.id} class=${"oc-edit-row" + (hidden ? " is-hidden" : "")}>
+        <div class="oc-edit-row-top">
+          <div class="oc-edit-id">
+            <code>${o.id}</code>
+            ${isCustom ? html`<span class="oc-edit-badge oc-edit-badge-custom">Added by you</span>` : ""}
+            ${isEdited ? html`<span class="oc-edit-badge oc-edit-badge-edited">Edited</span>` : ""}
+            ${hidden ? html`<span class="oc-edit-badge oc-edit-badge-hidden">Hidden</span>` : ""}
+          </div>
+          <div class="oc-edit-actions">
+            ${isCustom
+              ? html`<button class="oc-edit-trash" type="button" title="Remove this custom outcome"
+                             onClick=${() => removeCustom(o.id)}>Remove</button>`
+              : hidden
+                ? html`<button class="oc-edit-restore" type="button" title="Restore this default outcome"
+                               onClick=${() => toggleRemoved(o.id)}>Restore</button>`
+                : html`<button class="oc-edit-hide" type="button" title="Hide this outcome from the agent's vocabulary"
+                               onClick=${() => toggleRemoved(o.id)}>Hide</button>`}
+          </div>
+        </div>
+        <div class="oc-edit-fields">
+          <label class="oc-edit-field">
+            <span class="oc-edit-flabel">Label</span>
+            <input class="db-input" type="text" maxlength="80"
+                   value=${labelFor(o)}
+                   disabled=${hidden}
+                   onInput=${(e) => isCustom
+                     ? setAdded((prev) => prev.map((r) => r.id === o.id ? { ...r, label: e.target.value } : r))
+                     : setField(o.id, "label", e.target.value)} />
+          </label>
+          <label class="oc-edit-field">
+            <span class="oc-edit-flabel">Kind</span>
+            <select class="db-input"
+                    value=${kindFor(o)}
+                    disabled=${hidden}
+                    onChange=${(e) => isCustom
+                      ? setAdded((prev) => prev.map((r) => r.id === o.id ? { ...r, kind: e.target.value } : r))
+                      : setField(o.id, "kind", e.target.value)}>
+              ${_OC_KIND_OPTIONS.map((k) => html`
+                <option key=${k.value} value=${k.value}>${k.label}</option>
+              `)}
+            </select>
+          </label>
+        </div>
+      </li>
+    `;
+  };
+
+  // Custom rows are appended at the bottom; the resolved `outcomes`
+  // list already includes them (with is_custom: true) on subsequent
+  // loads, but UNSAVED added rows live only in the local `added`
+  // array until save. Render both, deduping by id.
+  const sawIds = new Set(outcomes.map((o) => o.id));
+  const unsavedAdds = added.filter((a) => !sawIds.has(a.id));
+
+  return html`
+    <section class="db-panel oc-edit-panel">
+      <div class="oc-drawer-head">
+        <h3 class="db-panel-title">Customise outcomes <span class="db-panel-pill">${outcomes.length + unsavedAdds.length}</span></h3>
+        <p class="db-panel-sub">
+          Rename what doesn't sound like how your staff talk, reclassify what counts
+          as a "win" for your business, add custom outcomes the catalogue missed,
+          or hide ones that don't apply. ${agent.sector || "This agent"} × ${agent.locale || "your locale"}.
+        </p>
+      </div>
+
+      <ul class="oc-edit-list">
+        ${outcomes.map((o) => renderRow(o, !!o.is_custom))}
+        ${unsavedAdds.map((o) => renderRow(o, true))}
+      </ul>
+
+      ${adding ? html`
+        <div class="oc-edit-addcard">
+          <div class="oc-edit-addcard-title">New custom outcome</div>
+          <div class="oc-edit-fields">
+            <label class="oc-edit-field">
+              <span class="oc-edit-flabel">Label (what callers see internally)</span>
+              <input class="db-input" type="text" maxlength="80"
+                     value=${newRow.label}
+                     placeholder="e.g. Insurance docs collected"
+                     onInput=${(e) => setNewRow((r) => ({ ...r, label: e.target.value, id: r.id || _slugifyOutcomeId(e.target.value) }))} />
+            </label>
+            <label class="oc-edit-field">
+              <span class="oc-edit-flabel">Kind</span>
+              <select class="db-input" value=${newRow.kind}
+                      onChange=${(e) => setNewRow((r) => ({ ...r, kind: e.target.value }))}>
+                ${_OC_KIND_OPTIONS.map((k) => html`<option key=${k.value} value=${k.value}>${k.label}</option>`)}
+              </select>
+            </label>
+          </div>
+          <label class="oc-edit-field">
+            <span class="oc-edit-flabel">id (auto from label — edit if you want)</span>
+            <input class="db-input db-mono" type="text" maxlength="60"
+                   value=${newRow.id}
+                   placeholder="e.g. insurance_docs_collected"
+                   onInput=${(e) => setNewRow((r) => ({ ...r, id: _slugifyOutcomeId(e.target.value) }))} />
+          </label>
+          <label class="oc-edit-field">
+            <span class="oc-edit-flabel">Description (optional — helps the agent decide when to log it)</span>
+            <textarea class="db-input" rows="2" maxlength="280"
+                      value=${newRow.description}
+                      placeholder="When the caller agreed to upload their insurance card photo before we hung up."
+                      onInput=${(e) => setNewRow((r) => ({ ...r, description: e.target.value }))}></textarea>
+          </label>
+          <div class="oc-edit-addcard-actions">
+            <button class="db-btn-primary db-btn-sm" type="button" onClick=${addCustomRow}>Add outcome</button>
+            <button class="db-btn-ghost db-btn-sm" type="button"
+                    onClick=${() => { setAdding(false); setNewRow({ id: "", label: "", kind: "success", description: "" }); }}>Cancel</button>
+          </div>
+        </div>
+      ` : html`
+        <div class="oc-edit-addrow">
+          <button class="db-btn-ghost db-btn-sm oc-edit-add" type="button"
+                  onClick=${() => setAdding(true)}>+ Add a custom outcome</button>
+          <button class="db-btn-ghost db-btn-sm oc-edit-reset" type="button"
+                  onClick=${resetAll} disabled=${busy}>Reset all to defaults</button>
+        </div>
+      `}
+
+      ${dirty || msg ? html`
+        <div class="oc-edit-footer">
+          <div class=${"oc-edit-msg" + (msg.startsWith("Couldn't") || msg.startsWith("Need") || msg.includes("already") ? " is-err" : " is-ok")}>
+            ${msg || "You have unsaved changes."}
+          </div>
+          <div>
+            <button class="db-btn-ghost db-btn-sm" type="button" onClick=${discard} disabled=${busy}>Discard</button>
+            <button class="db-btn-primary db-btn-sm" type="button" onClick=${save} disabled=${busy || !dirty}>
+              ${busy ? "Saving…" : "Save changes"}
+            </button>
+          </div>
+        </div>
+      ` : ""}
+    </section>
+  `;
+}
+
 // AgentCallOutcomesPage — /agent/<slug>/outcomes. The "results" page that
 // answers "how well is this agent doing?". Call logs is WHAT happened on
 // each call; Call outcomes is what was the RESULT, aggregated and bucketed.
@@ -4955,7 +5264,7 @@ function AgentCallOutcomesPage({ agent, agents, presets, plan, onNav }) {
         <button class=${"oc-tool" + (catalogueOpen ? " is-open" : "")} type="button"
                 onClick=${() => setCatalogueOpen((v) => !v)}>
           <span aria-hidden="true">📚</span>
-          <span>${catalogueOpen ? "Hide catalogue" : `Catalogue (${catLen})`}</span>
+          <span>${catalogueOpen ? "Hide outcomes editor" : `Customise outcomes (${catLen})`}</span>
         </button>
         ${series.length > 0 ? html`
           <button class=${"oc-tool" + (trendOpen ? " is-open" : "")} type="button"
@@ -5012,25 +5321,12 @@ function AgentCallOutcomesPage({ agent, agents, presets, plan, onNav }) {
         </section>
       ` : ""}
 
-      <!-- Catalogue drawer -->
+      <!-- Catalogue drawer + editor (build 213) -->
       ${catalogueOpen && catLen > 0 ? html`
-        <section class="db-panel oc-drawer">
-          <div class="oc-drawer-head">
-            <h3 class="db-panel-title">Outcome catalogue <span class="db-panel-pill">${catLen}</span></h3>
-            <p class="db-panel-sub">${agent.sector || "this agent"} × ${agent.locale || "your locale"} × your wizard answers.</p>
-          </div>
-          <ul class="oc-catalogue-list">
-            ${(report.outcomes || []).map((o) => html`
-              <li key=${o.id} class="oc-catalogue-row">
-                <span class=${"oc-pill oc-pill-" + o.kind}>${o.kind}</span>
-                <div>
-                  <div class="oc-catalogue-label"><code>${o.id}</code> — ${o.label}</div>
-                  <div class="oc-catalogue-desc">${o.description}</div>
-                </div>
-              </li>
-            `)}
-          </ul>
-        </section>
+        <${OutcomeCatalogueEditor}
+          agent=${agent}
+          outcomes=${report.outcomes || []}
+          onSaved=${loadReport} />
       ` : ""}
 
       <!-- Daily trend drawer -->

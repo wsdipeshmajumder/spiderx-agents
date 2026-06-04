@@ -315,21 +315,117 @@ def purpose_aligned_outcome_ids(agent: dict[str, Any]) -> list[str]:
 
 def catalogue_for(agent: dict[str, Any]) -> list[dict[str, Any]]:
     """Resolve the outcome catalogue for THIS agent: industry × locale ×
-    saved variables. Used by the dashboard report + by the end-of-call
-    vocabulary so agents pick from a comprehensive, sector-aware list."""
+    saved variables × operator overrides.
+
+    Build 213 — `agent.outcome_overrides` lets the business user edit
+    labels / kinds, hide irrelevant outcomes, and add custom ones.
+    Resolution order:
+      1. Start with the sector-resolved catalogue (industry × locale ×
+         variables — the original auto-detected set).
+      2. Drop any id listed in `outcome_overrides.removed`.
+      3. Overlay per-field edits from `outcome_overrides.edited`
+         (label / kind / description; `id` and `success_weight` stay
+         catalogue-managed so the rollup math doesn't drift).
+      4. Append `outcome_overrides.added` — each gets `is_custom: true`
+         so the UI can render an "operator-added" affordance.
+    """
     sector = (agent.get("sector") or "generic").strip().lower()
     locale = (agent.get("locale") or "en-IN")
     variables = agent.get("variables") if isinstance(agent.get("variables"), dict) else {}
     fn = _CATALOGUES.get(sector, _generic_catalogue)
     items = fn(locale, variables or {})
-    # Dedup by id (keep first occurrence) — preserves order.
+    overrides = _normalize_overrides(agent.get("outcome_overrides"))
+    removed = overrides["removed"]
+    edited = overrides["edited"]
+    # Dedup by id (keep first occurrence) — preserves order. Also drops
+    # `removed` ids in the same pass to keep the catalogue tight.
     seen: set[str] = set()
     out: list[dict[str, Any]] = []
     for it in items:
-        if it["id"] in seen:
+        if it["id"] in seen or it["id"] in removed:
             continue
         seen.add(it["id"])
+        # Apply per-field overlay if the operator edited this row.
+        ed = edited.get(it["id"])
+        if ed:
+            merged = dict(it)
+            for k in ("label", "kind", "description"):
+                if k in ed and ed[k] is not None:
+                    merged[k] = ed[k]
+            # Re-stamp the success_weight from the (possibly edited) kind so
+            # a "Lead captured" reclassified to `success` rolls into the
+            # right bucket on the report.
+            merged["success_weight"] = _KIND_WEIGHT.get(merged["kind"], 0.0)
+            merged["is_edited"] = True
+            it = merged
         out.append(it)
+    # Append operator-added customs — `is_custom: true` so the UI can
+    # render the "added by you" badge + a different delete affordance
+    # (custom rows truly delete; built-in rows are hidden via `removed`).
+    for added in overrides["added"]:
+        if added["id"] in seen:
+            continue
+        seen.add(added["id"])
+        out.append({
+            "id":             added["id"],
+            "label":          added["label"],
+            "kind":           added["kind"],
+            "description":    added.get("description") or "",
+            "success_weight": _KIND_WEIGHT.get(added["kind"], 0.0),
+            "is_custom":      True,
+        })
+    return out
+
+
+_ALLOWED_KINDS = {"success", "qualified", "info", "failure"}
+
+
+def _normalize_overrides(raw: Any) -> dict[str, Any]:
+    """Clean + type-coerce an `outcome_overrides` blob to a known shape.
+
+    Defensive — operators can't directly write this blob but a future
+    bulk-import / API path might. Bad fields are dropped silently so a
+    malformed override row never crashes the catalogue resolution path."""
+    out = {"edited": {}, "added": [], "removed": set()}
+    if not isinstance(raw, dict):
+        return out
+    ed = raw.get("edited")
+    if isinstance(ed, dict):
+        for oid, fields in ed.items():
+            if not isinstance(oid, str) or not isinstance(fields, dict):
+                continue
+            clean: dict[str, Any] = {}
+            label = fields.get("label")
+            if isinstance(label, str) and label.strip():
+                clean["label"] = label.strip()[:80]
+            kind = fields.get("kind")
+            if isinstance(kind, str) and kind in _ALLOWED_KINDS:
+                clean["kind"] = kind
+            desc = fields.get("description")
+            if isinstance(desc, str):
+                clean["description"] = desc.strip()[:280]
+            if clean:
+                out["edited"][oid] = clean
+    added = raw.get("added")
+    if isinstance(added, list):
+        for row in added:
+            if not isinstance(row, dict):
+                continue
+            oid = row.get("id")
+            label = row.get("label")
+            kind = row.get("kind")
+            if not (isinstance(oid, str) and oid.strip()): continue
+            if not (isinstance(label, str) and label.strip()): continue
+            if kind not in _ALLOWED_KINDS: continue
+            out["added"].append({
+                "id":          oid.strip().lower().replace(" ", "_")[:60],
+                "label":       label.strip()[:80],
+                "kind":        kind,
+                "description": (row.get("description") or "").strip()[:280] if isinstance(row.get("description"), str) else "",
+            })
+    rem = raw.get("removed")
+    if isinstance(rem, list):
+        out["removed"] = {x for x in rem if isinstance(x, str)}
     return out
 
 

@@ -6847,6 +6847,93 @@ button.db-stat:disabled { cursor: default; opacity: 0.7; }
 .oc-catalogue-label { font-size: 13px; color: #0f172a; font-weight: 600; }
 .oc-catalogue-label code { font-size: 11.5px; background: #f1f5f9; padding: 1px 6px; border-radius: 5px; font-weight: 600; color: #475569; margin-right: 6px; }
 .oc-catalogue-desc { font-size: 12px; color: #6a6f7e; margin-top: 2px; line-height: 1.4; }
+
+/* ─── OutcomeCatalogueEditor (build 213) ──────────────────────────────────
+   The "Customise outcomes" panel. Per-row card with editable label +
+   kind, plus a hide / restore / remove affordance. Sticky save/discard
+   footer when dirty. */
+.oc-edit-panel { padding: 18px 22px 16px; }
+.oc-edit-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.oc-edit-row {
+  padding: 12px 14px;
+  background: #fbfbfd;
+  border: 1px solid #ececf2;
+  border-radius: 10px;
+  transition: opacity 0.12s ease;
+}
+.oc-edit-row.is-hidden { opacity: 0.55; background: #f4f5f9; }
+.oc-edit-row-top { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.oc-edit-id { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; flex-wrap: wrap; }
+.oc-edit-id code {
+  font-size: 11.5px; background: #f1f5f9; padding: 2px 7px;
+  border-radius: 5px; font-weight: 600; color: #475569;
+}
+.oc-edit-badge {
+  display: inline-block; font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 999px;
+}
+.oc-edit-badge-custom  { background: linear-gradient(135deg,#fce7f3 0%,#ede9fe 100%); color: #a21caf; border: 1px solid #f5d0fe; }
+.oc-edit-badge-edited  { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+.oc-edit-badge-hidden  { background: #e5e7eb; color: #4b5563; border: 1px solid #d1d5db; }
+.oc-edit-actions { display: flex; gap: 6px; }
+.oc-edit-hide, .oc-edit-restore, .oc-edit-trash {
+  font: inherit; font-size: 12px; font-weight: 500;
+  padding: 5px 10px; border-radius: 6px; cursor: pointer;
+  background: #ffffff; border: 1px solid #d8dbe4; color: #1f2230;
+}
+.oc-edit-hide:hover    { background: #fef3c7; border-color: #fde68a; color: #92400e; }
+.oc-edit-restore:hover { background: #ecfdf5; border-color: #a7f3d0; color: #065f46; }
+.oc-edit-trash         { color: #b91c1c; }
+.oc-edit-trash:hover   { background: #fef2f2; border-color: #fecaca; }
+.oc-edit-fields { display: grid; grid-template-columns: 2fr 1fr; gap: 10px; }
+.oc-edit-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.oc-edit-flabel { font-size: 11px; font-weight: 600; color: #6a6f7e; text-transform: uppercase; letter-spacing: 0.04em; }
+.oc-edit-field .db-input { font-size: 13.5px; }
+.oc-edit-field textarea.db-input { resize: vertical; min-height: 48px; font-family: inherit; }
+
+.oc-edit-addrow { display: flex; gap: 8px; margin-top: 12px; align-items: center; }
+.oc-edit-add { color: #6366f1; }
+.oc-edit-reset { margin-left: auto; color: #6a6f7e; }
+.oc-edit-addcard {
+  margin-top: 12px;
+  padding: 14px 16px;
+  background: #f8faff;
+  border: 2px dashed #c7d2fe;
+  border-radius: 10px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.oc-edit-addcard-title { font-size: 13px; font-weight: 600; color: #4338ca; }
+.oc-edit-addcard-actions { display: flex; gap: 8px; margin-top: 4px; }
+
+.oc-edit-footer {
+  position: sticky; bottom: 0;
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.6) 0%, #ffffff 60%);
+  border-top: 1px solid #e6e7ec;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  border-bottom-left-radius: 14px; border-bottom-right-radius: 14px;
+}
+.oc-edit-msg { font-size: 12.5px; }
+.oc-edit-msg.is-ok  { color: #166534; }
+.oc-edit-msg.is-err { color: #b91c1c; }
+.oc-edit-footer button + button { margin-left: 6px; }
+
+@media (max-width: 640px) {
+  .oc-edit-fields { grid-template-columns: 1fr; }
+  .oc-edit-footer { flex-direction: column; align-items: stretch; }
+}
+
+:root[data-theme="dark"] .oc-edit-row { background: #14171f; border-color: #2a2f3e; }
+:root[data-theme="dark"] .oc-edit-row.is-hidden { background: #0e1015; }
+:root[data-theme="dark"] .oc-edit-id code { background: #1f2433; color: #c8ccd9; }
+:root[data-theme="dark"] .oc-edit-flabel { color: #9aa0ad; }
+:root[data-theme="dark"] .oc-edit-hide, :root[data-theme="dark"] .oc-edit-restore, :root[data-theme="dark"] .oc-edit-trash { background: #1f2433; border-color: #2a2f3e; color: #c8ccd9; }
+:root[data-theme="dark"] .oc-edit-trash { color: #fca5a5; }
+:root[data-theme="dark"] .oc-edit-addcard { background: #14182a; border-color: #3730a3; }
+:root[data-theme="dark"] .oc-edit-addcard-title { color: #a5b4fc; }
+:root[data-theme="dark"] .oc-edit-footer { background: linear-gradient(180deg, rgba(20,23,31,0.6) 0%, #14171f 60%); border-top-color: #2a2f3e; }
 :root[data-theme="dark"] .oc-kpi, :root[data-theme="dark"] .oc-row, :root[data-theme="dark"] .oc-catalogue-row { background: #14171f; border-color: #2a2f3e; }
 :root[data-theme="dark"] .oc-kpi-value, :root[data-theme="dark"] .oc-row-name, :root[data-theme="dark"] .oc-row-count, :root[data-theme="dark"] .oc-catalogue-label { color: #f1f3f8; }
 :root[data-theme="dark"] .oc-kpi-label, :root[data-theme="dark"] .oc-kpi-sub, :root[data-theme="dark"] .oc-row-desc, :root[data-theme="dark"] .oc-row-share, :root[data-theme="dark"] .oc-catalogue-desc { color: #9aa0ad; }
