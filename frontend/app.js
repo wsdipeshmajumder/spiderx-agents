@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 230;
+const SXAI_BUILD = 231;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -11282,6 +11282,7 @@ function AdminShell({ section, currentUser, onNav }) {
     calls:     "call",
     pnl:       "query_stats",
     obs:       "monitor_heart",
+    healthcheck: "health_and_safety",
     audit:     "history",
     chart:     "bar_chart",
     ledger:    "receipt_long",
@@ -11302,6 +11303,7 @@ function AdminShell({ section, currentUser, onNav }) {
         { key: "calls",          label: "Calls",         icon: Icon.calls },
         { key: "agent-pnl",      label: "Agent P&L",     icon: Icon.pnl },
         { key: "observability",  label: "Observability", icon: Icon.obs },
+        { key: "healthcheck",    label: "Health checks", icon: Icon.healthcheck },
       ],
     },
     {
@@ -11416,6 +11418,7 @@ function AdminShell({ section, currentUser, onNav }) {
             : sec === "agent-pnl" ? html`<${AdminAgentPnl} />`
             : sec === "audit" ? html`<${AdminAudit} />`
             : sec === "observability" ? html`<${AdminObservability} />`
+            : sec === "healthcheck" ? html`<${AdminHealthchecks} />`
             : sec === "settings" ? html`<${AdminSettings} />`
             : sec === "super-admins" ? html`<${AdminSuperAdmins} currentUser=${currentUser} />`
             : html`<p>Unknown section.</p>`
@@ -11425,6 +11428,239 @@ function AdminShell({ section, currentUser, onNav }) {
     </div>
   `;
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// AdminHealthchecks — /admin/healthcheck. Build 231.
+//
+// Three-tier monitoring config + agent-status grid + on-demand "Run now"
+// buttons. Reads/writes via the existing platform_settings PATCH endpoint
+// (key-by-key) so each row is independently audited.
+//
+//   Level 2 (always-on default) — hourly WS handshake probe. Free.
+//   Level 3 (opt-in, costs ~$0.002/probe) — daily full conversational probe.
+//   Level 4 (placeholder) — real outbound PSTN call. Config wired today,
+//                           outbound integration pending.
+// ─────────────────────────────────────────────────────────────────────────
+function AdminHealthchecks() {
+  const [settings, setSettings]   = useState(null);
+  const [busy,     setBusy]       = useState({});
+  const [msg,      setMsg]        = useState("");
+  const [agents,   setAgents]     = useState(null);
+
+  const load = async () => {
+    try {
+      const rs = await fetch("/api/admin/settings?category=healthcheck").then((r) => r.json());
+      const map = {};
+      for (const r of (rs || [])) map[r.key] = r;
+      setSettings(map);
+    } catch (e) { setMsg(`Couldn't load settings: ${e}`); }
+    try {
+      const rs = await fetch("/api/admin/agents/health").then((r) => r.json());
+      setAgents(Array.isArray(rs) ? rs : []);
+    } catch { setAgents([]); }
+  };
+  useEffect(() => { load(); }, []);
+
+  // PATCH a single setting. On success, the row in `settings` updates
+  // optimistically so the toggle feels instant; on failure we revert
+  // and show the error.
+  const saveSetting = async (key, value) => {
+    setBusy((b) => ({ ...b, [key]: true }));
+    setMsg("");
+    try {
+      const r = await fetch(`/api/admin/settings/${encodeURIComponent(key)}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value }),
+      });
+      if (!r.ok) throw new Error("status " + r.status);
+      const row = await r.json();
+      setSettings((s) => ({ ...(s || {}), [key]: row }));
+    } catch (e) {
+      setMsg(`Save failed for ${key}: ${e.message || e}`);
+    } finally {
+      setBusy((b) => ({ ...b, [key]: false }));
+    }
+  };
+
+  const runProbe = async (kind) => {
+    setBusy((b) => ({ ...b, [`run-${kind}`]: true }));
+    setMsg(`Running ${kind} probe…`);
+    try {
+      const ep = kind === "hourly" ? "run-now"
+              : kind === "full"   ? "run-full"
+              :                     "run-pstn";
+      const r = await fetch(`/api/admin/agents/health/${ep}`, { method: "POST" });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok && r.status !== 200) {
+        setMsg(`Probe failed: ${body.detail || r.status}`);
+      } else if (body.ok === false) {
+        setMsg(`Probe declined: ${body.error || "see Observability"}`);
+      } else {
+        setMsg(`${kind} probe done ✓ — check Observability for results.`);
+      }
+      load();
+    } catch (e) {
+      setMsg(`Run failed: ${e.message || e}`);
+    } finally {
+      setBusy((b) => ({ ...b, [`run-${kind}`]: false }));
+    }
+  };
+
+  const valueOf = (key) => settings?.[key]?.value;
+  const labelOf = (key) => settings?.[key]?.label || key;
+  const descOf  = (key) => settings?.[key]?.description || "";
+
+  if (!settings) return html`<div class="db-loading">Loading…</div>`;
+
+  // Per-agent status grid — counts + the full list with status dot.
+  const statusCounts = (agents || []).reduce((acc, a) => {
+    acc[a.status || "never"] = (acc[a.status || "never"] || 0) + 1;
+    return acc;
+  }, {});
+  const fmtAgo = (iso) => {
+    if (!iso) return "never";
+    const s = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+    if (s < 60) return `${s}s`;
+    if (s < 3600) return `${Math.round(s/60)}m`;
+    if (s < 86400) return `${Math.round(s/3600)}h`;
+    return `${Math.round(s/86400)}d`;
+  };
+
+  // Inline helpers for the JSX. Toggle row + dropdown row + text row +
+  // section header — keeps the form compact + the markup readable.
+  const ToggleRow = ({ k }) => html`
+    <div class="hc-row">
+      <div class="hc-row-text">
+        <div class="hc-row-label">${labelOf(k)}</div>
+        <div class="hc-row-desc">${descOf(k)}</div>
+      </div>
+      <label class="hc-toggle">
+        <input type="checkbox" disabled=${busy[k]}
+               checked=${!!valueOf(k)}
+               onChange=${(e) => saveSetting(k, e.target.checked)} />
+        <span class="hc-toggle-slider"></span>
+      </label>
+    </div>
+  `;
+  const TextRow = ({ k, placeholder = "", type = "text", parse = (s) => s }) => html`
+    <div class="hc-row">
+      <div class="hc-row-text">
+        <div class="hc-row-label">${labelOf(k)}</div>
+        <div class="hc-row-desc">${descOf(k)}</div>
+      </div>
+      <input class="hc-input db-input" type=${type} placeholder=${placeholder}
+             disabled=${busy[k]}
+             value=${valueOf(k) ?? ""}
+             onBlur=${(e) => {
+               const v = type === "number" ? Number(e.target.value || 0) : parse(e.target.value);
+               if (v !== valueOf(k)) saveSetting(k, v);
+             }}
+             onInput=${(e) => {
+               // optimistic for the input value only — server commit on blur
+               setSettings((s) => ({ ...s, [k]: { ...s[k], value: type === "number" ? Number(e.target.value || 0) : e.target.value } }));
+             }} />
+    </div>
+  `;
+  const SelectRow = ({ k, options }) => html`
+    <div class="hc-row">
+      <div class="hc-row-text">
+        <div class="hc-row-label">${labelOf(k)}</div>
+        <div class="hc-row-desc">${descOf(k)}</div>
+      </div>
+      <select class="hc-input db-input" disabled=${busy[k]}
+              value=${valueOf(k) ?? ""}
+              onChange=${(e) => saveSetting(k, e.target.value)}>
+        ${options.map((o) => html`<option key=${o} value=${o}>${o}</option>`)}
+      </select>
+    </div>
+  `;
+
+  return html`
+    <h1>Health checks</h1>
+    <p class="ax-sub">Proactive per-agent monitoring beyond the platform-level
+      <code>/api/build</code> check. Three tiers — handshake (free, hourly),
+      full conversational (Gemini cost, daily), and real PSTN call (config
+      wired, outbound integration pending). Failures emit Observability
+      events and (when enabled) email an alert.</p>
+
+    ${msg ? html`<div class="hc-msg">${msg}</div>` : ""}
+
+    <!-- Live status grid -->
+    <section class="hc-card">
+      <header class="hc-card-head">
+        <h2>Agent status</h2>
+        <div class="hc-card-meta">
+          ${statusCounts.up || 0} up · ${statusCounts.degraded || 0} slow ·
+          ${statusCounts.down || 0} down · ${statusCounts.never || 0} not yet probed
+        </div>
+      </header>
+      ${agents && agents.length > 0 ? html`
+        <table class="db-table hc-status-table">
+          <thead><tr><th></th><th>Agent</th><th>Org</th><th>Last check</th><th>Latency</th><th>Phase</th></tr></thead>
+          <tbody>
+            ${agents.map((a) => html`
+              <tr key=${a.agent_id}>
+                <td><span class=${"hc-dot hc-dot-" + a.status}></span></td>
+                <td><a class="db-link" href=${`/agent/${a.slug || a.agent_id}`}>${a.name}</a></td>
+                <td class="db-muted">${a.org_name || "—"}</td>
+                <td class="db-muted">${a.last_check ? fmtAgo(a.last_check) + " ago" : "never"}</td>
+                <td class="db-muted db-mono">${a.latency_ms != null ? a.latency_ms + " ms" : "—"}</td>
+                <td class="db-muted">${(a.payload && a.payload.phase) || "—"}</td>
+              </tr>
+            `)}
+          </tbody>
+        </table>
+      ` : html`<p class="db-muted" style=${{ padding: "20px" }}>No published agents yet.</p>`}
+    </section>
+
+    <!-- Level 2 — hourly handshake -->
+    <section class="hc-card">
+      <header class="hc-card-head">
+        <h2>Hourly handshake probe (Level 2)</h2>
+        <button class="db-btn-ghost db-btn-sm" type="button" disabled=${busy["run-hourly"]}
+                onClick=${() => runProbe("hourly")}>Run now</button>
+      </header>
+      <${ToggleRow} k="healthcheck.level2_enabled" />
+    </section>
+
+    <!-- Level 3 — daily full conversational -->
+    <section class="hc-card">
+      <header class="hc-card-head">
+        <h2>Daily full conversational probe (Level 3)</h2>
+        <button class="db-btn-primary db-btn-sm" type="button" disabled=${busy["run-full"]}
+                onClick=${() => runProbe("full")}>Run now</button>
+      </header>
+      <${ToggleRow} k="healthcheck.level3_enabled" />
+      <${TextRow}   k="healthcheck.level3_sample_size" type="number" placeholder="25" />
+    </section>
+
+    <!-- Email alerts -->
+    <section class="hc-card">
+      <header class="hc-card-head"><h2>Email alerts</h2></header>
+      <${ToggleRow} k="healthcheck.email_on_failure" />
+      <${TextRow}   k="healthcheck.email_recipients" placeholder="oncall@example.com,devteam@example.com" />
+    </section>
+
+    <!-- Level 4 — placeholder for real PSTN -->
+    <section class="hc-card hc-card-future">
+      <header class="hc-card-head">
+        <h2>Real PSTN probe (Level 4) — config wired, dial pending</h2>
+        <button class="db-btn-ghost db-btn-sm" type="button" disabled=${busy["run-pstn"]}
+                onClick=${() => runProbe("pstn")}>Dry-run</button>
+      </header>
+      <${ToggleRow} k="healthcheck.level4_pstn_enabled" />
+      <${SelectRow} k="healthcheck.level4_pstn_provider" options=${["twilio", "plivo"]} />
+      <${TextRow}   k="healthcheck.level4_pstn_from_number" placeholder="+14155551234" />
+      <${TextRow}   k="healthcheck.level4_pstn_to_number"   placeholder="+919876543210" />
+      <p class="hc-future-note">
+        The configuration above is read-write and audit-logged today. Outbound
+        call placement awaits the Twilio outbound integration — until then the
+        "Dry-run" button reports config status and emits an Observability event.
+      </p>
+    </section>
+  `;
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────
 // AdminObservability — /admin/observability. Build 200 redesign.

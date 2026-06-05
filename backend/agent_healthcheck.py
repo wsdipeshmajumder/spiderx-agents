@@ -215,6 +215,10 @@ async def _probe_one(agent: dict) -> dict:
             )
         except Exception:  # noqa: BLE001
             pass
+        # Build 231 — email alert on Level 2 failure too. Same path
+        # the Level 3 probe uses; honours `healthcheck.email_on_failure`
+        # + `healthcheck.email_recipients` settings.
+        await _maybe_email_alert(agent, result, level=2)
     return result
 
 
@@ -225,6 +229,13 @@ async def run_hourly_healthchecks() -> None:
     error-severity events; the daily EOD digest can sum them per
     agent later if we want a "uptime %" KPI.
     """
+    # Build 231 — admin-toggle gate. The hourly probe stays on by
+    # default but operators can flip it off via Platform Settings
+    # → Health checks without redeploying.
+    from . import settings as cfg
+    if not bool(await cfg.get("healthcheck.level2_enabled", True)):
+        log.info("agent_healthcheck: level 2 disabled via settings, skipping run")
+        return
     try:
         pool = await db.get_pool()
         async with pool.acquire() as conn:
@@ -337,3 +348,351 @@ async def latest_status_per_agent() -> list[dict[str, Any]]:
         d["latency_ms"] = (d.get("payload") or {}).get("latency_ms")
         out.append(d)
     return out
+
+
+# ─── Level 3: full conversational probe (build 231) ──────────────────────
+
+
+# Sample-rate of the inbound mic frames the bridge expects. PCM int16 LE.
+# 100 ms at 16 kHz = 1600 samples = 3200 bytes per "frame" we stream to
+# the WS — matches the chunk size the browser audio engine produces.
+_PROBE_FRAME_BYTES = 3200
+
+# Total bytes of silence to stream as the synthetic caller utterance.
+# 800 ms = 25 600 bytes. Long enough that Gemini's VAD fires; short
+# enough to keep the probe under 5 s total.
+_PROBE_SILENCE_BYTES = 25_600
+
+# How long to wait for each phase of the probe before giving up. Tuned
+# generously — a real Gemini Live session takes 1-2 s to open and 2-4 s
+# to produce the first greeting chunk on a cold path.
+_LEVEL3_TIMEOUT_GREETING_S = 12.0
+_LEVEL3_TIMEOUT_RESPONSE_S = 15.0
+
+
+async def probe_agent_full(agent_id: int) -> dict:
+    """Level 3 — exercise the FULL voice round-trip for one agent.
+
+    Phases (each timed; failure at any phase short-circuits + reports
+    which phase died):
+      1. connect           — WS handshake to /ws/session
+      2. session_starting  — bridge loaded the agent
+      3. greeting_audio    — Gemini Live opened + spoke first chunk
+      4. response_audio    — synthetic caller frames in, response out
+      5. closed            — clean teardown
+
+    The "caller utterance" is a synthesised text turn over the WS's
+    `{type:"text"}` channel (proves LLM round-trip + voice synthesis)
+    + a brief silence buffer streamed as binary frames (proves the
+    inbound audio pipe accepts frames). Together that's tight coverage
+    on every leg of a real call EXCEPT the PSTN provider hop.
+
+    Returns:
+      {
+        "ok":            bool,
+        "latency_ms":    int — total wall time
+        "phase_timings": {connect, session_starting, greeting_audio,
+                          response_audio, closed} — each int ms or None
+        "phase":         the phase reached (success or failure)
+        "error":         optional str — populated when ok=False,
+      }
+    """
+    url = f"{_internal_ws_url()}/ws/session?agent_id={int(agent_id)}&kind=test"
+    started = time.monotonic()
+    timings: dict[str, Optional[int]] = {
+        "connect": None, "session_starting": None,
+        "greeting_audio": None, "response_audio": None, "closed": None,
+    }
+    phase = "init"
+
+    def _ms_since() -> int:
+        return int((time.monotonic() - started) * 1000)
+
+    try:
+        async with asyncio.timeout(PROBE_TIMEOUT_S + _LEVEL3_TIMEOUT_GREETING_S + _LEVEL3_TIMEOUT_RESPONSE_S):
+            async with websockets.connect(url, max_size=None) as ws:
+                phase = "connect"; timings["connect"] = _ms_since()
+
+                # Phase 2 — wait for session_starting
+                async with asyncio.timeout(PROBE_TIMEOUT_S):
+                    while True:
+                        raw = await ws.recv()
+                        if isinstance(raw, str):
+                            try:
+                                msg = json.loads(raw)
+                            except Exception:  # noqa: BLE001
+                                continue
+                            if isinstance(msg, dict) and msg.get("type") == "session_starting":
+                                phase = "session_starting"
+                                timings["session_starting"] = _ms_since()
+                                break
+                            if isinstance(msg, dict) and msg.get("type") == "error":
+                                return {
+                                    "ok": False, "latency_ms": _ms_since(),
+                                    "phase_timings": timings, "phase": "session_starting",
+                                    "error": str(msg.get("message") or "bridge error at handshake")[:300],
+                                }
+
+                # Phase 3 — wait for first audio chunk OUT (greeting)
+                async with asyncio.timeout(_LEVEL3_TIMEOUT_GREETING_S):
+                    while True:
+                        raw = await ws.recv()
+                        if isinstance(raw, (bytes, bytearray)):
+                            phase = "greeting_audio"
+                            timings["greeting_audio"] = _ms_since()
+                            break
+                        # ignore non-audio messages during greeting wait
+
+                # Phase 4 — send synthetic caller turn + silence frames,
+                # wait for the next audio chunk out (the agent's response).
+                greeting_at = time.monotonic()
+                try:
+                    await ws.send(json.dumps({
+                        "type": "text",
+                        "text": "Hello, this is an automated healthcheck. Please briefly acknowledge.",
+                    }))
+                except Exception as e:  # noqa: BLE001
+                    return {
+                        "ok": False, "latency_ms": _ms_since(),
+                        "phase_timings": timings, "phase": "response_audio",
+                        "error": f"text send failed: {e}",
+                    }
+                # Stream a short burst of silence as audio frames so the
+                # inbound audio pipe is exercised even though the model
+                # answers from the text turn above. Best-effort — frame
+                # send failures don't fail the probe (the text path is
+                # the primary signal).
+                silence = b"\x00\x00" * (_PROBE_FRAME_BYTES // 2)
+                bytes_sent = 0
+                while bytes_sent < _PROBE_SILENCE_BYTES:
+                    try:
+                        await ws.send(silence)
+                        bytes_sent += len(silence)
+                        await asyncio.sleep(0.05)  # ~20 chunks/sec, mimics live mic
+                    except Exception:  # noqa: BLE001
+                        break
+
+                # Now wait for the agent's RESPONSE audio. Skip the
+                # greeting tail chunks by ignoring everything received
+                # in the first ~1 s after the greeting kicked off.
+                async with asyncio.timeout(_LEVEL3_TIMEOUT_RESPONSE_S):
+                    while True:
+                        raw = await ws.recv()
+                        if isinstance(raw, (bytes, bytearray)):
+                            # If we're still inside the greeting window,
+                            # this is greeting-tail audio — keep waiting.
+                            if time.monotonic() - greeting_at < 1.2:
+                                continue
+                            phase = "response_audio"
+                            timings["response_audio"] = _ms_since()
+                            break
+
+                # Phase 5 — close cleanly.
+                try:
+                    await ws.send(json.dumps({"type": "stop"}))
+                except Exception:  # noqa: BLE001
+                    pass
+                phase = "closed"
+                timings["closed"] = _ms_since()
+        return {
+            "ok": True, "latency_ms": _ms_since(),
+            "phase_timings": timings, "phase": "closed", "error": None,
+        }
+    except asyncio.TimeoutError:
+        return {
+            "ok": False, "latency_ms": _ms_since(),
+            "phase_timings": timings, "phase": phase,
+            "error": f"timeout at phase '{phase}'",
+        }
+    except Exception as e:  # noqa: BLE001
+        return {
+            "ok": False, "latency_ms": _ms_since(),
+            "phase_timings": timings, "phase": phase,
+            "error": f"{type(e).__name__}: {str(e)[:240]}",
+        }
+
+
+async def _probe_one_full(agent: dict) -> dict:
+    """Run one Level-3 probe + emit the matching event. Returns the
+    raw result so the caller can roll up + alert."""
+    result = await probe_agent_full(int(agent["id"]))
+    agent_id = int(agent["id"])
+    agent_name = agent.get("name") or f"#{agent_id}"
+    org_id = int(agent["org_id"]) if agent.get("org_id") else None
+    payload = {
+        "agent_id": agent_id,
+        "agent_slug": agent.get("slug"),
+        "latency_ms": result["latency_ms"],
+        "phase": result["phase"],
+        "phase_timings": result["phase_timings"],
+        "level": 3,
+    }
+    if result["ok"] and result["latency_ms"] > DEGRADED_LATENCY_MS * 3:
+        # Level 3 latency is naturally higher (full Gemini round-trip).
+        # Treat 3× the Level 2 threshold as "degraded" so info-grade
+        # operators aren't paged on every healthy 6-second probe.
+        await _safe_emit("agent.healthcheck.full.degraded", "warning",
+                         f"{agent_name} full probe slow ({result['latency_ms']} ms)",
+                         org_id, agent_id, payload)
+    elif result["ok"]:
+        await _safe_emit("agent.healthcheck.full.passed", "info",
+                         f"{agent_name} full probe OK ({result['latency_ms']} ms)",
+                         org_id, agent_id, payload)
+    else:
+        payload["error"] = result["error"]
+        await _safe_emit("agent.healthcheck.full.failed", "error",
+                         f"{agent_name} FULL PROBE FAILED — {result['phase']}",
+                         org_id, agent_id, payload, message=result["error"])
+        # Email alert when configured. Failed-only — we don't spam on
+        # passed runs because the summary event covers that.
+        await _maybe_email_alert(agent, result, level=3)
+    return result
+
+
+async def run_daily_full_healthchecks() -> None:
+    """Scheduler entry point — Level 3 probe across published agents.
+
+    Sample-size capped via `healthcheck.level3_sample_size` to bound
+    Gemini cost. When N agents > sample_size, pick N at random per run
+    so over time every agent gets covered without paying for all of
+    them daily.
+    """
+    from . import settings as cfg
+    if not bool(await cfg.get("healthcheck.level3_enabled", False)):
+        log.info("agent_healthcheck: level 3 disabled via settings, skipping run")
+        return
+    sample_size = int(await cfg.get("healthcheck.level3_sample_size", 25) or 0)
+    try:
+        pool = await db.get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, name, slug, org_id FROM agents "
+                "WHERE published = TRUE ORDER BY id ASC"
+            )
+        agents = [dict(r) for r in rows]
+    except Exception as e:  # noqa: BLE001
+        log.warning("agent_healthcheck: agent list query failed: %s", e)
+        return
+    if not agents:
+        return
+    # Stable but rotating sample — order by (id + day_of_year) mod len
+    # so the same agent isn't always picked first. No random imports
+    # needed; day-anchored rotation gives even coverage over a week.
+    from datetime import datetime, timezone as _tz
+    if sample_size > 0 and sample_size < len(agents):
+        doy = datetime.now(_tz.utc).timetuple().tm_yday
+        agents = sorted(agents, key=lambda a: (int(a["id"]) + doy) % len(agents))[:sample_size]
+
+    # Lower parallelism than Level 2 — each probe holds a Gemini Live
+    # session for ~5 s, and we don't want to spike concurrent sessions.
+    sem = asyncio.Semaphore(max(1, PROBE_PARALLELISM // 2))
+    async def _bounded(a):
+        async with sem:
+            return await _probe_one_full(a)
+    results = await asyncio.gather(*(_bounded(a) for a in agents), return_exceptions=True)
+
+    passed = sum(1 for r in results if isinstance(r, dict) and r.get("ok"))
+    failed = sum(1 for r in results if not (isinstance(r, dict) and r.get("ok")))
+    sev = "info" if failed == 0 else "error"
+    await _safe_emit(
+        "agent.healthcheck.full.summary", sev,
+        f"Daily full probe: {passed} ok · {failed} failed (of {len(agents)} sampled)",
+        None, None,
+        {"passed": passed, "failed": failed, "total_sampled": len(agents)},
+    )
+
+
+# ─── Level 4: real PSTN probe (placeholder) ──────────────────────────────
+
+
+async def run_pstn_healthcheck() -> dict:
+    """Level 4 — place a real outbound call to verify the PSTN path.
+
+    NOT YET IMPLEMENTED — the configuration plumbing is live (settings
+    keys + admin form), but the actual call placement awaits the
+    Twilio outbound integration. Returns a stub result so the admin
+    "Run now" button can give a clear "not configured" message rather
+    than crashing.
+    """
+    from . import settings as cfg
+    if not bool(await cfg.get("healthcheck.level4_pstn_enabled", False)):
+        return {"ok": False, "error": "Level 4 PSTN probe is disabled in settings"}
+    provider = await cfg.get("healthcheck.level4_pstn_provider", "twilio")
+    from_n = (await cfg.get("healthcheck.level4_pstn_from_number", "")).strip()
+    to_n   = (await cfg.get("healthcheck.level4_pstn_to_number", "")).strip()
+    if not (from_n and to_n):
+        await _safe_emit(
+            "agent.healthcheck.pstn.config_missing", "warning",
+            "PSTN probe requested but FROM / TO number not configured",
+            None, None,
+            {"provider": provider, "from": from_n, "to": to_n},
+        )
+        return {"ok": False, "error": "from_number / to_number not set"}
+    # Stub — emit an event explaining the wiring is partial.
+    await _safe_emit(
+        "agent.healthcheck.pstn.not_implemented", "info",
+        "PSTN probe configured but outbound integration not wired yet",
+        None, None,
+        {"provider": provider, "from": from_n, "to": to_n},
+    )
+    return {"ok": False, "error": f"{provider} outbound integration not yet implemented"}
+
+
+# ─── Helpers ─────────────────────────────────────────────────────────────
+
+
+async def _safe_emit(
+    kind: str, severity: str, title: str,
+    org_id, agent_id, payload, *, message: Optional[str] = None,
+) -> None:
+    """Wrapper around events.emit that swallows failures + uniformly
+    sets source='scheduler'. Keeps every emission site terse."""
+    try:
+        await _ev.emit(
+            kind, severity=severity, source="scheduler",
+            title=title, message=message,
+            org_id=org_id, agent_id=agent_id, payload=payload,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def _maybe_email_alert(agent: dict, result: dict, *, level: int) -> None:
+    """When the operator has `healthcheck.email_on_failure` on, send
+    a terse alert email with the failed phase + the latency + a link
+    back to the agent's overview page so they can dig in immediately."""
+    try:
+        from . import settings as cfg, email_stub
+        if not bool(await cfg.get("healthcheck.email_on_failure", True)):
+            return
+        recipients = (await cfg.get("healthcheck.email_recipients", "")).strip()
+        to_list: list[str] = []
+        if recipients:
+            to_list = [a.strip() for a in recipients.split(",") if a.strip()]
+        else:
+            fallback = (os.environ.get("REPORT_EMAIL_TO") or "").strip()
+            if fallback:
+                to_list = [fallback]
+        if not to_list:
+            log.info("healthcheck.alert_email: no recipients configured, skipping")
+            return
+        subject = f"[SpiderX healthcheck] {agent.get('name') or agent.get('id')} — LEVEL {level} FAILED"
+        base = (os.environ.get("PUBLIC_BASE_URL") or "http://localhost:8765").rstrip("/")
+        agent_url = f"{base}/agent/{agent.get('slug') or agent.get('id')}"
+        body = (
+            f"Healthcheck probe FAILED for agent: {agent.get('name')}\n"
+            f"  Probe level:      {level}\n"
+            f"  Phase reached:    {result.get('phase')}\n"
+            f"  Latency:          {result.get('latency_ms')} ms\n"
+            f"  Error:            {result.get('error')}\n"
+            f"  Phase timings:    {result.get('phase_timings')}\n"
+            f"\nAgent: {agent_url}\n"
+            f"Observability: {base}/admin/observability\n"
+        )
+        for to in to_list:
+            try:
+                await email_stub._send(to, subject, body, html_body=None)
+            except Exception as e:  # noqa: BLE001
+                log.warning("healthcheck.alert_email send to %s failed: %s", to, e)
+    except Exception as e:  # noqa: BLE001
+        log.warning("healthcheck.alert_email path failed: %s", e)

@@ -148,4 +148,17 @@ _DEFAULTS: dict[str, Any] = {
     "features.signups_open":        True,
     "branding.support_email":       "support@spiderx.ai",
     "branding.brand_palette":       {"primary": "#a78bfa", "accent": "#2563eb"},
+    # ── Agent healthcheck (build 231) ──
+    # See backend/agent_healthcheck.py for the probe implementations.
+    # Defaults mirror Alembic 0023; presence here keeps the app working
+    # if that migration hasn't run yet.
+    "healthcheck.level2_enabled":            True,
+    "healthcheck.level3_enabled":            False,   # opt-in: real Gemini cost
+    "healthcheck.level3_sample_size":        25,
+    "healthcheck.email_on_failure":          True,
+    "healthcheck.email_recipients":          "",
+    "healthcheck.level4_pstn_enabled":       False,   # placeholder
+    "healthcheck.level4_pstn_provider":      "twilio",
+    "healthcheck.level4_pstn_from_number":   "",
+    "healthcheck.level4_pstn_to_number":     "",
 }

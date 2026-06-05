@@ -86,6 +86,16 @@ async def _startup() -> None:
             "hourly_agent_healthcheck", "5 * * * *",
             _ahc.run_hourly_healthchecks, tz="Asia/Kolkata",
         )
+        # 04:00 IST daily — Level 3 full conversational probe per agent
+        # (build 231). Opens a real Gemini Live session, sends a text
+        # turn + silence frames, waits for response audio. OFF by
+        # default; flip `healthcheck.level3_enabled` in Platform
+        # Settings → Health checks to enable. Sample-size capped so
+        # cost stays predictable.
+        scheduler.register(
+            "daily_agent_full_healthcheck", "0 4 * * *",
+            _ahc.run_daily_full_healthchecks, tz="Asia/Kolkata",
+        )
         await scheduler.start()
         log.info("scheduler: started with %d job(s)", len(scheduler.list_jobs()))
     except Exception as e:  # noqa: BLE001
@@ -107,7 +117,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 230
+APP_BUILD = 231
 
 
 # ────────────────────────── auth (stub) ──────────────────────────

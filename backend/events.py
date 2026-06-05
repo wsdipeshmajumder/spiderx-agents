@@ -259,6 +259,13 @@ KINDS = {
     # agent health (build 219 — hourly per-agent WS handshake probe)
     "agent.healthcheck.passed", "agent.healthcheck.degraded",
     "agent.healthcheck.failed", "agent.healthcheck.summary",
+    # agent health Level 3 — daily full conversational probe (build 231)
+    "agent.healthcheck.full.passed", "agent.healthcheck.full.degraded",
+    "agent.healthcheck.full.failed", "agent.healthcheck.full.summary",
+    # agent health Level 4 — real PSTN probe (stub today, build 231)
+    "agent.healthcheck.pstn.config_missing",
+    "agent.healthcheck.pstn.not_implemented",
+    "agent.healthcheck.pstn.passed", "agent.healthcheck.pstn.failed",
     # recordings (build 206)
     "recording.purged", "recording.purge.error",
     # calls

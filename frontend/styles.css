@@ -11663,6 +11663,117 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
   max-width: 880px;
 }
 
+/* ───── Health-checks settings page (build 231) ──────────────────────────
+ * /admin/healthcheck — settings cards for the three monitoring tiers
+ * plus the per-agent status table. Visual rhythm matches the other admin
+ * pages (Observability, Pricing): white card on light grey background,
+ * 14 px section heads, dense form rows. */
+.hc-card {
+  background: #ffffff;
+  border: 1px solid #e6e7ec;
+  border-radius: 12px;
+  margin-bottom: 18px;
+  overflow: hidden;
+}
+.hc-card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid #eef0f4;
+}
+.hc-card-head h2 {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: #1f2230;
+}
+.hc-card-meta {
+  font-size: 12px; color: #6a6f7d;
+  white-space: nowrap;
+}
+.hc-card-future { opacity: 0.94; border-style: dashed; }
+.hc-future-note {
+  padding: 10px 18px 14px;
+  font-size: 12px; color: #6a6f7d;
+  border-top: 1px dashed #eef0f4;
+  margin: 0;
+}
+
+/* Form row — label/desc on the left, control on the right. Matches the
+ * AdminFilterBar's 11px-uppercase-label rhythm. */
+.hc-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px;
+  padding: 12px 18px;
+  border-bottom: 1px solid #f3f4f8;
+}
+.hc-row:last-child { border-bottom: 0; }
+.hc-row-text { flex: 1; min-width: 0; }
+.hc-row-label {
+  font-size: 13px; font-weight: 600; color: #1f2230;
+  margin-bottom: 2px;
+}
+.hc-row-desc {
+  font-size: 12px; color: #6a6f7d;
+  line-height: 1.45;
+}
+.hc-input { max-width: 320px; }
+
+/* iOS-style toggle. Pure CSS, no JS — works with a <label><input/>+<span>. */
+.hc-toggle { position: relative; display: inline-block; width: 38px; height: 22px; flex-shrink: 0; }
+.hc-toggle input { opacity: 0; width: 0; height: 0; }
+.hc-toggle-slider {
+  position: absolute; cursor: pointer;
+  inset: 0;
+  background: #d1d5db;
+  border-radius: 22px;
+  transition: background 0.16s ease;
+}
+.hc-toggle-slider::before {
+  content: ""; position: absolute;
+  height: 18px; width: 18px;
+  left: 2px; top: 2px;
+  background: #ffffff;
+  border-radius: 50%;
+  transition: transform 0.16s ease;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.18);
+}
+.hc-toggle input:checked + .hc-toggle-slider {
+  background: linear-gradient(135deg, #ec4899 0%, #a855f7 100%);
+}
+.hc-toggle input:checked + .hc-toggle-slider::before {
+  transform: translateX(16px);
+}
+
+/* Status dots for the agent list. */
+.hc-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.hc-dot-up        { background: #10b981; }
+.hc-dot-degraded  { background: #f59e0b; }
+.hc-dot-down      { background: #ef4444; }
+.hc-dot-never     { background: #9ca3af; }
+.hc-dot-unknown   { background: #9ca3af; }
+
+.hc-status-table { margin: 0; }
+.hc-status-table th { font-size: 11px; }
+
+.hc-msg {
+  font-size: 12.5px;
+  padding: 8px 14px;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 8px;
+  color: #312e81;
+  margin-bottom: 14px;
+}
+
+:root[data-theme="dark"] .hc-card { background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.08); }
+:root[data-theme="dark"] .hc-card-head { border-bottom-color: rgba(255,255,255,0.06); }
+:root[data-theme="dark"] .hc-card-head h2 { color: #e8e9ef; }
+:root[data-theme="dark"] .hc-row { border-bottom-color: rgba(255,255,255,0.05); }
+:root[data-theme="dark"] .hc-row-label { color: #e8e9ef; }
+:root[data-theme="dark"] .hc-toggle-slider { background: rgba(255,255,255,0.18); }
+:root[data-theme="dark"] .hc-msg { background: rgba(99, 102, 241, 0.12); border-color: rgba(99, 102, 241, 0.3); color: #c7d2fe; }
+
 /* Status pill row — reference-style */
 .ax-statusrow {
   display: flex; gap: 10px; flex-wrap: wrap;

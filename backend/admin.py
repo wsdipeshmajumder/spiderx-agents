@@ -126,6 +126,31 @@ async def admin_agents_health_run_now(request: Request) -> dict:
     return {"ok": True}
 
 
+@router.post("/agents/health/run-full")
+async def admin_agents_health_run_full(request: Request) -> dict:
+    """Build 231 — manual trigger for the Level 3 (full conversational)
+    probe. Same path the daily scheduler uses; this is the "Run now"
+    affordance on the Health-checks settings card. Honours the
+    `healthcheck.level3_sample_size` cap so a stray click doesn't
+    burn budget by probing every agent."""
+    await _admin_user(request)
+    from . import agent_healthcheck as _ahc
+    await _ahc.run_daily_full_healthchecks()
+    return {"ok": True}
+
+
+@router.post("/agents/health/run-pstn")
+async def admin_agents_health_run_pstn(request: Request) -> dict:
+    """Build 231 — manual trigger for the Level 4 PSTN probe. Stubbed
+    today (outbound integration pending) — returns a structured
+    response describing why it didn't dial so the UI can render the
+    operator-facing explanation without guessing."""
+    await _admin_user(request)
+    from . import agent_healthcheck as _ahc
+    result = await _ahc.run_pstn_healthcheck()
+    return result
+
+
 # ─── lookups for admin filter bar (build 202) ────────────────────────────
 
 @router.get("/orgs-lookup")
