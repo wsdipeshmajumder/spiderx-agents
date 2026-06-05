@@ -5148,12 +5148,13 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   flex-direction: column;
   background: #f7f8fa;
   color: #1a1a1a;
-  /* Build 225 — bumped 14 → 15.5px site-wide. Body copy, form labels
-   * and table rows all inherit, so the dashboard reads closer to the
-   * Vani reference's roomier text density without per-component edits.
-   * Pills + chips + status badges keep their own smaller sizes via
-   * their own rules (e.g. .db-status-pill is 11.5px on purpose). */
-  font: 15.5px/1.55 -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", "Helvetica Neue", sans-serif;
+  /* Build 229 — base body 15.5 → 16.5 px, line-height 1.55 → 1.6 as
+   * part of a +1 px uniform bump across the body type hierarchy.
+   * Body sits comfortably above the 16 px accessibility floor;
+   * line-height nudged so the heavier text breathes. Pills + chips
+   * + status badges keep their own smaller sizes via their own
+   * rules (e.g. .db-status-pill is 11.5px on purpose). */
+  font: 16.5px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", "Helvetica Neue", sans-serif;
   letter-spacing: -0.005em;
   overflow: hidden;
   user-select: text;
@@ -5886,14 +5887,17 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 }
 .db-pageheader-title {
   margin: 0;
-  font-size: 22px;
+  /* Build 229 — +1 px uniform bump (22 → 23). Page title leads the
+   * hierarchy on every page. */
+  font-size: 23px;
   font-weight: 700;
   letter-spacing: -0.015em;
   color: #1a1a1a;
 }
 .db-pageheader-sub {
   margin: 4px 0 0;
-  font-size: 13px;
+  /* Build 229 — +1 px (13 → 14) so the subtitle keeps pace. */
+  font-size: 14px;
   color: #6a6a6a;
 }
 .db-pageheader-actions {
@@ -6140,14 +6144,17 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 }
 .db-hero-name {
   margin: 0;
-  font-size: 22px;
+  /* Build 229 — +1 px uniform bump (22 → 23). Matches the page
+   * title; agent name is the biggest identifier on the Overview. */
+  font-size: 23px;
   font-weight: 700;
   letter-spacing: -0.015em;
   color: #1a1a1a;
 }
 .db-hero-tagline {
   margin: 4px 0 10px;
-  font-size: 13.5px;
+  /* Build 229 — +1 px (13.5 → 14.5). */
+  font-size: 14.5px;
   color: #4a4a4a;
   line-height: 1.5;
 }
@@ -6217,10 +6224,9 @@ button.db-stat:disabled { cursor: default; opacity: 0.7; }
   border-radius: 12px;
 }
 .db-headline-text {
-  /* Build 228 — dropped 18 → 17px to match the .db-panel-title
-   * benchmark. The Overview headline now reads at the same density
-   * as every section title across the dashboard. */
-  margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em;
+  /* Build 229 — +1 px uniform bump (17 → 18) to keep matching the
+   * .db-panel-title benchmark which moved up too. */
+  margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.01em;
   color: #0f172a; line-height: 1.3;
 }
 .db-headline-sub {
@@ -6298,7 +6304,8 @@ button.db-stat:disabled { cursor: default; opacity: 0.7; }
 .db-form { display: flex; flex-direction: column; gap: 14px; margin-top: 12px; }
 .db-form-field { display: flex; flex-direction: column; gap: 6px; }
 .db-form-label {
-  font-size: 12.5px;
+  /* Build 229 — +1 px (12.5 → 13.5). */
+  font-size: 13.5px;
   font-weight: 500;
   color: #4a4a4a;
 }
@@ -6307,7 +6314,9 @@ button.db-stat:disabled { cursor: default; opacity: 0.7; }
   color: #8a8a8a;
   margin-left: 4px;
 }
-.db-form-help { font-size: 12px; color: #6a6a6a; }
+/* Build 229 — +1 px (12 → 13). Help text stays the muted tier
+ * BELOW labels — readable but visually subordinate. */
+.db-form-help { font-size: 13px; color: #6a6a6a; }
 .db-input,
 .db-textarea {
   width: 100%;
@@ -7838,7 +7847,8 @@ button.oc-kind:disabled { cursor: default; }
   .landing-theme { top: 12px; right: 12px; }
 }
 .db-stat-label {
-  font-size: 12.5px;
+  /* Build 229 — +1 px (12.5 → 13.5). */
+  font-size: 13.5px;
   color: #5a5a5a;
   margin-bottom: 6px;
 }
@@ -7867,11 +7877,10 @@ button.oc-kind:disabled { cursor: default; }
 }
 .db-panel-title {
   margin: 0;
-  /* Build 224 — bumped from 15 → 17px (Vani-style section title
-   * weight). Larger title + tighter line-height + the matched
-   * one-liner .db-panel-sub below gives each section a clear
-   * "this is what this is FOR" lead-in before any controls. */
-  font-size: 17px;
+  /* Build 229 — +1 px uniform bump (17 → 18). Matches the test-call
+   * title and the headline-text, keeping all card-level section
+   * titles on a single beat across the dashboard. */
+  font-size: 18px;
   font-weight: 700;
   letter-spacing: -0.01em;
   color: #1a1a1a;
@@ -7879,7 +7888,8 @@ button.oc-kind:disabled { cursor: default; }
 }
 .db-panel-sub {
   margin: 4px 0 0;
-  font-size: 13px;
+  /* Build 229 — +1 px (13 → 14). */
+  font-size: 14px;
   color: #6a6f7d;
   line-height: 1.5;
 }
@@ -8841,11 +8851,9 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
   border-radius: 99px;
 }
 .db-testcall-title {
-  /* Build 228 — dropped 20 → 17px to match the .db-panel-title
-   * benchmark. Was the only outlier card heading on any per-agent
-   * page; now reads at the same density as every other section
-   * title across the dashboard. */
-  font-size: 17px; font-weight: 700;
+  /* Build 229 — +1 px uniform bump (17 → 18) to keep matching the
+   * .db-panel-title benchmark which moved up too. */
+  font-size: 18px; font-weight: 700;
   color: #1a1d2b;
   margin: 4px 0 0;
   letter-spacing: -0.01em;

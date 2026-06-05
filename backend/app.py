@@ -76,6 +76,16 @@ async def _startup() -> None:
             "daily_recording_purge", "0 3 * * *",
             _rec.run_daily_recording_purge, tz="Asia/Kolkata",
         )
+        # Hourly — per-agent WS handshake probe. Free (no Gemini cost),
+        # ~500 ms per agent, parallelism-capped at 10 concurrent. Emits
+        # agent.healthcheck.{passed,degraded,failed} per agent plus one
+        # summary row per run. Catches Gemini/DB/per-agent config rot
+        # the platform-level /api/build healthcheck misses. Build 219.
+        from . import agent_healthcheck as _ahc
+        scheduler.register(
+            "hourly_agent_healthcheck", "5 * * * *",
+            _ahc.run_hourly_healthchecks, tz="Asia/Kolkata",
+        )
         await scheduler.start()
         log.info("scheduler: started with %d job(s)", len(scheduler.list_jobs()))
     except Exception as e:  # noqa: BLE001
@@ -97,7 +107,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 228
+APP_BUILD = 229
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
