@@ -5741,28 +5741,29 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 .db-nav-group-head {
   display: flex; align-items: center; gap: 9px;
   width: 100%;
-  /* Build 224 — extra top padding + tighter horizontal padding to
-   * match the admin shell's section spacing. Gives each group a
-   * clear visual gap from the previous one. */
-  padding: 14px 9px 6px;
-  background: transparent;
+  /* Build 231 — group heads now read as filled pills (reference design).
+   * Subtle grey background + generous padding + rounded corners
+   * make the group anchor a deliberate "section marker" rather than
+   * a stray uppercase label. Each group gets visible breathing room
+   * via margin-top instead of giant padding-top. */
+  padding: 11px 14px;
+  margin-top: 10px;
+  background: #f3f4f7;
   border: 0;
-  /* Build 224 — ALL-CAPS group labels in the muted tone, matching
-   * the admin shell's DAILY OPS / PLATFORM / SYSTEM section heads.
-   * Per-agent sidebar group labels ("About the business", "Voice &
-   * behaviour", "Test & launch") now read at the same density as
-   * the admin sidebar — no more sentence-case-vs-caps mismatch. */
-  color: #6a6f7d;
+  color: #4b5563;
   font: inherit;
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: 10px;
   text-align: left;
 }
-.db-nav-group-head:hover { background: #f5f6f8; }
+.db-nav-group:first-child .db-nav-group-head { margin-top: 0; }
+.db-nav-group-head:hover { background: #ecedf2; color: #1f2230; }
+:root[data-theme="dark"] .db-nav-group-head { background: #1f2433; color: #c8ccd9; }
+:root[data-theme="dark"] .db-nav-group-head:hover { background: #262c3e; color: #f1f3f8; }
 /* Build 230 — group icons are now Material Symbols spans (not SVGs).
    Same target dimensions; selectors cover both for back-compat. */
 .db-nav-group-head .db-nav-group-icon { flex: 0 0 18px; color: #4a4a4a; line-height: 1; }
