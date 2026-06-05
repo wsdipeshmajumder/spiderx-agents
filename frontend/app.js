@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 237;
+const SXAI_BUILD = 238;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -3313,8 +3313,14 @@ function WizardView({ industry, locale, initialText, presets, onClose, onSwitchT
 // top of this module.
 // ─────────────────────────────────────────────────────────────────────────
 
+// Build 238 — apiKey flows through env. backend/_render_index
+// substitutes {FIREBASE_API_KEY} into a tiny <script> in index.html
+// which sets window.__FIREBASE_API_KEY before this module loads.
+// Local override during dev:
+//   set FIREBASE_API_KEY in your .env, restart uvicorn.
+// On Railway: add FIREBASE_API_KEY to the service env vars.
 const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyD-spiderx-ai-placeholder",  // injected at build time
+  apiKey: (typeof window !== "undefined" && window.__FIREBASE_API_KEY) || "",
   authDomain: "spiderx-ai-agents.firebaseapp.com",
   projectId: "spiderx-ai-agents",
   storageBucket: "spiderx-ai-agents.firebasestorage.app",

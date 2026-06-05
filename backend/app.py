@@ -117,7 +117,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 237
+APP_BUILD = 238
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -2380,6 +2380,13 @@ def _render_index() -> "HTMLResponse":
         log.exception("_render_index: failed to read index.html")
         return HTMLResponse("<h1>SpiderX AI · Eva</h1><p>Frontend missing.</p>", status_code=500, headers=_NO_CACHE)
     html_text = html_text.replace("{BUILD}", str(APP_BUILD))
+    # Build 238 — inject the Firebase Web API key from env at render
+    # time so the value never lives in git. Empty string is fine for
+    # builds without Google sign-in wired up (the lazy importer
+    # rejects an empty key with a clear error from Firebase itself).
+    html_text = html_text.replace(
+        "{FIREBASE_API_KEY}", os.environ.get("FIREBASE_API_KEY", ""),
+    )
     return HTMLResponse(html_text, headers=_NO_CACHE)
 
 

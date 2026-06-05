@@ -35,6 +35,14 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Build 238 — Firebase Web API key injected at render time
+         from the FIREBASE_API_KEY env var. Empty string when unset
+         (Firebase rejects with a clear error if you then try to
+         sign in). The key is NOT a secret in the cryptographic
+         sense — Firebase relies on Authorized Domains for security —
+         but keeping it out of git lets staging/prod use separate
+         projects without code changes. -->
+    <script>window.__FIREBASE_API_KEY = "{FIREBASE_API_KEY}";</script>
     <script type="module" src="/static/app.js?v={BUILD}"></script>
   </body>
 </html>
