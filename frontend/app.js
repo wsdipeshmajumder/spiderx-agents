@@ -3706,22 +3706,20 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
   const agentSlug = agent?.slug || agent?.id;
   const itemActive = (key) => activeKey === key;
 
+  // Build 236 — sidebar order pivots on whether the agent is LIVE.
+  //
+  //   Published agent  → Call Analytics is up top. The operator's
+  //                      daily question is "what did calls do today?"
+  //                      Configuration groups drop below.
+  //
+  //   Draft agent      → Test & launch is up top. The operator's job
+  //                      RIGHT NOW is to try the agent and publish her;
+  //                      Call Analytics is empty + irrelevant until
+  //                      she's live, so it drops below the build flow.
+  //
+  // Implementation: keep the canonical group order in `groups` for
+  // semantic clarity; reorder by key afterwards based on `agent.published`.
   const groups = [
-    // Build 235 — Call Analytics promoted to the TOP of the per-agent
-    // sidebar. Once an agent is live, the operator's most-clicked
-    // surface is "did calls land + how did they go?" — not "let me
-    // re-configure her persona". Build-time configuration groups
-    // (General Info / Voice & behaviour / Test & launch) drop below
-    // so they're still discoverable but not in the daily-use seat.
-    //
-    //   1. Call Analytics — post-launch RESULTS (call activity + outcomes).
-    //   2. General Info — what she IS and what she KNOWS.
-    //   3. Voice & behaviour — how she SOUNDS and what she will / won't do.
-    //   4. Test & launch — pre-launch ACTIONS only (try her, publish her).
-    //   5. Developer — webhooks + raw data, for power users.
-    //
-    // Account groups follow at the bottom, separated so the per-agent
-    // workflow stays visually distinct from workspace administration.
     agent ? {
       key: "insights",
       label: "Call Analytics",
@@ -3798,6 +3796,19 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
       ],
     },
   ].filter(Boolean);
+
+  // Build 236 — published agent puts Call Analytics at the top; draft
+  // agent puts Test & launch at the top. Everything else stays in its
+  // canonical order. We rebuild as [priority, ...rest-without-priority]
+  // so the rest preserves its semantic ordering.
+  if (agent) {
+    const priorityKey = agent.published ? "insights" : "launch";
+    const priorityIdx = groups.findIndex((g) => g.key === priorityKey);
+    if (priorityIdx > 0) {
+      const [priorityGroup] = groups.splice(priorityIdx, 1);
+      groups.unshift(priorityGroup);
+    }
+  }
 
   // Default-open: the group that holds the currently-active item, and
   // (when an agent is open) the three primary per-agent groups so the
