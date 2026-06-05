@@ -7918,8 +7918,19 @@ button.oc-kind:disabled { cursor: default; }
   position: absolute;
   top: 24px; left: 28px;
   z-index: 3;
-  color: #f7f5ff;  /* logo wordmark inherits via currentColor */
+  /* Build 240 — force the wordmark white (the SpiderXLogo SVG uses
+     `currentColor` for the wordmark and a hardcoded #df3739 for the
+     X). A drop-shadow keeps both visible against bright frames of
+     the background video — without it the white wordmark vanishes
+     in the lighter parts of the loop. */
+  color: #ffffff !important;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5));
+  text-decoration: none;
 }
+/* Belt-and-braces: explicitly paint the wordmark glyphs white in case
+   any cascade reset overrides `currentColor` on the SVG. The red X
+   path stays untouched (its fill is hardcoded #df3739 inline). */
+.sx-auth-logo-corner svg path[fill="currentColor"] { fill: #ffffff; }
 .sx-auth-center {
   position: relative;
   z-index: 2;
