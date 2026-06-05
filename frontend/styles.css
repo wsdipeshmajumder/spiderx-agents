@@ -23,6 +23,18 @@
     radial-gradient(80% 60% at 50% -10%, rgba(196, 181, 253, 0.20) 0%, transparent 60%),
     radial-gradient(50% 50% at 100% 100%, rgba(125, 211, 252, 0.16) 0%, transparent 65%),
     radial-gradient(50% 40% at 0% 90%, rgba(244, 114, 182, 0.10) 0%, transparent 70%);
+  /* Build 223 — unified border palette. The dashboard's many panels
+   * used to mix #e6e7ec / #ececf2 / #d8dbe4 / #eef0f4; sweep them
+   * onto these variables so the entire app shares one card-border
+   * tone. Existing literals stay until the next theme refresh. */
+  --db-border:        #e6e7ec;   /* panel outlines */
+  --db-border-soft:   #eef0f4;   /* row dividers, sub-grid */
+  --db-border-strong: #d8dbe4;   /* form-control outline */
+}
+:root[data-theme="dark"] {
+  --db-border:        #2a2f3e;
+  --db-border-soft:   #1f2433;
+  --db-border-strong: #353b4d;
 }
 
 * { box-sizing: border-box; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
@@ -7822,10 +7834,15 @@ button.oc-kind:disabled { cursor: default; }
 
 .db-panel {
   background: #ffffff;
-  border: 1px solid #e6e7ec;
+  /* Build 223 — onto the unified border var so the whole app shares
+   * one card-edge tone. Old #e6e7ec literal still appears elsewhere
+   * (legacy rules, admin shell); they'll migrate in the next theme
+   * refresh. Setting it here covers every .db-panel on the dashboard. */
+  border: 1px solid var(--db-border, #e6e7ec);
   border-radius: 12px;
   padding: 18px 20px;
 }
+:root[data-theme="dark"] .db-panel { background: #14171f; border-color: var(--db-border); }
 .db-panel-head {
   display: flex; align-items: center; justify-content: space-between;
   gap: 14px;
@@ -9652,14 +9669,18 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
   font-size: 11px; font-weight: 600; text-transform: uppercase;
   letter-spacing: 0.05em;
 }
-.db-lead-hot   { background: rgba(239,68,68,0.14);  color: #b91c1c; border: 1px solid rgba(239,68,68,0.30); }
-.db-lead-warm  { background: rgba(245,158,11,0.16); color: #b45309; border: 1px solid rgba(245,158,11,0.30); }
-.db-lead-cold  { background: rgba(59,130,246,0.14); color: #1d4ed8; border: 1px solid rgba(59,130,246,0.30); }
-.db-lead-na    { background: rgba(107,114,128,0.14); color: #374151; border: 1px solid rgba(107,114,128,0.25); }
-.db-mood-positive { background: rgba(16,185,129,0.16); color: #047857; border: 1px solid rgba(16,185,129,0.30); }
-.db-mood-neutral  { background: rgba(107,114,128,0.14); color: #374151; border: 1px solid rgba(107,114,128,0.25); }
-.db-mood-negative { background: rgba(239,68,68,0.14);  color: #b91c1c; border: 1px solid rgba(239,68,68,0.30); }
-.db-mood-mixed    { background: rgba(167,139,250,0.16); color: #6d28d9; border: 1px solid rgba(167,139,250,0.30); }
+/* Build 223 — borders dropped on lead/mood pills (Vani-style soft bg
+ * pills). Background tone alone carries the semantic distinction; the
+ * outline only added visual noise at small sizes. Same colour pairs
+ * as the cost-breakdown badges in build 221 for consistency. */
+.db-lead-hot   { background: #fee2e2; color: #991b1b; }
+.db-lead-warm  { background: #fef3c7; color: #92400e; }
+.db-lead-cold  { background: #dbeafe; color: #1e3a8a; }
+.db-lead-na    { background: #f3f4f6; color: #374151; }
+.db-mood-positive { background: #dcfce7; color: #166534; }
+.db-mood-neutral  { background: #f3f4f6; color: #374151; }
+.db-mood-negative { background: #fee2e2; color: #991b1b; }
+.db-mood-mixed    { background: #ede9fe; color: #5b21b6; }
 
 /* Dark theme */
 :root[data-theme="dark"] .db-purpose { background: #15182a; border-color: #2a2e44; }
