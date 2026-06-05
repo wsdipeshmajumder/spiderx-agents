@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 218;
+const SXAI_BUILD = 219;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -5090,6 +5090,305 @@ function OutcomeCatalogueEditor({ agent, outcomes, onSaved }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// ChipSchemaEditor (build 219) — operator-facing CRUD over the
+// resolved tag-chip schema. Behind a "Customise tags" toggle on the
+// Call outcomes page. Lets the business:
+//   • Rename a default chip ("Party size" → "Group size")
+//   • Recategorise (move "occasion" from Detail → Topic)
+//   • Hide an irrelevant default ("baby_seat" on an adults-only venue)
+//   • Add a fully-custom field that Eva should ALSO capture
+//
+// Edits land in `agents.chip_overrides` (migration 0025) via PATCH
+// /api/agents/{id}. Server-side, `effective_schema(agent)` applies
+// them — both the dashboard chip rendering AND Eva's end_call prompt
+// read from this same resolved schema, so the LLM's vocabulary
+// updates in lock-step with the operator's edits.
+// ─────────────────────────────────────────────────────────────────────────
+function ChipSchemaEditor({ agent, onSaved }) {
+  // schema = resolved schema [{field, category, label, is_custom?, is_edited?}]
+  // categories = SEMANTIC_CATEGORIES map from the backend
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const initialOverrides = (agent.chip_overrides && typeof agent.chip_overrides === "object")
+    ? agent.chip_overrides : {};
+  const [edited,  setEdited]  = useState(() => ({ ...(initialOverrides.edited || {}) }));
+  const [removed, setRemoved] = useState(() => new Set(initialOverrides.removed || []));
+  const [added,   setAdded]   = useState(() => [...(initialOverrides.added || [])]);
+  const [adding,  setAdding]  = useState(false);
+  const [newRow,  setNewRow]  = useState({ field: "", label: "", category: "detail", description: "" });
+
+  const reload = () => {
+    setErr("");
+    fetch(`/api/agents/${agent.id}/chip-schema`)
+      .then((r) => r.ok ? r.json() : Promise.reject(new Error("status " + r.status)))
+      .then((d) => setData(d))
+      .catch((e) => setErr(String(e.message || e)));
+  };
+  useEffect(() => { reload(); }, [agent?.id]);
+
+  const dirty = (
+    JSON.stringify(edited)   !== JSON.stringify(initialOverrides.edited || {}) ||
+    JSON.stringify([...removed].sort()) !== JSON.stringify((initialOverrides.removed || []).slice().sort()) ||
+    JSON.stringify(added)    !== JSON.stringify(initialOverrides.added || [])
+  );
+  if (err) {
+    return html`<section class="db-panel oc-edit-panel">
+      <div class="db-form-help" style=${{ color: "#b91c1c" }}>Couldn't load chip schema: ${err}</div>
+    </section>`;
+  }
+  if (!data) {
+    return html`<section class="db-panel oc-edit-panel">
+      <div class="db-loading">Loading tag schema…</div>
+    </section>`;
+  }
+
+  const categories = data.categories || {};
+  const categoryOptions = Object.entries(categories).map(([k, v]) => ({
+    value: k, label: v.label, hint: v.hint,
+  }));
+
+  const isHidden = (field) => removed.has(field);
+  const editedRow = (field) => edited[field] || {};
+  const labelFor    = (row) => editedRow(row.field).label    ?? row.label;
+  const categoryFor = (row) => editedRow(row.field).category ?? row.category;
+
+  const setField = (field, key, val) => {
+    setEdited((prev) => {
+      const next = { ...prev, [field]: { ...(prev[field] || {}), [key]: val } };
+      // If the override now matches the catalogue default, drop it
+      // so the blob stays tight.
+      const original = data.schema.find((r) => r.field === field) || {};
+      const merged = next[field];
+      if (
+        (merged.label == null    || merged.label    === original.label) &&
+        (merged.category == null || merged.category === original.category)
+      ) {
+        const { [field]: _, ...rest } = next;
+        return rest;
+      }
+      return next;
+    });
+  };
+
+  const toggleRemoved = (field) => {
+    setRemoved((prev) => {
+      const next = new Set(prev);
+      if (next.has(field)) next.delete(field); else next.add(field);
+      return next;
+    });
+  };
+
+  const removeCustom = (field) => {
+    setAdded((prev) => prev.filter((r) => r.field !== field));
+  };
+
+  const slugifyField = (s) => String(s || "")
+    .trim().toLowerCase()
+    .replace(/[^a-z0-9_\s-]+/g, "")
+    .replace(/[\s-]+/g, "_")
+    .slice(0, 60);
+
+  const addCustomRow = () => {
+    const field = slugifyField(newRow.field || newRow.label);
+    if (!field || !newRow.label.trim()) {
+      setMsg("Need a field name and a label.");
+      return;
+    }
+    if (data.schema.some((r) => r.field === field) || added.some((a) => a.field === field)) {
+      setMsg(`"${field}" already exists — pick a different name.`);
+      return;
+    }
+    setAdded((prev) => [...prev, {
+      field, label: newRow.label.trim(),
+      category: newRow.category,
+      description: (newRow.description || "").trim(),
+    }]);
+    setNewRow({ field: "", label: "", category: "detail", description: "" });
+    setAdding(false);
+    setMsg("");
+  };
+
+  const save = async () => {
+    setBusy(true); setMsg("");
+    try {
+      const blob = { edited, added, removed: [...removed] };
+      const r = await fetch(`/api/agents/${agent.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chip_overrides: blob }),
+      });
+      if (!r.ok) throw new Error("server " + r.status);
+      setMsg("Saved ✓ — Eva will use this vocabulary on her next call");
+      onSaved && onSaved();
+      reload();
+      setTimeout(() => setMsg(""), 2800);
+    } catch (e) { setMsg("Couldn't save — try again."); }
+    finally { setBusy(false); }
+  };
+  const discard = () => {
+    setEdited({ ...(initialOverrides.edited || {}) });
+    setRemoved(new Set(initialOverrides.removed || []));
+    setAdded([...(initialOverrides.added || [])]);
+    setMsg("");
+  };
+  const resetAll = async () => {
+    if (busy) return;
+    setBusy(true); setMsg("");
+    try {
+      const r = await fetch(`/api/agents/${agent.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chip_overrides: null }),
+      });
+      if (!r.ok) throw new Error("server " + r.status);
+      setEdited({}); setRemoved(new Set()); setAdded([]);
+      setMsg("Reset to sector defaults ✓");
+      onSaved && onSaved();
+      reload();
+      setTimeout(() => setMsg(""), 2400);
+    } catch (e) { setMsg("Couldn't reset — try again."); }
+    finally { setBusy(false); }
+  };
+
+  const renderRow = (row, isCustom) => {
+    const hidden = !isCustom && isHidden(row.field);
+    const isEdit = !isCustom && (editedRow(row.field).label != null || editedRow(row.field).category != null);
+    const catKey = categoryFor(row);
+    const catPalette = categories[catKey] || { bg: "#f3f4f9", fg: "#4a4f5e" };
+    return html`
+      <li key=${row.field} class=${"oc-edit-row" + (hidden ? " is-hidden" : "")}>
+        <div class="oc-edit-row-top">
+          <div class="oc-edit-id">
+            <code>${row.field}</code>
+            <span class="db-log-chip" style=${{ background: catPalette.bg, color: catPalette.fg }}>${labelFor(row)}</span>
+            ${isCustom ? html`<span class="oc-edit-badge oc-edit-badge-custom">Added by you</span>` : ""}
+            ${isEdit ? html`<span class="oc-edit-badge oc-edit-badge-edited">Edited</span>` : ""}
+            ${hidden ? html`<span class="oc-edit-badge oc-edit-badge-hidden">Hidden</span>` : ""}
+          </div>
+          <div class="oc-edit-actions">
+            ${isCustom
+              ? html`<button class="oc-edit-trash" type="button" onClick=${() => removeCustom(row.field)}>Remove</button>`
+              : hidden
+                ? html`<button class="oc-edit-restore" type="button" onClick=${() => toggleRemoved(row.field)}>Restore</button>`
+                : html`<button class="oc-edit-hide" type="button" onClick=${() => toggleRemoved(row.field)}>Hide</button>`}
+          </div>
+        </div>
+        <div class="oc-edit-fields">
+          <label class="oc-edit-field">
+            <span class="oc-edit-flabel">Label</span>
+            <input class="db-input" type="text" maxlength="80"
+                   value=${labelFor(row)}
+                   disabled=${hidden}
+                   onInput=${(e) => isCustom
+                     ? setAdded((prev) => prev.map((r) => r.field === row.field ? { ...r, label: e.target.value } : r))
+                     : setField(row.field, "label", e.target.value)} />
+          </label>
+          <label class="oc-edit-field">
+            <span class="oc-edit-flabel">Category</span>
+            <select class="db-input"
+                    value=${catKey}
+                    disabled=${hidden}
+                    onChange=${(e) => isCustom
+                      ? setAdded((prev) => prev.map((r) => r.field === row.field ? { ...r, category: e.target.value } : r))
+                      : setField(row.field, "category", e.target.value)}>
+              ${categoryOptions.map((c) => html`
+                <option key=${c.value} value=${c.value}>${c.label}</option>
+              `)}
+            </select>
+          </label>
+        </div>
+      </li>
+    `;
+  };
+
+  const knownFields = new Set(data.schema.map((r) => r.field));
+  const unsavedAdds = added.filter((a) => !knownFields.has(a.field));
+
+  return html`
+    <section class="db-panel oc-edit-panel">
+      <div class="oc-drawer-head">
+        <h3 class="db-panel-title">Customise tags <span class="db-panel-pill">${data.schema.length + unsavedAdds.length}</span></h3>
+        <p class="db-panel-sub">
+          Rename labels, recategorise, hide ones that don't apply, or add
+          your own. Saved edits drive BOTH the chip colours on the call
+          log AND the field names Eva captures at end-of-call —
+          ${agent.sector || "this agent"}'s vocabulary stays in sync.
+        </p>
+      </div>
+
+      <ul class="oc-edit-list">
+        ${data.schema.map((row) => renderRow(row, !!row.is_custom))}
+        ${unsavedAdds.map((row) => renderRow(row, true))}
+      </ul>
+
+      ${adding ? html`
+        <div class="oc-edit-addcard">
+          <div class="oc-edit-addcard-title">New custom field</div>
+          <div class="oc-edit-fields">
+            <label class="oc-edit-field">
+              <span class="oc-edit-flabel">Label (what shows on the chip)</span>
+              <input class="db-input" type="text" maxlength="80"
+                     value=${newRow.label}
+                     placeholder="e.g. Loyalty tier"
+                     onInput=${(e) => setNewRow((r) => ({ ...r, label: e.target.value, field: r.field || slugifyField(e.target.value) }))} />
+            </label>
+            <label class="oc-edit-field">
+              <span class="oc-edit-flabel">Category</span>
+              <select class="db-input" value=${newRow.category}
+                      onChange=${(e) => setNewRow((r) => ({ ...r, category: e.target.value }))}>
+                ${categoryOptions.map((c) => html`<option key=${c.value} value=${c.value}>${c.label}</option>`)}
+              </select>
+            </label>
+          </div>
+          <label class="oc-edit-field">
+            <span class="oc-edit-flabel">Field name (auto-slugged from label — edit if you want)</span>
+            <input class="db-input db-mono" type="text" maxlength="60"
+                   value=${newRow.field}
+                   placeholder="e.g. loyalty_tier"
+                   onInput=${(e) => setNewRow((r) => ({ ...r, field: slugifyField(e.target.value) }))} />
+          </label>
+          <label class="oc-edit-field">
+            <span class="oc-edit-flabel">Description (optional — tells Eva when to capture this)</span>
+            <textarea class="db-input" rows="2" maxlength="280"
+                      value=${newRow.description}
+                      placeholder="Whenever the caller mentions their loyalty membership tier (silver / gold / platinum)."
+                      onInput=${(e) => setNewRow((r) => ({ ...r, description: e.target.value }))}></textarea>
+          </label>
+          <div class="oc-edit-addcard-actions">
+            <button class="db-btn-primary db-btn-sm" type="button" onClick=${addCustomRow}>Add field</button>
+            <button class="db-btn-ghost db-btn-sm" type="button"
+                    onClick=${() => { setAdding(false); setNewRow({ field: "", label: "", category: "detail", description: "" }); }}>Cancel</button>
+          </div>
+        </div>
+      ` : html`
+        <div class="oc-edit-addrow">
+          <button class="db-btn-ghost db-btn-sm oc-edit-add" type="button"
+                  onClick=${() => setAdding(true)}>+ Add a custom field</button>
+          <button class="db-btn-ghost db-btn-sm oc-edit-reset" type="button"
+                  onClick=${resetAll} disabled=${busy}>Reset all to sector defaults</button>
+        </div>
+      `}
+
+      ${dirty || msg ? html`
+        <div class="oc-edit-footer">
+          <div class=${"oc-edit-msg" + (msg.startsWith("Couldn't") || msg.startsWith("Need") || msg.includes("already") ? " is-err" : " is-ok")}>
+            ${msg || "You have unsaved changes."}
+          </div>
+          <div>
+            <button class="db-btn-ghost db-btn-sm" type="button" onClick=${discard} disabled=${busy}>Discard</button>
+            <button class="db-btn-primary db-btn-sm" type="button" onClick=${save} disabled=${busy || !dirty}>
+              ${busy ? "Saving…" : "Save tags"}
+            </button>
+          </div>
+        </div>
+      ` : ""}
+    </section>
+  `;
+}
+
+
 // OutcomeDigestSchedule (build 214) — when does this agent's outcome
 // digest email fire, and what window does it cover?
 //
@@ -5780,6 +6079,11 @@ function AgentCallOutcomesPage({ agent, agents, presets, plan, onNav }) {
           agent=${agent}
           outcomes=${report.outcomes || []}
           onSaved=${loadReport} />
+        <!-- Chip-schema editor (build 219) — same toggle, since both
+             are "customise what the dashboard tracks for this agent". -->
+        <${ChipSchemaEditor}
+          agent=${agent}
+          onSaved=${loadReport} />
       ` : ""}
 
       <!-- Daily trend drawer -->
@@ -6357,6 +6661,18 @@ function _humaniseChip(s) {
 function chipsForCall(call, agent, opts = {}) {
   const out = [];
   const seen = new Set();   // dedupe by lowercased label
+  // Build 219 — prefer the API-fetched schema + categories (single
+  // source of truth that ALSO drives Eva's extraction prompt). Fall
+  // back to the built-in maps when the API hasn't responded yet or
+  // the caller didn't pass them — so chips still render on the very
+  // first frame after a navigation.
+  const apiSchema = opts.apiSchema && Array.isArray(opts.apiSchema) ? opts.apiSchema : null;
+  const apiCategories = opts.apiCategories && typeof opts.apiCategories === "object" ? opts.apiCategories : null;
+  const catFor = (catName) => {
+    const apiCat = apiCategories?.[catName];
+    if (apiCat) return { bg: apiCat.bg, fg: apiCat.fg };
+    return CHIP_CATS[catName] || CHIP_CATS.detail;
+  };
   const push = (label, cat, key) => {
     const l = _humaniseChip(_chipLabel(label));
     if (!l) return;
@@ -6370,21 +6686,29 @@ function chipsForCall(call, agent, opts = {}) {
   // already). Outcome FIRST so the operator scans "what kind of call
   // was it" instantly.
   if (!opts.skipStatus) {
-    if (call.outcome) push(call.outcome, CHIP_CATS.outcome, "outcome");
+    if (call.outcome) push(call.outcome, catFor("outcome"), "outcome");
     if (call.lead_quality && call.lead_quality !== "na") {
-      push(call.lead_quality.toUpperCase(), CHIP_CATS.lead, "lead");
+      push(call.lead_quality.toUpperCase(), catFor("lead"), "lead");
     }
     if (call.sentiment && call.sentiment !== "neutral") {
-      push(call.sentiment, CHIP_CATS.emotion, "sentiment");
+      push(call.sentiment, catFor("emotion"), "sentiment");
     }
   }
 
-  // 2. Per-sector extracted fields, in declared order.
+  // 2. Schema-driven extracted fields, in declared order. Backend's
+  // resolved schema (with the operator's chip_overrides applied)
+  // takes precedence. Built-in SECTOR_CHIP_SCHEMA is the cold-start
+  // fallback when the API is still in-flight.
   const ex = (call.extracted && typeof call.extracted === "object") ? call.extracted : {};
-  const sector = String(agent?.sector || "").toLowerCase();
-  const schema = SECTOR_CHIP_SCHEMA[sector] || [];
-  for (const [field, cat] of schema) {
-    if (field in ex) push(ex[field], CHIP_CATS[cat] || CHIP_CATS.detail, field);
+  let pairs;
+  if (apiSchema) {
+    pairs = apiSchema.map((r) => [r.field, r.category]);
+  } else {
+    const sector = String(agent?.sector || "").toLowerCase();
+    pairs = SECTOR_CHIP_SCHEMA[sector] || [];
+  }
+  for (const [field, cat] of pairs) {
+    if (field in ex) push(ex[field], catFor(cat), field);
     if (out.length >= 9) break;
   }
   // 3. Generic baseline pass — picks up sector-agnostic fields
@@ -6462,6 +6786,25 @@ function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
     if (!agent?.id) return;
     fetch(`/api/agents/${agent.id}/outcomes/catalogue`)
       .then((r) => r.ok ? r.json() : null).then((d) => setCatalogue(d?.outcomes || [])).catch(() => {});
+  }, [agent?.id]);
+  // Build 219 — chip schema fetched from the backend registry. Used to
+  // render the per-row Tags column AND wired through to Eva's
+  // extraction prompt server-side, so the same vocabulary drives
+  // both. `chipSchema` is [{field, category, label, ...}]; null
+  // until loaded, in which case the chipsForCall fallback to the
+  // built-in SECTOR_CHIP_SCHEMA still works.
+  const [chipSchema, setChipSchema] = useState(null);
+  const [chipCategories, setChipCategories] = useState(null);
+  useEffect(() => {
+    if (!agent?.id) return;
+    fetch(`/api/agents/${agent.id}/chip-schema`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => {
+        if (!d) return;
+        setChipSchema(d.schema || []);
+        setChipCategories(d.categories || null);
+      })
+      .catch(() => {});
   }, [agent?.id]);
   useEffect(() => {
     if (!agent?.id) return;
@@ -6635,7 +6978,11 @@ function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
                   // stays in the dedicated columns to the left, so we
                   // pass skipStatus and let Tags carry the extracted
                   // entities only.
-                  const chips = chipsForCall(c, agent, { skipStatus: true });
+                  const chips = chipsForCall(c, agent, {
+                    skipStatus: true,
+                    apiSchema: chipSchema,
+                    apiCategories: chipCategories,
+                  });
                   return html`
                   <tr key=${c.id}>
                     <td>${fmtTime(c.started_at)}</td>

@@ -97,7 +97,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 218
+APP_BUILD = 219
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1430,6 +1430,36 @@ async def get_agent_outcome_report(agent_id: int, days: int = 30, request: Reque
     d = max(1, min(int(days), 365))
     analytics = await db.agent_analytics(agent_id, days=d)
     return call_outcomes.assemble_report(agent, analytics)
+
+
+@app.get("/api/agents/{agent_id}/chip-schema")
+async def get_agent_chip_schema(agent_id: int, request: Request) -> dict:
+    """Resolved tag-chip schema for THIS agent — sector defaults +
+    operator chip_overrides applied. Frontend uses this to render
+    chips on the call log AND to power the override editor on
+    /agent/<slug>/outcomes.
+
+    Response shape:
+      {
+        sector: "<resolved sector>",
+        categories: { <key>: {bg, fg, label, hint}, ... },  // SEMANTIC_CATEGORIES
+        schema: [ {field, category, label, is_custom?, is_edited?}, ... ],
+        overrides: <agent.chip_overrides verbatim>          // for the editor
+      }
+
+    Both the catalogue AND the categories are returned so the
+    frontend doesn't need to keep its own colour map in sync — the
+    backend is the single source of truth.
+    """
+    from . import chip_schema
+    user = await current_user(request)
+    agent = await _require_agent_owned(agent_id, user)
+    return {
+        "sector":     agent.get("sector"),
+        "categories": chip_schema.SEMANTIC_CATEGORIES,
+        "schema":     chip_schema.effective_schema(agent),
+        "overrides":  agent.get("chip_overrides") or {},
+    }
 
 
 @app.post("/api/agents/{agent_id}/digest/preview")

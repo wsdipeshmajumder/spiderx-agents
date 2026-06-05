@@ -1349,7 +1349,18 @@ Wrapping up — ALWAYS call `end_call`:
   • After calling end_call, say ONE short closing line ("Take care!", "Thanks, bye!") and stop. Do not keep the line open.
   • If end_call returns `rejected: true` (disconnect-safety blocked a too-early imprecise outcome), do not insist — pick a clearer outcome or keep the call alive for another exchange.
 """
-    return a_star + recording_disclosure_block
+    # Build 219 — inject the agent's resolved chip-schema vocabulary
+    # into the system prompt. Same schema the dashboard chips render
+    # against, so the LLM stops drifting between `party_size` and
+    # `guests` between calls. Empty string when chip_overrides has
+    # removed everything; no-op for agents without a sector mapping.
+    try:
+        from . import chip_schema as _cs
+        extraction_block = _cs.extraction_hints_for_prompt(agent)
+    except Exception:  # noqa: BLE001
+        extraction_block = ""
+    extra = "\n" + extraction_block if extraction_block else ""
+    return a_star + recording_disclosure_block + extra
 
 
 # ────────────────────────────── tools ────────────────────────────────────
