@@ -1181,6 +1181,30 @@ def _otp_make() -> str:
     return f"{_secrets.randbelow(1_000_000):06d}"
 
 
+# ─── Brand-mark data URI for transactional email (build 245) ────────────
+# Read the white-on-transparent SpiderX logo once at module load and
+# base64-encode it. Embedded as a data URI inside every OTP email's
+# <img> tag so:
+#   - No external HTTP fetch — every email client renders the same
+#     mark regardless of network reachability to our static server.
+#   - No 404 risk — the previous version pointed at a hashed
+#     marketing-site asset that drifted.
+#   - Gmail / Apple Mail / Outlook-web all render embedded data URIs.
+#     Outlook desktop (pre-2019, Word renderer) is the lone weak spot
+#     and shows the alt-text; acceptable trade-off.
+def _load_brand_data_uri() -> str:
+    try:
+        import base64 as _b64
+        svg_path = Path(__file__).resolve().parent.parent / "frontend" / "assets" / "spiderx-logo-white.svg"
+        raw = svg_path.read_bytes()
+        return "data:image/svg+xml;base64," + _b64.b64encode(raw).decode("ascii")
+    except Exception as _e:  # noqa: BLE001
+        log.warning("brand.data_uri_load_failed err=%s", _e)
+        return ""
+
+_BRAND_LOGO_DATA_URI = _load_brand_data_uri()
+
+
 @app.post("/api/auth/otp/request")
 async def auth_otp_request(request: Request) -> dict:
     """Issue a fresh OTP to the given email. Always returns `ok: true`
@@ -1247,16 +1271,30 @@ async def auth_otp_request(request: Request) -> dict:
             "<table cellpadding='0' cellspacing='0' border='0' width='100%' "
             "style='background:linear-gradient(120deg,#1a1138 0%,#2a1a4d 55%,#3a1d52 100%);'>"
             "<tr><td align='center' style='padding:34px 28px 30px;'>"
-            "<a href='#' style='display:inline-block;font-size:32px;"
-            "font-weight:800;letter-spacing:-0.02em;text-decoration:none !important;"
-            "color:#ffffff !important;line-height:1;'>"
-            "<span style='color:#ffffff;'>spider</span>"
-            "<span style='color:#df3739;'>X</span>"
-            "<span style='color:#ffffff;'>.ai</span>"
-            "</a>"
+            # Build 245 — real SpiderX SVG logo (white wordmark + red X)
+            # embedded as a base64 data URI. Renders pixel-perfect in
+            # Gmail / Apple Mail / Outlook-web. If a client strips
+            # data-URI images (older Outlook desktop), the alt text
+            # "spiderX.ai" still reads the brand.
+            + (
+                f"<img src='{_BRAND_LOGO_DATA_URI}' alt='spiderX.ai' "
+                f"height='44' style='display:inline-block;height:44px;"
+                f"width:auto;border:0;outline:none;text-decoration:none;' />"
+                if _BRAND_LOGO_DATA_URI else
+                # Fallback to the styled-text wordmark if the SVG file
+                # couldn't be loaded at module import — keeps the email
+                # from going out logo-less.
+                "<a href='#' style='display:inline-block;font-size:32px;"
+                "font-weight:800;letter-spacing:-0.02em;text-decoration:none !important;"
+                "color:#ffffff !important;line-height:1;'>"
+                "<span style='color:#ffffff;'>spider</span>"
+                "<span style='color:#df3739;'>X</span>"
+                "<span style='color:#ffffff;'>.ai</span>"
+                "</a>"
+            ) +
             "<div style='font-size:11px;font-weight:600;"
             "letter-spacing:0.18em;text-transform:uppercase;"
-            "color:rgba(255,255,255,0.65);margin-top:12px;'>"
+            "color:rgba(255,255,255,0.65);margin-top:14px;'>"
             "Phone AI agent builder</div>"
             "</td></tr></table>"
             "</td></tr>"
