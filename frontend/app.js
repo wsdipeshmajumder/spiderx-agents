@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 216;
+const SXAI_BUILD = 217;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -6038,6 +6038,236 @@ function CallDetailModal({ loading, data, agent, onClose }) {
   `;
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Per-industry call-log chips (build 217)
+//
+// The Call Details modal already renders chips from `extracted` JSONB,
+// but the call LOG table just shows the Summary string — for a busy
+// restaurant or dealer, that's a wall of text. The reference shows
+// each row as a colourful chip cluster (Reservation · 4 guests ·
+// June 8th · 6:45 PM · indoor seating · etc.) that a human can scan
+// in under a second.
+//
+// This module:
+//   1. Defines SEMANTIC categories with stable colours (date / time /
+//      count / topic / person / place / detail / emotion / outcome) —
+//      a chip's colour communicates WHAT kind of info it is, not just
+//      "different chips look different".
+//   2. Per-sector field ordering — which `extracted.*` fields surface
+//      as chips and in what order. Restaurant leads with party_size +
+//      date + time; dental leads with procedure + urgency; etc.
+//   3. Always-on chips at the front of the cluster — the call's
+//      `outcome`, then `lead_quality` (if hot/warm), then `sentiment`
+//      (if not "neutral") — so the operator scans status without
+//      hunting the colour-key.
+//   4. Catch-all fallback — any `extracted` field NOT in the sector
+//      schema still surfaces at the END of the cluster with the
+//      hash-of-key palette, so a custom field the operator added in
+//      Eva's build flow doesn't silently vanish.
+// ─────────────────────────────────────────────────────────────────────────
+const CHIP_CATS = {
+  outcome: { bg: "#dbeafe", fg: "#1e3a8a" }, // blue — what kind of call
+  topic:   { bg: "#d1fae5", fg: "#065f46" }, // emerald — sub-topic / service
+  count:   { bg: "#fce7f3", fg: "#9f1239" }, // pink — N guests / N adults
+  date:    { bg: "#fef3c7", fg: "#92400e" }, // amber — June 8th, tomorrow
+  time:    { bg: "#ede9fe", fg: "#5b21b6" }, // violet — 6:45 PM
+  place:   { bg: "#d9f99d", fg: "#3f6212" }, // lime — indoor seating, table-3
+  detail:  { bg: "#cffafe", fg: "#155e75" }, // cyan — dietary / accessory
+  person:  { bg: "#e0e7ff", fg: "#3730a3" }, // indigo — family, manager
+  emotion: { bg: "#fee2e2", fg: "#991b1b" }, // red — frustration, urgent
+  lead:    { bg: "#fed7aa", fg: "#9a3412" }, // orange — hot/warm lead
+};
+
+// Per-sector field → category mapping. Order matters; first 4-6 of
+// each sector are the operator's "at-a-glance" signals. Sectors not
+// listed fall through to _GENERIC.
+//
+// Keys here mirror the extracted-slot vocabulary Eva uses on save_agent.
+const SECTOR_CHIP_SCHEMA = {
+  restaurant: [
+    ["reservation_type", "topic"],   // "reservation" / "cancellation" / "inquiry"
+    ["service_type",     "topic"],   // "dine-in" / "takeaway" / "delivery"
+    ["party_size",       "count"],   // "4 guests"
+    ["guest_count",      "count"],   // alt spelling
+    ["guest_type",       "person"],  // "family" / "group" / "couple"
+    ["occasion",         "detail"],  // "birthday" / "anniversary"
+    ["date",             "date"],
+    ["reservation_date", "date"],
+    ["time",             "time"],
+    ["reservation_time", "time"],
+    ["seating_pref",     "place"],   // "indoor seating"
+    ["seating",          "place"],
+    ["table",            "place"],
+    ["dietary",          "detail"],
+    ["dietary_needs",    "detail"],
+    ["allergies",        "detail"],
+    ["special_requests", "detail"],
+    ["high_chair",       "detail"],
+    ["baby_seat",        "detail"],
+    ["menu_item",        "topic"],
+    ["dish",             "topic"],
+  ],
+  dental: [
+    ["procedure",         "topic"],
+    ["treatment",         "topic"],
+    ["urgency",           "emotion"],
+    ["pain_level",        "emotion"],
+    ["appointment_date",  "date"],
+    ["appointment_time",  "time"],
+    ["preferred_dentist", "person"],
+    ["dentist",           "person"],
+    ["insurance",         "detail"],
+    ["insurance_provider","detail"],
+  ],
+  healthcare: [
+    ["specialty",         "topic"],
+    ["complaint",         "topic"],
+    ["urgency",           "emotion"],
+    ["appointment_date",  "date"],
+    ["appointment_time",  "time"],
+    ["preferred_doctor",  "person"],
+    ["doctor",            "person"],
+    ["insurance",         "detail"],
+  ],
+  automotive: [
+    ["vehicle_model",   "topic"],
+    ["brand",           "topic"],
+    ["variant",         "topic"],
+    ["budget",          "detail"],
+    ["test_drive_date", "date"],
+    ["test_drive_time", "time"],
+    ["trade_in",        "detail"],
+    ["service_type",    "topic"],   // "service" / "sales" / "parts"
+  ],
+  salon: [
+    ["service",         "topic"],
+    ["stylist",         "person"],
+    ["appointment_date","date"],
+    ["appointment_time","time"],
+  ],
+  real_estate: [
+    ["property_type",  "topic"],   // "apartment" / "villa"
+    ["bedrooms",       "count"],
+    ["budget",         "detail"],
+    ["location",       "place"],
+    ["viewing_date",   "date"],
+    ["viewing_time",   "time"],
+  ],
+  // Generic baseline — applied to any sector not above, AND used as
+  // the secondary pass for sector-listed schemas (catches the common
+  // entities Eva extracts regardless of vertical).
+  _generic: [
+    ["topic",   "topic"],
+    ["category","topic"],
+    ["date",    "date"],
+    ["time",    "time"],
+    ["count",   "count"],
+    ["location","place"],
+    ["name",    "person"],
+  ],
+};
+
+// Hash-of-key fallback colour for fields not in any schema — keeps
+// custom slots visible without leaking them out of the chip cluster.
+const CHIP_FALLBACK_PALETTE = [
+  { bg: "#fee2e2", fg: "#991b1b" }, { bg: "#fed7aa", fg: "#9a3412" },
+  { bg: "#fef3c7", fg: "#92400e" }, { bg: "#d9f99d", fg: "#3f6212" },
+  { bg: "#d1fae5", fg: "#065f46" }, { bg: "#cffafe", fg: "#155e75" },
+  { bg: "#dbeafe", fg: "#1e3a8a" }, { bg: "#ede9fe", fg: "#5b21b6" },
+  { bg: "#fce7f3", fg: "#9f1239" },
+];
+function _chipFallback(key) {
+  let h = 0; const s = String(key || "");
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return CHIP_FALLBACK_PALETTE[h % CHIP_FALLBACK_PALETTE.length];
+}
+
+// Format an extracted value for the chip label. Strings pass through;
+// arrays join with " · "; numbers + units the agent stored verbatim
+// stay verbatim. Trims to keep chips one-line.
+function _chipLabel(v) {
+  if (v == null || v === "" || typeof v === "boolean") return null;
+  let s = (Array.isArray(v) ? v.join(", ") : String(v)).trim();
+  if (!s) return null;
+  return s.length > 28 ? s.slice(0, 28) + "…" : s;
+}
+
+// Title-case a string like "indoor_seating" → "indoor seating" for
+// chip readability. Keeps already-spaced strings unchanged.
+function _humaniseChip(s) {
+  if (!s) return s;
+  if (!/[_\-]/.test(s)) return s;
+  return String(s).replace(/[_\-]+/g, " ");
+}
+
+// Compose the chip list for one call. Returns [{label, ...CHIP_CATS[cat]}].
+//
+// `call` is one row from /api/agents/{id}/calls (build 217 includes
+// `extracted`). `agent` is the parent agent (we read `.sector` to
+// pick the schema). Returns at most ~9 chips so a row stays one-line.
+//
+// `opts.skipStatus` — set to true when the host surface already has
+// Outcome/Lead/Mood columns (the Call log table does). Status chips
+// are dropped so the cluster shows ONLY the per-sector extracted
+// entities, which is the unique value-add of the chip row.
+function chipsForCall(call, agent, opts = {}) {
+  const out = [];
+  const seen = new Set();   // dedupe by lowercased label
+  const push = (label, cat, key) => {
+    const l = _humaniseChip(_chipLabel(label));
+    if (!l) return;
+    const k = l.toLowerCase();
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push({ label: l, key: key || l, ...cat });
+  };
+
+  // 1. Always-on status chips (unless the host has them as columns
+  // already). Outcome FIRST so the operator scans "what kind of call
+  // was it" instantly.
+  if (!opts.skipStatus) {
+    if (call.outcome) push(call.outcome, CHIP_CATS.outcome, "outcome");
+    if (call.lead_quality && call.lead_quality !== "na") {
+      push(call.lead_quality.toUpperCase(), CHIP_CATS.lead, "lead");
+    }
+    if (call.sentiment && call.sentiment !== "neutral") {
+      push(call.sentiment, CHIP_CATS.emotion, "sentiment");
+    }
+  }
+
+  // 2. Per-sector extracted fields, in declared order.
+  const ex = (call.extracted && typeof call.extracted === "object") ? call.extracted : {};
+  const sector = String(agent?.sector || "").toLowerCase();
+  const schema = SECTOR_CHIP_SCHEMA[sector] || [];
+  for (const [field, cat] of schema) {
+    if (field in ex) push(ex[field], CHIP_CATS[cat] || CHIP_CATS.detail, field);
+    if (out.length >= 9) break;
+  }
+  // 3. Generic baseline pass — picks up sector-agnostic fields
+  // (date, time, name, etc.) when the sector schema didn't cover them.
+  if (out.length < 9) {
+    for (const [field, cat] of SECTOR_CHIP_SCHEMA._generic) {
+      if (field in ex) push(ex[field], CHIP_CATS[cat] || CHIP_CATS.detail, field);
+      if (out.length >= 9) break;
+    }
+  }
+  // 4. Catch-all — anything left in extracted that we haven't shown
+  // yet, coloured by the hash-fallback palette. Keeps custom slots
+  // visible (operator added "loyalty_number" via the wizard, etc.).
+  if (out.length < 9) {
+    for (const [k, v] of Object.entries(ex)) {
+      if (k.startsWith("_")) continue;
+      const label = _humaniseChip(_chipLabel(v));
+      if (!label || seen.has(label.toLowerCase())) continue;
+      const fallback = _chipFallback(k);
+      push(label, fallback, k);
+      if (out.length >= 9) break;
+    }
+  }
+  return out;
+}
+
+
 function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
   const [allCalls, setAllCalls] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -6240,12 +6470,24 @@ function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
                       How the caller sounded overall — <strong>positive</strong>, <strong>neutral</strong>, <strong>negative</strong>, or <strong>mixed</strong>. A frustrated caller whose problem got solved is <em>mixed</em>, not <em>positive</em>.
                     </${InfoDot}>
                   </th>
-                  <th>Summary</th>
+                  <th>
+                    Tags
+                    <${InfoDot}>
+                      The key things ${agent.name} captured on this call — date, time, party size, dietary needs, etc. Tuned to your industry (<b>${agent.sector || "generic"}</b>). Hover a chip to see its raw field name; everything's in the call's Details modal too.
+                    </${InfoDot}>
+                  </th>
                   <th class="db-table-th-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                ${calls.map((c) => html`
+                ${calls.map((c) => {
+                  // Build 217 — per-industry chip cluster replaces the
+                  // free-text Summary cell. Status (outcome/lead/mood)
+                  // stays in the dedicated columns to the left, so we
+                  // pass skipStatus and let Tags carry the extracted
+                  // entities only.
+                  const chips = chipsForCall(c, agent, { skipStatus: true });
+                  return html`
                   <tr key=${c.id}>
                     <td>${fmtTime(c.started_at)}</td>
                     <td>${c.duration_s ? Number(c.duration_s).toFixed(1) + "s" : "—"}</td>
@@ -6260,13 +6502,23 @@ function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
                         ? html`<span class=${"db-mood db-mood-" + c.sentiment}>${c.sentiment}</span>`
                         : html`<span class="db-muted">—</span>`}
                     </td>
-                    <td class="db-table-summary">${c.summary || c.reason || "—"}</td>
+                    <td class="db-table-tags">
+                      ${chips.length === 0
+                        ? html`<span class="db-muted" title=${c.summary || c.reason || ""}>${c.summary ? (c.summary.length > 60 ? c.summary.slice(0, 60) + "…" : c.summary) : "—"}</span>`
+                        : html`<div class="db-chip-row">
+                            ${chips.map((ch) => html`
+                              <span key=${ch.key} class="db-log-chip"
+                                    title=${ch.key}
+                                    style=${{ background: ch.bg, color: ch.fg }}>${ch.label}</span>
+                            `)}
+                          </div>`}
+                    </td>
                     <td class="db-table-td-right">
                       <button class="db-btn-ghost db-btn-sm" type="button"
                               onClick=${() => setDetailId(c.id)}>Details</button>
                     </td>
                   </tr>
-                `)}
+                `;})}
               </tbody>
             </table>
           </div>

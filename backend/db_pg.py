@@ -948,11 +948,15 @@ async def get_call_detail(agent_id: int, call_id: int) -> Optional[dict[str, Any
 
 
 async def list_calls_for_agent(agent_id: int, limit: int = 50) -> list[dict[str, Any]]:
+    """Build 217: include the `extracted` JSONB so the call log's
+    Tags column can render per-industry chips (party_size, date,
+    seating_pref, etc.) without an extra round-trip per row. Payload
+    grows ~150 B per call — trivial at any reasonable list size."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         rs = await conn.fetch(
             "SELECT id, agent_id, started_at, ended_at, duration_s, outcome, reason, summary, "
-            "       sentiment, lead_quality, lead_signals "
+            "       sentiment, lead_quality, lead_signals, extracted "
             "FROM calls WHERE agent_id = $1 ORDER BY id DESC LIMIT $2",
             agent_id, limit,
         )
