@@ -146,6 +146,11 @@ _DEFAULTS: dict[str, Any] = {
     "features.ambience_beta":       True,
     "features.knowledge_url_fetch": False,
     "features.signups_open":        True,
+    # Build 244 — Ask-Eva floating helper. When false, the bubble + the
+    # expanded card never render anywhere in the SPA. Default ON so the
+    # feature works the moment a fresh install boots; flip OFF via
+    # Platform settings → Features when a tenant doesn't want it.
+    "features.eva_assist":          True,
     "branding.support_email":       "support@spiderx.ai",
     "branding.brand_palette":       {"primary": "#a78bfa", "accent": "#2563eb"},
     # ── Agent healthcheck (build 231) ──
