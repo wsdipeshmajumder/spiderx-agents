@@ -5919,6 +5919,12 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   flex: 1;
   min-width: 0;
   overflow-y: auto;
+  /* Build 232 — stabilize the scrollbar gutter so navigating between
+     pages of different heights doesn't snap the content sideways by
+     ~15 px (the scrollbar width) when the scrollbar appears or
+     disappears. `stable` reserves space for the scrollbar ALWAYS, even
+     on short pages; nothing visually present until needed. */
+  scrollbar-gutter: stable;
   display: flex;
   flex-direction: column;
   background: #f7f8fa;
@@ -11622,6 +11628,11 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
   padding: 32px clamp(20px, 4vw, 48px) 48px;
   max-width: 1380px;
   background: #f5f6f8;
+  /* Build 232 — own the scroll + reserve the scrollbar gutter so
+     navigating between admin pages of different heights doesn't snap
+     the content sideways. Same reasoning as `.db-main`. */
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 .ax-main h1 {
   font-size: 24px;

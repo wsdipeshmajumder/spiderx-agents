@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 231;
+const SXAI_BUILD = 232;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -3502,6 +3502,19 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
   // saves us threading those props through every per-agent page component.
   const user = userProp || loadAuth();
   const [supportOpen, setSupportOpen] = useState(false);
+  // Build 232 — reset the main scroll position whenever the active page
+  // changes. Without this the new page mounts with the previous page's
+  // scrollTop carried over — e.g. you scroll halfway down Call logs,
+  // click Persona, and Persona renders 400px from the top instead of
+  // at the page header. Browsers don't reset on virtual-route changes
+  // (the SPA doesn't trigger a real navigation), so we own it here.
+  const mainRef = useRef(null);
+  useEffect(() => {
+    if (mainRef.current) mainRef.current.scrollTop = 0;
+    // Also defensively reset window scroll for the rare admin/embed
+    // path that doesn't use the main column's own overflow.
+    if (typeof window !== "undefined") window.scrollTo(0, 0);
+  }, [activeKey]);
   // Phone sidebar drawer state. The CSS keeps the sidebar inline above
   // ~768px and turns it into an off-canvas slide-in below; toggling the
   // `is-mobile-open` class is what reveals it on phones. We also lock
@@ -3762,7 +3775,7 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
             </div>
           </aside>
         `}
-        <main class=${"db-main" + (hideSidebar ? " db-main-wide" : "")}>
+        <main ref=${mainRef} class=${"db-main" + (hideSidebar ? " db-main-wide" : "")}>
           <header class="db-pageheader">
             <div>
               <h1 class="db-pageheader-title">${title}</h1>
@@ -11244,6 +11257,14 @@ function useAdminLookups() {
 // ─────────────────────────────────────────────────────────────────────────
 function AdminShell({ section, currentUser, onNav }) {
   const sec = section || "summary";
+  // Build 232 — reset main scroll on every section change (same fix as
+  // DashboardShell). Without this, switching between admin pages of
+  // different heights leaves the new page scrolled to the previous
+  // page's scrollTop value.
+  const adminMainRef = useRef(null);
+  useEffect(() => {
+    if (adminMainRef.current) adminMainRef.current.scrollTop = 0;
+  }, [sec]);
 
   if (!currentUser?.is_super_admin) {
     return html`
@@ -11408,7 +11429,7 @@ function AdminShell({ section, currentUser, onNav }) {
             <div class="ax-side-user">${currentUser?.email || "—"}</div>
           </div>
         </aside>
-        <main class="db-admin-main db-admin-main-vsplit ax-main">
+        <main ref=${adminMainRef} class="db-admin-main db-admin-main-vsplit ax-main">
           ${sec === "summary" ? html`<${AdminSummary} />`
             : sec === "analytics" ? html`<${AdminAnalytics} />`
             : sec === "llm" ? html`<${AdminLlmLedger} />`
