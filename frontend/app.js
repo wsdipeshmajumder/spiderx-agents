@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 234;
+const SXAI_BUILD = 235;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -3576,7 +3576,8 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
       // /admin (Material Symbols Outlined) for visual consistency.
       icon: "info",
       items: [
-        { key: "overview",  label: "Overview",         icon: "space_dashboard", route: `/agent/${agentSlug}` },
+        // Build 234 — Overview moved out of this group; pinned at
+        // the top of the sidebar as "Dashboard" instead.
         // Core purpose sits right under Overview because it answers
         // the most important "what" question — what is she built to
         // do? It was previously embedded inside the Overview page; now
@@ -3735,6 +3736,19 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
                 <span>${primaryLabel}</span>
               </button>
             `}
+
+            <!-- Build 234 — Dashboard is pinned above the section groups
+                 (was inside "About the business" as "Overview"). Mirrors
+                 the admin shell's pinned Dashboard pattern. The route
+                 still maps to the agent's Overview surface; activeKey
+                 stays "overview" so the highlight logic is unchanged. -->
+            ${agent ? html`
+              <button class=${"db-nav-item db-nav-pinned" + (itemActive("overview") ? " active" : "")}
+                      onClick=${() => navTo(`/agent/${agentSlug}`)}>
+                <${MIcon} name="space_dashboard" size=18 className="db-nav-item-icon" />
+                <span>Dashboard</span>
+              </button>
+            ` : ""}
 
             ${groups.map((g) => html`
               <div key=${g.key} class=${"db-nav-group" + (openGroups[g.key] ? " open" : "")}>

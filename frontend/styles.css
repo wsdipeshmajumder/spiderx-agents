@@ -5235,6 +5235,18 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 }
 .db-topbar-brand-link:hover { opacity: 0.78; }
 
+/* ─── Pinned Dashboard nav item (build 234) ────────────────────────────
+   Sits between the agent switcher and the first section group. Same
+   base shape as a .db-nav-item but with a touch more weight and a
+   bottom divider so it reads as a top-level pin rather than a
+   misplaced group child. */
+.db-nav-pinned {
+  margin: 6px 0 8px;
+  font-weight: 600;
+}
+.db-nav-pinned + .db-nav-group { border-top: 1px solid var(--db-border-soft, #eef0f4); padding-top: 6px; }
+:root[data-theme="dark"] .db-nav-pinned + .db-nav-group { border-top-color: #1f2433; }
+
 /* ─── WorkspaceSelector (build 222) ───────────────────────────────────
    Soft pill in the topbar with the active workspace name + member
    count. Click to open a popover that lists every org the user
