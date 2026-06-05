@@ -3552,20 +3552,33 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
   const itemActive = (key) => activeKey === key;
 
   const groups = [
-    // Per-agent groups, ordered by the operator's natural build → live → run
-    // journey. Each group answers ONE question; mixing different concerns in
-    // one group (the old "Test & launch" lumped pre-launch actions with the
-    // post-launch analytics — "Call logs" had nothing to do with launching)
-    // made the mental model fuzzy and the labels lie.
+    // Build 235 — Call Analytics promoted to the TOP of the per-agent
+    // sidebar. Once an agent is live, the operator's most-clicked
+    // surface is "did calls land + how did they go?" — not "let me
+    // re-configure her persona". Build-time configuration groups
+    // (General Info / Voice & behaviour / Test & launch) drop below
+    // so they're still discoverable but not in the daily-use seat.
     //
-    //   1. General Info — what she IS and what she KNOWS.
-    //   2. Voice & behaviour — how she SOUNDS and what she will / won't do.
-    //   3. Test & launch — pre-launch ACTIONS only (try her, publish her).
-    //   4. Insights — post-launch RESULTS (call activity + outcomes report).
+    //   1. Call Analytics — post-launch RESULTS (call activity + outcomes).
+    //   2. General Info — what she IS and what she KNOWS.
+    //   3. Voice & behaviour — how she SOUNDS and what she will / won't do.
+    //   4. Test & launch — pre-launch ACTIONS only (try her, publish her).
     //   5. Developer — webhooks + raw data, for power users.
     //
     // Account groups follow at the bottom, separated so the per-agent
     // workflow stays visually distinct from workspace administration.
+    agent ? {
+      key: "insights",
+      label: "Call Analytics",
+      icon: "monitoring",
+      items: [
+        // Logs = what happened. Outcomes = what was the result.
+        // Both are POST-launch surfaces — the day-to-day question is
+        // "what did the agent do today?", which lives here.
+        { key: "calls",    label: "Call logs",     icon: "format_list_bulleted", route: `/agent/${agentSlug}/calls` },
+        { key: "outcomes", label: "Call outcomes", icon: "donut_large",          route: `/agent/${agentSlug}/outcomes` },
+      ],
+    } : null,
     agent ? {
       key: "about",
       label: "General Info",
@@ -3605,21 +3618,9 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
       label: "Test & launch",
       icon: "rocket_launch",
       items: [
-        // Pre-launch ACTIONS only. Activity / outcomes moved to Insights
-        // below so this group is purely "make it real".
+        // Pre-launch ACTIONS only — try her, publish her.
         { key: "test-call", label: "Get a test call", icon: "headset_mic", route: `/agent/${agentSlug}/test-call` },
         { key: "live",      label: "Go live",         icon: "bolt",        route: `/agent/${agentSlug}/go-live`, statusBadge: agent.published ? "live" : "draft" },
-      ],
-    } : null,
-    agent ? {
-      key: "insights",
-      label: "Call Analytics",
-      icon: "monitoring",
-      items: [
-        // Logs = what happened. Outcomes = what was the result.
-        // Both are POST-launch surfaces — separate from Test & launch.
-        { key: "calls",    label: "Call logs",     icon: "format_list_bulleted", route: `/agent/${agentSlug}/calls` },
-        { key: "outcomes", label: "Call outcomes", icon: "donut_large",          route: `/agent/${agentSlug}/outcomes` },
       ],
     } : null,
     agent ? {
