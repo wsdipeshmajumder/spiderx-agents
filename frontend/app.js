@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 244;
+const SXAI_BUILD = 245;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -3330,15 +3330,26 @@ const FIREBASE_CONFIG = {
 };
 
 // Cached Firebase auth handle — initialised on first popup.
+//
+// Build 242 — switched from esm.sh to gstatic.com (Firebase's official
+// CDN). esm.sh resolves each subpath (`/app`, `/auth`) to a separately
+// bundled copy of Firebase's internal component registry, so calling
+// getAuth(app) raises "Component auth has not been registered yet" —
+// the auth module registered itself with ITS app instance, not the
+// one we initialised. gstatic.com serves the official ESM bundles
+// that share the internal registry across imports.
 let _firebaseAuthPromise = null;
 function _getFirebaseAuth() {
   if (_firebaseAuthPromise) return _firebaseAuthPromise;
   _firebaseAuthPromise = (async () => {
-    const [{ initializeApp }, { getAuth, GoogleAuthProvider, signInWithPopup }] = await Promise.all([
-      import("https://esm.sh/firebase@10.13.2/app"),
-      import("https://esm.sh/firebase@10.13.2/auth"),
+    const [{ initializeApp, getApps }, { getAuth, GoogleAuthProvider, signInWithPopup }] = await Promise.all([
+      import("https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js"),
+      import("https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js"),
     ]);
-    const app = initializeApp(FIREBASE_CONFIG);
+    // Reuse the existing app instance if one already exists (HMR + the
+    // back-button can re-import this module otherwise). Firebase throws
+    // a "duplicate app" error if we naively re-initialise.
+    const app = getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG);
     const auth = getAuth(app);
     return { auth, GoogleAuthProvider, signInWithPopup };
   })().catch((err) => {
@@ -3448,11 +3459,23 @@ function AuthPage({ mode, defaults, onAuthed, onSwitch }) {
       saveAuth(user);
       onAuthed && onAuthed(user);
     } catch (err) {
-      const msg = String(err?.code || err?.message || err);
+      const raw = String(err?.code || err?.message || err);
       // Quiet the "user closed the popup" cancel — that's not an error
       // worth shouting about, it's just an aborted flow.
-      if (!msg.includes("popup-closed") && !msg.includes("cancelled")) {
-        setError(msg);
+      if (raw.includes("popup-closed") || raw.includes("cancelled")) {
+        // no-op
+      } else if (raw.includes("Component auth") || raw.includes("auth/invalid-api-key")) {
+        // Friendlier message for the two most common configuration
+        // misses — bad/missing FIREBASE_API_KEY or stale SDK state.
+        // Real cause is still in the console for debugging.
+        console.error("Firebase auth init failed:", err);
+        setError("Google sign-in isn't configured yet. Use email + code instead, or contact support@spiderx.ai.");
+      } else if (raw.includes("popup-blocked")) {
+        setError("Your browser blocked the Google popup. Allow pop-ups for this site and try again.");
+      } else if (raw.includes("network")) {
+        setError("Network hiccup talking to Google. Try again in a moment.");
+      } else {
+        setError(raw);
       }
     } finally {
       setGoogleBusy(false);
