@@ -5534,23 +5534,35 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   overflow-y: auto;
 }
 .db-nav-primary {
+  /* Build 242 — toned down. Was a saturated blue→indigo gradient with
+     a heavy box-shadow that competed with the actual active nav item
+     (pink/purple gradient on the page you're on). The agent picker
+     is a SELECTOR, not the loudest thing on the sidebar — quiet it
+     down to a neutral surface so the eye finds the active page first
+     and uses this only when it's looking to switch agents. */
   display: flex; align-items: center; gap: 9px;
   width: 100%;
-  padding: 10px 14px;
+  padding: 9px 12px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #3b82f6, #6366f1);
-  color: #ffffff;
+  background: #f4f5f9;
+  color: #1f2230;
   font: inherit;
   font-size: 13.5px;
   font-weight: 600;
-  border: 0;
+  border: 1px solid #e3e5ec;
   cursor: pointer;
   margin-bottom: 14px;
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.22);
-  transition: filter 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
-.db-nav-primary:hover { filter: brightness(1.05); }
-.db-nav-primary svg { width: 16px; height: 16px; flex: 0 0 16px; }
+.db-nav-primary:hover { background: #eceef4; border-color: #d8dbe4; }
+.db-nav-primary svg { width: 16px; height: 16px; flex: 0 0 16px; color: #6a6f7d; }
+:root[data-theme="dark"] .db-nav-primary {
+  background: rgba(255,255,255,0.04);
+  border-color: rgba(255,255,255,0.1);
+  color: #e8e9ef;
+}
+:root[data-theme="dark"] .db-nav-primary:hover { background: rgba(255,255,255,0.07); }
+:root[data-theme="dark"] .db-nav-primary svg { color: #a4a8b8; }
 
 /* AgentSwitcher — custom dropdown component. The trigger looks identical
  * to the old big-blue primary tile (we reuse .db-nav-primary). The menu
