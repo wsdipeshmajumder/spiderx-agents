@@ -5928,6 +5928,29 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   opacity: 0.85;
 }
 
+/* Build 237 — the paid-plan variant. No saturated wash; quiet text
+   link that says "Manage" so the operator can reach billing without
+   the visual nag the gold pill carried. */
+.db-nav-foot-plan {
+  /* Stretch so the Manage link drifts to the right via margin-left:auto
+     in the parent flex — matches the old "label + pill" rhythm. */
+  flex: 1; min-width: 0;
+}
+.db-nav-foot-link {
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #7a7e88;
+  background: transparent;
+  border: 0;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.db-nav-foot-link:hover { background: #f0f1f4; color: #1f2230; }
+:root[data-theme="dark"] .db-nav-foot-link { color: #a4a8b8; }
+:root[data-theme="dark"] .db-nav-foot-link:hover { background: rgba(255,255,255,0.06); color: #e8e9ef; }
+
 .db-main {
   flex: 1;
   min-width: 0;

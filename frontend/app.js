@@ -3958,11 +3958,23 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
             `)}
 
             <div class="db-nav-foot">
-              ${plan?.label || "Free"} plan
-              <button class="db-nav-upgrade" type="button" onClick=${() => navTo("/account/billing")}>
-                <svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M13 2L4 14h6l-1 8 10-14h-7z"/></svg>
-                Upgrade
-              </button>
+              <span class="db-nav-foot-plan">${plan?.label || "Free"} plan</span>
+              ${/* Build 237 — Upgrade pill only on the free plan. Paid users
+                    were seeing "Pro plan · Upgrade" because the button was
+                    rendered unconditionally — visually nagging a customer
+                    who already paid us. Paid plans now show just the plan
+                    label; billing is still one click away via Account →
+                    Billing & plan. */ ""}
+              ${(plan?.plan?.slug || "free") === "free" ? html`
+                <button class="db-nav-upgrade" type="button" onClick=${() => navTo("/account/billing")}>
+                  <svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M13 2L4 14h6l-1 8 10-14h-7z"/></svg>
+                  Upgrade
+                </button>
+              ` : html`
+                <button class="db-nav-foot-link" type="button" onClick=${() => navTo("/account/billing")}>
+                  Manage
+                </button>
+              `}
             </div>
           </aside>
         `}
