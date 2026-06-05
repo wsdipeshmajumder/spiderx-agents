@@ -96,6 +96,11 @@ Current build: **215**.
 
 - **Local Postgres** — connection via `DATABASE_URL` / `PG_URL` in `.env`
 - **Local recordings** — `data/recordings/<agent_id>/<call_id>/`
+- **Production recordings** — Railway volume mounted at `/files`,
+  recordings land at `/files/recordings/<agent_id>/<call_id>/`.
+  Resolved by `backend/recordings._resolve_recording_root()` —
+  order: `RECORDING_DIR` env var → `RAILWAY_VOLUME_MOUNT_PATH` env
+  var → `/files` autodetect → `data/recordings` dev fallback.
 - **Server** — `uvicorn backend.app:app` on `localhost:8765`
 - **Production** — Railway (`spiderx-agents` service, root `requirements.txt`
   + `railway.json` with start command `alembic upgrade head && uvicorn …`)

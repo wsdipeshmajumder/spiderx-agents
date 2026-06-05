@@ -1,7 +1,12 @@
 """Per-call audio recording — writer + retention helpers.
 
 What this module owns:
-  - The filesystem layout under `data/recordings/<agent_id>/<call_id>/`
+  - The filesystem layout under `<RECORDING_ROOT>/<agent_id>/<call_id>/`
+    where RECORDING_ROOT is resolved at import time from (in order):
+      1. RECORDING_DIR env var
+      2. RAILWAY_VOLUME_MOUNT_PATH env var + "/recordings"
+      3. "/files/recordings" if "/files" exists (Railway mount)
+      4. "data/recordings" (dev fallback)
   - The wave-format writers for the two raw PCM streams Gemini Live
     gives us:
       caller.wav  — 16-kHz mono int16 (incoming mic, native rate)
@@ -55,10 +60,39 @@ log = logging.getLogger("eva.recordings")
 # up to 365 (or down to 30 for a strict-privacy use-case).
 RECORDING_RETENTION_DAYS = int(os.environ.get("RECORDING_RETENTION_DAYS", "180"))
 
-# Where files land. Default to a repo-local `data/recordings` dir so a
-# dev box just works; production wires `RECORDING_DIR` to a mounted
-# volume (Railway volume, EBS, etc.).
-RECORDING_ROOT = Path(os.environ.get("RECORDING_DIR", "data/recordings"))
+# Where files land. Resolution order:
+#   1. `RECORDING_DIR` env var — explicit override (production).
+#   2. `RAILWAY_VOLUME_MOUNT_PATH` env var — Railway sets this on
+#      every service that has a volume attached; we drop a
+#      `recordings/` subdir under it.
+#   3. `/files/recordings` — the customary Railway mount path the
+#      operator chose. Auto-picked when `/files` exists on disk so
+#      we never lose audio to an ephemeral container restart.
+#   4. `data/recordings` — repo-local dev fallback.
+#
+# `_resolve_recording_root()` runs at import time AND ensures the
+# directory exists so the first call doesn't race against mkdir.
+def _resolve_recording_root() -> Path:
+    explicit = os.environ.get("RECORDING_DIR")
+    if explicit:
+        p = Path(explicit)
+    else:
+        rv = os.environ.get("RAILWAY_VOLUME_MOUNT_PATH")
+        if rv:
+            p = Path(rv) / "recordings"
+        elif Path("/files").exists():
+            p = Path("/files/recordings")
+        else:
+            p = Path("data/recordings")
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+    except Exception as e:  # noqa: BLE001
+        log.warning("recordings.root_mkdir_failed path=%s err=%s", p, e)
+    log.info("recordings.root resolved to %s", p)
+    return p
+
+
+RECORDING_ROOT = _resolve_recording_root()
 
 # Native sample rates Gemini Live cascade speaks. Hard-coded because
 # changing them silently would corrupt every WAV header we've ever
