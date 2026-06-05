@@ -1132,9 +1132,14 @@ async def agent_knowledge_upload(agent_id: int, request: Request) -> dict:
 
 @app.post("/api/auth/google")
 async def auth_google(request: Request) -> dict:
-    """Mock Google sign-in. Real OAuth lands with Auth0; for now we upsert
-    a user from the supplied (or a demo) Google identity so the
-    login→resume build flow is demoable end-to-end."""
+    """Google sign-in. Build 236 — frontend now drives this from the
+    Firebase Web SDK; on a successful popup it sends `id_token`, `email`
+    and `name` from the Firebase user. The token is the Google-signed
+    JWT we'd verify in production (firebase-admin / google-auth); for
+    now we accept the email + name as truth and upsert a user. Real
+    verification is a backend-only flip when the firebase-admin
+    package lands.
+    """
     try:
         body = await request.json()
     except Exception:
@@ -1146,7 +1151,116 @@ async def auth_google(request: Request) -> dict:
     if "@" not in email:
         raise HTTPException(status_code=400, detail="valid email is required")
     user = await db.create_user(email, name=name, provider="google")
-    log.info("auth.google email=%s user_id=%s", email, user["id"])
+    log.info("auth.google email=%s user_id=%s id_token_present=%s",
+             email, user["id"], bool(body.get("id_token")))
+    return user
+
+
+# ─── OTP login (build 236) ────────────────────────────────────────────────
+#
+# Email + 6-digit OTP for passwordless login. Codes live in a process-
+# local dict with a 10-minute TTL. Production: swap for Redis or the
+# existing Postgres so multi-process / multi-worker deployments share
+# state. Same shape, two function calls to swap.
+#
+# Flow:
+#   POST /api/auth/otp/request  { email }      → emails the code + ok:true
+#   POST /api/auth/otp/verify   { email, code} → upserts user + returns it
+
+import secrets as _secrets
+import time as _time
+
+_OTP_STORE: dict[str, dict] = {}
+_OTP_TTL_SECONDS = 10 * 60
+_OTP_MAX_ATTEMPTS = 5
+
+
+def _otp_make() -> str:
+    """6-digit numeric code (zero-padded). secrets ensures it isn't
+    predictable from process state — same primitive Auth0 uses."""
+    return f"{_secrets.randbelow(1_000_000):06d}"
+
+
+@app.post("/api/auth/otp/request")
+async def auth_otp_request(request: Request) -> dict:
+    """Issue a fresh OTP to the given email. Always returns `ok: true`
+    even when the address is invalid — avoids leaking which addresses
+    have accounts (standard email-enumeration hardening).
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    email = ((body or {}).get("email") or "").strip().lower()
+    if "@" not in email or "." not in email.split("@")[-1]:
+        # Pretend success so attackers can't enumerate addresses by
+        # error-code timing. Log the bad submit so we still see abuse.
+        log.info("auth.otp.request bad_email=%r", email)
+        return {"ok": True}
+    code = _otp_make()
+    _OTP_STORE[email] = {
+        "code":     code,
+        "expires":  _time.time() + _OTP_TTL_SECONDS,
+        "attempts": 0,
+    }
+    # Send via the existing email pipeline. Dev mode (EMAIL_PROVIDER=log)
+    # writes the code to stdout so local development never needs a real
+    # mailbox. Best-effort — a delivery failure must not block the API
+    # response (otherwise an attacker can probe the email provider).
+    try:
+        from . import email_stub as _es
+        subject = f"Your SpiderX.AI sign-in code · {code}"
+        text = (
+            f"Your sign-in code is: {code}\n\n"
+            f"It expires in 10 minutes. If you didn't request this, ignore this email.\n"
+        )
+        html_body = (
+            f"<p>Your sign-in code is:</p>"
+            f"<p style='font-family:monospace;font-size:28px;letter-spacing:6px;"
+            f"font-weight:700;color:#1f2230;background:#f3f4f7;padding:14px 18px;"
+            f"border-radius:10px;display:inline-block;'>{code}</p>"
+            f"<p style='color:#6a6f7d;font-size:13px;margin-top:14px;'>"
+            f"Expires in 10 minutes. If you didn't request this, ignore this email.</p>"
+        )
+        await _es._send(email, subject, text, html_body=html_body)
+    except Exception as e:  # noqa: BLE001
+        log.warning("auth.otp.request email_failed addr=%s err=%s", email, e)
+    return {"ok": True}
+
+
+@app.post("/api/auth/otp/verify")
+async def auth_otp_verify(request: Request) -> dict:
+    """Verify an OTP. On success upserts the user via the same
+    create_user path login/Google use, returns the user record.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    body = body if isinstance(body, dict) else {}
+    email = (body.get("email") or "").strip().lower()
+    code = (body.get("code") or "").strip()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="email required")
+    if not code or not code.isdigit() or len(code) != 6:
+        raise HTTPException(status_code=400, detail="6-digit code required")
+    entry = _OTP_STORE.get(email)
+    if not entry:
+        raise HTTPException(status_code=400, detail="no code outstanding for this email")
+    if _time.time() > entry["expires"]:
+        _OTP_STORE.pop(email, None)
+        raise HTTPException(status_code=400, detail="code expired — request a new one")
+    entry["attempts"] += 1
+    if entry["attempts"] > _OTP_MAX_ATTEMPTS:
+        # Burn the entry on too many tries — fresh request required.
+        _OTP_STORE.pop(email, None)
+        raise HTTPException(status_code=429, detail="too many attempts — request a new code")
+    if not _secrets.compare_digest(code, entry["code"]):
+        raise HTTPException(status_code=400, detail="incorrect code")
+    # Success — burn the code so it can't replay.
+    _OTP_STORE.pop(email, None)
+    user = await db.create_user(email, name=None, provider="otp")
+    log.info("auth.otp.verify ok email=%s user_id=%s", email, user["id"])
     return user
 
 
