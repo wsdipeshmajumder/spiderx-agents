@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 240;
+const SXAI_BUILD = 241;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -3475,10 +3475,12 @@ function AuthPage({ mode, defaults, onAuthed, onSwitch }) {
   ];
 
   return html`
-    <!-- Build 239 — single full-page surface. Video covers the whole
-         viewport; the rounded login card floats centered on top. No
-         more left/right split. Logo pinned top-left, trust strip
-         pinned bottom-center, everything else overlaid on the video. -->
+    <!-- Build 241 — full-bleed video background (covers the whole
+         viewport, no visible divider), with the original two-column
+         content layout intact ON TOP of it. Left column: logo +
+         showcase + pills + trust strip. Right column: rounded
+         login card. Both columns sit on the SAME video — there's
+         no solid panel boundary between them anymore. -->
     <div class="sx-auth-full">
       <video class="sx-auth-bgvideo" aria-hidden="true"
              autoPlay muted loop playsInline preload="auto">
@@ -3487,13 +3489,40 @@ function AuthPage({ mode, defaults, onAuthed, onSwitch }) {
       <div class="sx-auth-stars" aria-hidden="true"></div>
       <div class="sx-auth-veil" aria-hidden="true"></div>
 
-      <a class="sx-auth-logo sx-auth-logo-corner" href="/" aria-label="SpiderX.AI">
-        <${SpiderXLogo} height=${32} />
-      </a>
+      <div class="sx-auth-cols">
+        <!-- LEFT side: brand + showcase + benefit pills + trust strip. -->
+        <aside class="sx-auth-leftcol">
+          <a class="sx-auth-logo" href="/" aria-label="SpiderX.AI">
+            <${SpiderXLogo} height=${36} />
+          </a>
+          <div class="sx-auth-showcase">
+            <div class="sx-auth-showcase-eyebrow">Your front office, on autopilot</div>
+            <div class="sx-auth-showcase-card">
+              <div class="sx-auth-showcase-avatar" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 2.08 4.18 2 2 0 0 1 4 2h3a2 2 0 0 1 2 1.72c.13.96.37 1.9.7 2.81a2 2 0 0 1-.45 2.11L8 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.33 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/>
+                </svg>
+              </div>
+              <div class="sx-auth-showcase-meta">
+                <div class="sx-auth-showcase-name">Phone AI agents</div>
+                <div class="sx-auth-showcase-role">Built in minutes · works in any industry</div>
+              </div>
+            </div>
+            <div class="sx-auth-pills">
+              ${showcasePills.map((p, i) => html`
+                <span key=${i} class="sx-auth-pill">
+                  <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>
+                  ${p}
+                </span>
+              `)}
+            </div>
+          </div>
+          <div class="sx-auth-trust">Trusted by teams shipping AI-first call experiences worldwide.</div>
+        </aside>
 
-      <main class="sx-auth-center">
-        <div class="sx-auth-tagline">Phone AI agents — built in minutes, work in any industry.</div>
-        <div class="sx-auth-card">
+        <!-- RIGHT side: the rounded login card (white surface on video). -->
+        <main class="sx-auth-rightcol">
+          <div class="sx-auth-card">
           <h1 class="sx-auth-title">${isSignup ? "Welcome" : "Welcome Back"}</h1>
           <p class="sx-auth-sub">
             ${step === "otp"
@@ -3557,8 +3586,8 @@ function AuthPage({ mode, defaults, onAuthed, onSwitch }) {
             <span>${googleBusy ? "Opening Google…" : "Continue with Google"}</span>
           </button>
         </div>
-        <div class="sx-auth-trust">Trusted by teams shipping AI-first call experiences worldwide.</div>
-      </main>
+        </main>
+      </div>
     </div>
   `;
 }

@@ -7910,71 +7910,62 @@ button.oc-kind:disabled { cursor: default; }
     0 12px 32px rgba(0, 0, 0, 0.45);
 }
 
-/* ─── Full-page layout (build 239) ─────────────────────────────────────
- * The video covers the entire viewport; the rounded card centres on
- * top with the logo pinned top-left and a trust strip under the card.
- * No two-column split. */
+/* ─── Full-page layout (build 241) ─────────────────────────────────────
+ * Video covers the entire viewport. The original two-column content
+ * layout sits ON TOP of it — left column with logo + showcase + pills
+ * + trust strip; right column with the rounded login card. Both
+ * columns are transparent over the shared video, so there's no visible
+ * panel divider between them anymore. */
+.sx-auth-cols {
+  position: relative; z-index: 2;
+  flex: 1; min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+}
+.sx-auth-leftcol {
+  position: relative;
+  display: flex; flex-direction: column;
+  padding: 48px 56px;
+  gap: 36px;
+  color: #f7f5ff;
+}
+.sx-auth-rightcol {
+  display: flex; align-items: center; justify-content: center;
+  padding: 40px 48px;
+}
+/* Force the logo's white wordmark + keep the red X. The SpiderXLogo
+ * SVG uses currentColor for the letters; the X is hardcoded #df3739
+ * inline. Drop-shadow lifts the mark off bright frames of the video. */
+.sx-auth-leftcol .sx-auth-logo,
 .sx-auth-logo-corner {
-  position: absolute;
-  top: 24px; left: 28px;
-  z-index: 3;
-  /* Build 240 — force the wordmark white (the SpiderXLogo SVG uses
-     `currentColor` for the wordmark and a hardcoded #df3739 for the
-     X). A drop-shadow keeps both visible against bright frames of
-     the background video — without it the white wordmark vanishes
-     in the lighter parts of the loop. */
   color: #ffffff !important;
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5));
   text-decoration: none;
 }
-/* Belt-and-braces: explicitly paint the wordmark glyphs white in case
-   any cascade reset overrides `currentColor` on the SVG. The red X
-   path stays untouched (its fill is hardcoded #df3739 inline). */
+.sx-auth-leftcol .sx-auth-logo svg path[fill="currentColor"],
 .sx-auth-logo-corner svg path[fill="currentColor"] { fill: #ffffff; }
-.sx-auth-center {
-  position: relative;
-  z-index: 2;
-  flex: 1; min-height: 0;
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  padding: 80px 24px 32px;
-  gap: 18px;
-}
-.sx-auth-tagline {
-  font-size: 16px;
-  font-weight: 500;
-  color: rgba(255,255,255,0.82);
-  letter-spacing: 0.005em;
-  text-align: center;
-  max-width: 540px;
-  text-shadow: 0 1px 3px rgba(0,0,0,0.45);
-}
-/* Card on the video: keep the rounded card look but lean into the
- * floating-glass feel — slightly stronger shadow against the dark
- * video, white surface that doesn't disappear into bright frames. */
+
+/* Card sits on top of the video — needs the stronger shadow it used
+ * to get from a solid white right panel. */
 .sx-auth-full .sx-auth-card {
   background: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.6);
   border-radius: 22px;
   box-shadow:
     0 1px 2px rgba(0, 0, 0, 0.35),
     0 24px 60px rgba(0, 0, 0, 0.45);
-  /* Slight inner padding bump for breathing room over a busy bg. */
-  padding: 38px 40px 34px;
-}
-/* Trust strip pinned under the card — small, low-opacity, doesn't
- * compete with the video. */
-.sx-auth-full .sx-auth-trust {
-  margin-top: 6px;
-  font-size: 12px;
-  color: rgba(255,255,255,0.55);
-  text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+  padding: 36px 36px 32px;
+  width: 100%; max-width: 440px;
 }
 
-@media (max-width: 600px) {
-  .sx-auth-logo-corner { top: 16px; left: 18px; }
-  .sx-auth-center { padding: 72px 16px 24px; }
+@media (max-width: 900px) {
+  /* Stack on tablet / phone — left content collapses above the form
+   * so it stays available without crowding the input field. */
+  .sx-auth-cols { grid-template-columns: 1fr; }
+  .sx-auth-leftcol { padding: 28px 24px 8px; gap: 20px; }
+  .sx-auth-rightcol { padding: 16px 18px 28px; }
   .sx-auth-full .sx-auth-card { padding: 28px 22px 24px; border-radius: 18px; }
-  .sx-auth-tagline { font-size: 14px; }
 }
 .sx-auth-title {
   margin: 0;
