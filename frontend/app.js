@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 225;
+const SXAI_BUILD = 226;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -14454,7 +14454,12 @@ function App() {
   const [callQuestion, setCallQuestion] = useState(null);
   const [callQuestionError, setCallQuestionError] = useState(null);
   const [blobMode, setBlobMode] = useState("idle");
-  const [splashGone, setSplashGone] = useState(false);
+  // Build 226 — splash starts in the "gone" state. The 1700 ms brand
+  // teaser made every navigation feel a beat slow; killing it makes
+  // page transitions snap. Splash markup left in place but rendered
+  // invisible from frame 1; the state var is kept so anything else
+  // reading it (build flow, deep-links) keeps working.
+  const [splashGone, setSplashGone] = useState(true);
   const [hint, setHint] = useState(null);
   const [callState, setCallState] = useState("idle");
   const [agent, setAgent] = useState(null);
@@ -14610,7 +14615,12 @@ function App() {
 
   // boot
   useEffect(() => {
-    const t = setTimeout(() => setSplashGone(true), 1700);
+    // Build 226 — splash teaser removed. Was: 1700ms branded reveal
+    // before the app became interactive. Operator feedback: makes
+    // every page load feel slow. Kept as a no-op timeout reference
+    // for code shape; the splash is already gone from frame 1 via
+    // the initial state above.
+    const t = null; // setTimeout(() => setSplashGone(true), 1700);
 
     // Path-based routing — read location.pathname on mount, then again on
     // every popstate (browser back/forward). Patterns:
