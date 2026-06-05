@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 243;
+const SXAI_BUILD = 244;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -3490,10 +3490,12 @@ function AuthPage({ mode, defaults, onAuthed, onSwitch }) {
       <div class="sx-auth-veil" aria-hidden="true"></div>
 
       <div class="sx-auth-cols">
-        <!-- LEFT side: brand + showcase + benefit pills + trust strip. -->
+        <!-- LEFT side: brand + showcase + benefit pills + trust strip.
+             Build 244 — logo bumped 1.5x (36 → 54) so the brand mark
+             holds its own next to the full-bleed video background. -->
         <aside class="sx-auth-leftcol">
           <a class="sx-auth-logo" href="/" aria-label="SpiderX.AI">
-            <${SpiderXLogo} height=${36} />
+            <${SpiderXLogo} height=${54} />
           </a>
           <div class="sx-auth-showcase">
             <div class="sx-auth-showcase-eyebrow">Your front office, on autopilot</div>
