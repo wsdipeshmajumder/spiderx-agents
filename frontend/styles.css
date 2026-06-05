@@ -7732,6 +7732,20 @@ button.oc-kind:disabled { cursor: default; }
 /* ─── Split-layout auth page (build 236) ────────────────────────────────
    Left: dark starry panel with the white SpiderX logo + showcase + trust
    strip. Right: white card with the email → OTP → Google form. */
+/* Build 239 — single full-page surface. Video covers the whole viewport;
+ * a centred rounded card floats on top. Old `.sx-auth-split` 2-column
+ * grid + `.sx-auth-left` panel rules kept (unused) so any backed-up
+ * cache returning the previous markup still degrades gracefully. */
+.sx-auth-full {
+  position: fixed; inset: 0;
+  overflow: hidden;
+  z-index: 50;
+  background: #06050c;
+  color: #f7f5ff;
+  /* No split, no grid — the children stack absolutely via position
+   * and the card centres in the remaining flex space. */
+  display: flex; flex-direction: column;
+}
 .sx-auth-split {
   position: fixed; inset: 0;
   display: grid;
@@ -7868,7 +7882,9 @@ button.oc-kind:disabled { cursor: default; }
  * Build 238 — was solid white with the form floating raw on it; user
  * asked for the form to read as a rounded card. So the PANEL goes
  * soft grey + the CARD goes white-on-white with a border, rounded
- * corners and a subtle elevation. */
+ * corners and a subtle elevation. Build 239: this only applies in
+ * the legacy split layout; the full-page layout has its own override
+ * below (transparent canvas, card floats on video). */
 .sx-auth-right {
   display: flex; align-items: center; justify-content: center;
   background: #f5f6fa;
@@ -7892,6 +7908,62 @@ button.oc-kind:disabled { cursor: default; }
   box-shadow:
     0 1px 2px rgba(0, 0, 0, 0.4),
     0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+/* ─── Full-page layout (build 239) ─────────────────────────────────────
+ * The video covers the entire viewport; the rounded card centres on
+ * top with the logo pinned top-left and a trust strip under the card.
+ * No two-column split. */
+.sx-auth-logo-corner {
+  position: absolute;
+  top: 24px; left: 28px;
+  z-index: 3;
+  color: #f7f5ff;  /* logo wordmark inherits via currentColor */
+}
+.sx-auth-center {
+  position: relative;
+  z-index: 2;
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 80px 24px 32px;
+  gap: 18px;
+}
+.sx-auth-tagline {
+  font-size: 16px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.82);
+  letter-spacing: 0.005em;
+  text-align: center;
+  max-width: 540px;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.45);
+}
+/* Card on the video: keep the rounded card look but lean into the
+ * floating-glass feel — slightly stronger shadow against the dark
+ * video, white surface that doesn't disappear into bright frames. */
+.sx-auth-full .sx-auth-card {
+  background: #ffffff;
+  border-radius: 22px;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    0 24px 60px rgba(0, 0, 0, 0.45);
+  /* Slight inner padding bump for breathing room over a busy bg. */
+  padding: 38px 40px 34px;
+}
+/* Trust strip pinned under the card — small, low-opacity, doesn't
+ * compete with the video. */
+.sx-auth-full .sx-auth-trust {
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(255,255,255,0.55);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+}
+
+@media (max-width: 600px) {
+  .sx-auth-logo-corner { top: 16px; left: 18px; }
+  .sx-auth-center { padding: 72px 16px 24px; }
+  .sx-auth-full .sx-auth-card { padding: 28px 22px 24px; border-radius: 18px; }
+  .sx-auth-tagline { font-size: 14px; }
 }
 .sx-auth-title {
   margin: 0;
