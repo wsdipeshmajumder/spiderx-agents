@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 217;
+const SXAI_BUILD = 218;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -6153,6 +6153,52 @@ const SECTOR_CHIP_SCHEMA = {
     ["viewing_date",   "date"],
     ["viewing_time",   "time"],
   ],
+  legal: [
+    ["case_type",       "topic"],     // "family law" / "criminal"
+    ["urgency",         "emotion"],
+    ["consultation_date", "date"],
+    ["consultation_time", "time"],
+    ["preferred_lawyer","person"],
+  ],
+  education: [
+    ["program",         "topic"],     // "MBA" / "Coding bootcamp"
+    ["intake",          "topic"],     // "Spring 2026"
+    ["enquiry_type",    "topic"],
+    ["session_date",    "date"],
+    ["session_time",    "time"],
+    ["fee_bucket",      "detail"],
+  ],
+  fitness: [
+    ["service",         "topic"],     // "personal training" / "yoga"
+    ["trainer",         "person"],
+    ["session_date",    "date"],
+    ["session_time",    "time"],
+    ["plan",            "detail"],   // "monthly" / "annual"
+  ],
+  veterinary: [
+    ["species",         "topic"],
+    ["complaint",       "topic"],
+    ["urgency",         "emotion"],
+    ["appointment_date","date"],
+    ["appointment_time","time"],
+    ["preferred_vet",   "person"],
+  ],
+  hospitality: [
+    ["room_type",       "topic"],
+    ["check_in",        "date"],
+    ["check_out",       "date"],
+    ["nights",          "count"],
+    ["adults",          "count"],
+    ["children",        "count"],
+    ["special_requests","detail"],
+  ],
+  logistics: [
+    ["service_type",    "topic"],    // "pickup" / "delivery" / "tracking"
+    ["pickup_date",     "date"],
+    ["pickup_time",     "time"],
+    ["destination",     "place"],
+    ["order_id",        "detail"],
+  ],
   // Generic baseline — applied to any sector not above, AND used as
   // the secondary pass for sector-listed schemas (catches the common
   // entities Eva extracts regardless of vertical).
@@ -6180,6 +6226,104 @@ function _chipFallback(key) {
   let h = 0; const s = String(key || "");
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
   return CHIP_FALLBACK_PALETTE[h % CHIP_FALLBACK_PALETTE.length];
+}
+
+// ─── Value-based chip inference (build 218) ──────────────────────────────
+//
+// SECTOR_CHIP_SCHEMA above is FIELD-NAME based: if Eva extracts
+// `party_size`, we know it's a count chip. But the LLM is freeform —
+// the same call could write `guest_count`, `guests`, `pax`, etc. And
+// custom slots an operator adds via Eva's build flow (e.g.
+// `referral_source`, `loyalty_tier`) won't be in any schema we ship.
+//
+// `inferCategoryFromValue(field, value)` runs as a fallback BEFORE
+// the hash-of-key palette: pattern-match the VALUE to detect what
+// kind of info it carries, regardless of the field name. That makes
+// the chip system genuinely adaptive — a date is amber whether
+// Eva called it `date`, `appointment_date`, `viewing_date`, or
+// `next_followup`.
+
+// Value-shape patterns. Greedy on the value first; the field-name
+// hint is consulted only as a tie-breaker.
+const _CHIP_VALUE_PATTERNS = [
+  // ISO-shaped dates: 2026-06-04, 2026/06/04, 04 Jun 2026
+  { re: /^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/, cat: "date" },
+  // Long-form dates: "June 8th", "8 June", "8th June", "Mon, 14 Jun"
+  { re: /^(?:mon|tue|wed|thu|fri|sat|sun),?\s+/i, cat: "date" },
+  { re: /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)(?:[a-z]*)\s+\d{1,2}(?:st|nd|rd|th)?\b/i, cat: "date" },
+  { re: /^\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i, cat: "date" },
+  { re: /^(today|tomorrow|yesterday|tonight|this\s+(?:morning|afternoon|evening|week|weekend|monday|tuesday|wednesday|thursday|friday|saturday|sunday))$/i, cat: "date" },
+  // Clock times: 6:45 PM, 18:45, 6 PM
+  { re: /^\d{1,2}:\d{2}\s*(?:am|pm)?$/i, cat: "time" },
+  { re: /^\d{1,2}\s*(?:am|pm)$/i, cat: "time" },
+  // Counts with a unit: 4 guests, 10 adults, 2 children, 3 bedrooms, 1 night
+  { re: /^\d+\s+(?:guest|guests|adult|adults|child|children|kid|kids|people|person|pax|night|nights|bedroom|bedrooms|room|rooms|seat|seats|car|cars|item|items|order|orders)$/i, cat: "count" },
+  // Money: ₹2,500 / $1200 / £80 / 50 USD / 2.5k
+  { re: /^[₹$€£¥]\s?[\d,]+(?:\.\d+)?$/i, cat: "detail" },
+  { re: /^[\d,]+(?:\.\d+)?\s*(?:usd|inr|eur|gbp|jpy|aud|sgd)$/i, cat: "detail" },
+  { re: /^[\d,.]+\s*[kml]$/i, cat: "detail" },  // 2.5k, 1.2m
+  // Phone numbers — surface as a detail chip rather than a count
+  { re: /^\+?\d[\d\s\-]{6,}$/, cat: "detail" },
+  // Email — also a detail
+  { re: /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i, cat: "detail" },
+];
+
+// Vocabulary buckets — words/phrases that strongly imply a category
+// regardless of field name. Lowercased + word-boundary checked.
+const _CHIP_VALUE_WORDS = {
+  emotion: new Set([
+    "urgent", "emergency", "frustrated", "frustration", "angry", "anger",
+    "upset", "concerned", "anxious", "worried", "happy", "delighted",
+    "satisfied", "pleased", "impatient", "calm", "rude", "polite",
+    "confused", "panicked", "stressed",
+  ]),
+  person: new Set([
+    "family", "couple", "group", "individual", "solo", "team",
+    "manager", "owner", "customer", "client", "guest", "patient",
+    "child", "infant", "senior", "elderly",
+  ]),
+  place: new Set([
+    "indoor", "outdoor", "patio", "balcony", "rooftop", "private",
+    "table", "booth", "bar", "garden", "lounge", "showroom",
+    "consultation room", "delivery", "dine-in", "takeaway", "takeout",
+  ]),
+  topic: new Set([
+    "reservation", "booking", "cancellation", "rescheduling", "inquiry",
+    "complaint", "feedback", "support", "appointment", "consultation",
+    "follow-up", "callback", "test drive", "service", "purchase",
+  ]),
+};
+
+function inferCategoryFromValue(field, value) {
+  if (value == null || typeof value === "boolean") return null;
+  const s = String(Array.isArray(value) ? value[0] : value).trim();
+  if (!s) return null;
+  for (const { re, cat } of _CHIP_VALUE_PATTERNS) {
+    if (re.test(s)) return cat;
+  }
+  const low = s.toLowerCase();
+  for (const [cat, words] of Object.entries(_CHIP_VALUE_WORDS)) {
+    if (words.has(low)) return cat;
+    // Multi-word value — match if ANY token is in the vocabulary
+    for (const w of low.split(/[\s,/]+/)) {
+      if (words.has(w)) return cat;
+    }
+  }
+  // Pure integer ≤ 999 → count (likely a quantity even without a unit
+  // like "4" for party_size, "10" for bedrooms)
+  if (/^\d{1,3}$/.test(s)) return "count";
+  // Field-name heuristic as a last hint before falling all the way
+  // through to the hash palette. Catches synonyms the sector schemas
+  // didn't enumerate (guests/pax/no_of_people for count, etc.).
+  const f = String(field || "").toLowerCase();
+  if (/(date|day|when)/.test(f))            return "date";
+  if (/(time|hour|slot)/.test(f))           return "time";
+  if (/(count|qty|num|size|guests?|pax|adults?|children|people)/.test(f)) return "count";
+  if (/(seat|room|table|location|venue|area|address|city)/.test(f)) return "place";
+  if (/(name|dentist|doctor|stylist|manager)/.test(f)) return "person";
+  if (/(emotion|mood|feeling|urgency)/.test(f)) return "emotion";
+  if (/(type|category|service|procedure|topic|reason)/.test(f))    return "topic";
+  return null;
 }
 
 // Format an extracted value for the chip label. Strings pass through;
@@ -6252,15 +6396,20 @@ function chipsForCall(call, agent, opts = {}) {
     }
   }
   // 4. Catch-all — anything left in extracted that we haven't shown
-  // yet, coloured by the hash-fallback palette. Keeps custom slots
-  // visible (operator added "loyalty_number" via the wizard, etc.).
+  // yet. First try VALUE-based inference (build 218) — a value that
+  // looks like a date gets the date colour even if the field name is
+  // unknown. Falls back to hash-of-key palette only when both the
+  // sector schema AND value inference give up. Keeps custom slots
+  // visible (operator added "loyalty_number" via the wizard, etc.)
+  // AND semantically coloured when possible.
   if (out.length < 9) {
     for (const [k, v] of Object.entries(ex)) {
       if (k.startsWith("_")) continue;
       const label = _humaniseChip(_chipLabel(v));
       if (!label || seen.has(label.toLowerCase())) continue;
-      const fallback = _chipFallback(k);
-      push(label, fallback, k);
+      const inferredCat = inferCategoryFromValue(k, v);
+      const palette = inferredCat ? CHIP_CATS[inferredCat] : _chipFallback(k);
+      push(label, palette, k);
       if (out.length >= 9) break;
     }
   }
