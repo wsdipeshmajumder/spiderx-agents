@@ -15,3 +15,9 @@ psycopg[binary]>=3.2
 # pinned here explicitly so a future env without that transitive pull-in
 # still resolves.
 PyYAML>=6.0
+# Python 3.13 removed the stdlib `audioop` module. We import it in
+# twilio_bridge.py (mu-law ↔ PCM) and recordings.py (16 kHz → 24 kHz
+# resample for the stereo call-recording mix). `audioop-lts` is the
+# maintained drop-in backport — same module name, same API. Gated on
+# Python ≥ 3.13 so 3.9-3.12 dev boxes don't pull in an unneeded dep.
+audioop-lts>=0.2; python_version >= "3.13"

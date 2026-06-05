@@ -371,7 +371,11 @@ def mix_to_stereo(rec_dir: Path) -> Optional[Path]:
     or unreadable. Best-effort throughout — a mixdown failure
     surfaces as `None` and the caller can fall back to a 404.
     """
-    import audioop  # stdlib; deprecated in 3.13 but supported through then
+    # Stdlib through Python 3.12; removed in 3.13. The `audioop-lts`
+    # backport (pinned in requirements.txt under python_version>=3.13)
+    # registers itself as `audioop` so the import line is identical
+    # across versions.
+    import audioop
     import struct
 
     caller_path = rec_dir / "caller.wav"

@@ -19,3 +19,10 @@ alembic>=1.13
 SQLAlchemy>=2.0
 psycopg[binary]>=3.2
 PyYAML>=6.0
+# Python 3.13 removed the stdlib `audioop` module. We import it in
+# backend/twilio_bridge.py (mu-law ↔ PCM) and backend/recordings.py
+# (16 kHz → 24 kHz resample for the stereo call-recording mix).
+# `audioop-lts` is the maintained drop-in backport — same module name,
+# same API. Railpack resolves Python 3.13 by default on Railway, so
+# this pin is mandatory; on local Python 3.9-3.12 it's a no-op.
+audioop-lts>=0.2; python_version >= "3.13"
