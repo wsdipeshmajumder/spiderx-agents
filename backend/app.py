@@ -1216,13 +1216,25 @@ async def auth_otp_request(request: Request) -> dict:
             f"It expires in 10 minutes. If you didn't request this, ignore this email.\n\n"
             f"SpiderX AI, 84 W Santa Clara St, Suite 700, San Jose, CA 95113, USA\n"
         )
-        # Build 239 — brand-friendly OTP email: dark navy outer page,
-        # white rounded card with a gradient header carrying the
-        # SpiderX wordmark, big grey code block, "Valid for 10
-        # Minutes" caption, divider, safety instructions, address
-        # footer. Email-safe HTML: every layout block is a <table>,
-        # every colour/typography rule is inline (most clients strip
-        # <style>), no flex/grid.
+        # Build 242 — properly designed OTP email header.
+        #
+        # The previous version had three problems visible in real Gmail:
+        #   1. "SPIDERX.AI" rendered as a blue underlined LINK because
+        #      Gmail auto-detects domain-like text and hyperlinks it.
+        #   2. The right-side <img> URL was a hashed marketing-site
+        #      asset that 404'd, leaving a broken-image icon next to
+        #      the wordmark.
+        #   3. A redundant pink/purple avatar circle sat next to a
+        #      wordmark that already carries the brand mark.
+        #
+        # New header — centered, full-bleed gradient banner:
+        #   - Wordmark rendered as styled HTML TEXT, "spider" white +
+        #     "X" red (#df3739) + ".ai" white. Brand-correct, no image
+        #     to 404. An <a href="#"> wrapper with explicit color +
+        #     text-decoration:none defeats Gmail's auto-link on .ai.
+        #   - "PHONE AI AGENT BUILDER" eyebrow under it, small caps,
+        #     low-opacity white.
+        #   - No avatar circle. No external <img>. Pure text + gradient.
         html_body = (
             "<!doctype html><html><body style='margin:0;padding:32px 16px;"
             "background:#0a0d2e;font-family:-apple-system,BlinkMacSystemFont,"
@@ -1230,29 +1242,23 @@ async def auth_otp_request(request: Request) -> dict:
             "<table cellpadding='0' cellspacing='0' border='0' width='100%' "
             "style='max-width:540px;margin:0 auto;background:#ffffff;"
             "border-radius:14px;overflow:hidden;'>"
-            # ── Header banner (dark gradient + SpiderX wordmark) ────
-            "<tr><td style='padding:24px 28px 0;'>"
+            # ── Header banner (gradient + brand-text wordmark) ──────
+            "<tr><td style='padding:0;'>"
             "<table cellpadding='0' cellspacing='0' border='0' width='100%' "
-            "style='background:linear-gradient(120deg,#1a1138 0%,#2a1a4d 55%,#3a1d52 100%);"
-            "border-radius:12px;'>"
-            "<tr><td style='padding:18px 22px;' valign='middle' align='left'>"
-            "<table cellpadding='0' cellspacing='0' border='0'><tr>"
-            "<td valign='middle' style='padding-right:14px;'>"
-            "<div style='width:36px;height:36px;border-radius:50%;"
-            "background:linear-gradient(135deg,#ec4899,#a855f7);'></div>"
-            "</td>"
-            "<td valign='middle'>"
-            "<div style='font-size:16px;font-weight:700;color:#ffffff;"
-            "letter-spacing:.04em;'>SPIDERX.AI</div>"
-            "<div style='font-size:12px;color:rgba(255,255,255,0.75);margin-top:2px;'>"
-            "Phone AI Agent Builder</div>"
+            "style='background:linear-gradient(120deg,#1a1138 0%,#2a1a4d 55%,#3a1d52 100%);'>"
+            "<tr><td align='center' style='padding:34px 28px 30px;'>"
+            "<a href='#' style='display:inline-block;font-size:32px;"
+            "font-weight:800;letter-spacing:-0.02em;text-decoration:none !important;"
+            "color:#ffffff !important;line-height:1;'>"
+            "<span style='color:#ffffff;'>spider</span>"
+            "<span style='color:#df3739;'>X</span>"
+            "<span style='color:#ffffff;'>.ai</span>"
+            "</a>"
+            "<div style='font-size:11px;font-weight:600;"
+            "letter-spacing:0.18em;text-transform:uppercase;"
+            "color:rgba(255,255,255,0.65);margin-top:12px;'>"
+            "Phone AI agent builder</div>"
             "</td></tr></table>"
-            "</td>"
-            "<td align='right' valign='middle' style='padding:18px 22px;'>"
-            "<img src='https://spiderx.ai/assets/spiderx-white-logo-DOHUzGmy.svg' "
-            "alt='SpiderX.AI' height='22' style='display:inline-block;height:22px;width:auto;' />"
-            "</td>"
-            "</tr></table>"
             "</td></tr>"
             # ── Intro text ─────────────────────────────────────────
             "<tr><td style='padding:24px 30px 4px;font-size:15px;line-height:1.6;color:#3a3f4d;'>"
