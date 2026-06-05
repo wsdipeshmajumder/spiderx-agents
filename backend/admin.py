@@ -102,6 +102,30 @@ async def admin_audit(request: Request, limit: int = 100, offset: int = 0,
     )
 
 
+# ─── per-agent health status (build 219) ─────────────────────────────────
+
+@router.get("/agents/health")
+async def admin_agents_health(request: Request) -> list[dict]:
+    """Latest healthcheck status per published agent. Reads the most
+    recent `agent.healthcheck.{passed,degraded,failed}` event per
+    agent via a LATERAL join (one tiny query, no N+1). Powers the
+    Observability page's Agent-Health card."""
+    await _admin_user(request)
+    from . import agent_healthcheck as _ahc
+    return await _ahc.latest_status_per_agent()
+
+
+@router.post("/agents/health/run-now")
+async def admin_agents_health_run_now(request: Request) -> dict:
+    """Out-of-band trigger — same hourly probe but on-demand. Useful
+    for verifying a fix didn't regress without waiting for the next
+    :05 of the hour."""
+    await _admin_user(request)
+    from . import agent_healthcheck as _ahc
+    await _ahc.run_hourly_healthchecks()
+    return {"ok": True}
+
+
 # ─── lookups for admin filter bar (build 202) ────────────────────────────
 
 @router.get("/orgs-lookup")

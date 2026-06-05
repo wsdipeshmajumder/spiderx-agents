@@ -256,6 +256,11 @@ KINDS = {
     "agent.created", "agent.updated", "agent.published", "agent.unpublished",
     "agent.deleted", "agent.purpose.changed", "agent.knowledge.imported",
     "agent.info_groups.regenerated", "agent.voice.changed",
+    # agent health (build 219 — hourly per-agent WS handshake probe)
+    "agent.healthcheck.passed", "agent.healthcheck.degraded",
+    "agent.healthcheck.failed", "agent.healthcheck.summary",
+    # recordings (build 206)
+    "recording.purged", "recording.purge.error",
     # calls
     "call.completed", "call.abandoned", "call.outcome.captured",
     # cost
