@@ -5148,7 +5148,12 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   flex-direction: column;
   background: #f7f8fa;
   color: #1a1a1a;
-  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", "Helvetica Neue", sans-serif;
+  /* Build 225 — bumped 14 → 15.5px site-wide. Body copy, form labels
+   * and table rows all inherit, so the dashboard reads closer to the
+   * Vani reference's roomier text density without per-component edits.
+   * Pills + chips + status badges keep their own smaller sizes via
+   * their own rules (e.g. .db-status-pill is 11.5px on purpose). */
+  font: 15.5px/1.55 -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", "Helvetica Neue", sans-serif;
   letter-spacing: -0.005em;
   overflow: hidden;
   user-select: text;
@@ -5471,12 +5476,15 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 }
 
 .db-nav {
-  flex: 0 0 232px;
+  /* Build 225 — widened from 232 → 264 to match the Vani reference's
+   * roomier sidebar. Group labels + nav items breathe instead of
+   * truncating; "Voice & behaviour" no longer brushes the right edge. */
+  flex: 0 0 264px;
   background: #ffffff;
-  border-right: 1px solid #e6e7ec;
+  border-right: 1px solid var(--db-border, #e6e7ec);
   display: flex;
   flex-direction: column;
-  padding: 16px 12px;
+  padding: 16px 14px;
   overflow-y: auto;
 }
 .db-nav-primary {

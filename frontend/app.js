@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 224;
+const SXAI_BUILD = 225;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -4673,34 +4673,33 @@ function AgentOverviewPage({ agent, agents, presets, plan, stats, onTest, onGoLi
           </div>
         </section>
 
-        <!-- Build 221 — right rail wraps Next steps + Cost Breakdown
-             so they stack neatly in the second grid column instead of
-             one wrapping to a new row. -->
-        <div class="db-overview-rail">
-          <aside class="db-next-steps">
-            <header class="db-next-steps-head">
-              <h3 class="db-next-steps-title">Next steps</h3>
-              ${isFresh ? html`<span class="db-next-steps-fresh"><span aria-hidden="true">✨</span> New</span>` : ""}
-            </header>
-            <ol class="db-next-steps-list">
-              ${steps.map((s, i) => html`
-                <li class=${"db-next-step" + (s.done ? " done" : "")} key=${s.key}>
-                  <span class="db-next-step-num">${s.done ? html`<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>` : i + 1}</span>
-                  <div class="db-next-step-body">
-                    <div class="db-next-step-title">${s.title}</div>
-                    <div class="db-next-step-sub">${s.sub}</div>
-                  </div>
-                  <button type="button"
-                          class=${"db-btn-sm " + (s.primary ? "db-btn-primary" : "db-btn-ghost")}
-                          onClick=${s.onClick}>
-                    ${s.cta}
-                  </button>
-                </li>
-              `)}
-            </ol>
-          </aside>
-          <${CostBreakdownCard} agentId=${agent.id} />
-        </div>
+        <!-- Build 225 — Cost Breakdown card removed from the
+             dashboard Overview per operator feedback. Component +
+             endpoint stay around (mounted from the admin LLM ledger
+             page) but the customer-facing dashboard stays focused
+             on what to DO next, not what to pay. -->
+        <aside class="db-next-steps">
+          <header class="db-next-steps-head">
+            <h3 class="db-next-steps-title">Next steps</h3>
+            ${isFresh ? html`<span class="db-next-steps-fresh"><span aria-hidden="true">✨</span> New</span>` : ""}
+          </header>
+          <ol class="db-next-steps-list">
+            ${steps.map((s, i) => html`
+              <li class=${"db-next-step" + (s.done ? " done" : "")} key=${s.key}>
+                <span class="db-next-step-num">${s.done ? html`<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>` : i + 1}</span>
+                <div class="db-next-step-body">
+                  <div class="db-next-step-title">${s.title}</div>
+                  <div class="db-next-step-sub">${s.sub}</div>
+                </div>
+                <button type="button"
+                        class=${"db-btn-sm " + (s.primary ? "db-btn-primary" : "db-btn-ghost")}
+                        onClick=${s.onClick}>
+                  ${s.cta}
+                </button>
+              </li>
+            `)}
+          </ol>
+        </aside>
       </div>
 
       <!--
