@@ -5890,13 +5890,22 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 :root[data-theme="dark"] .db-nav-item-badge.is-draft { background: #2a2e44; color: #8a91a4; }
 .db-nav-foot {
   margin-top: auto;
-  /* Row layout: "Free plan" + Upgrade pill share one tight line, with
-     the pill on the right. Flex with justify-between AND a moderate
-     gap so we don't get a yawning whitespace gulf between the label
-     and the button — that gap was making the saturated pill look
-     marooned in the corner. */
-  padding: 12px 10px 8px;
-  border-top: 1px solid #f0f0f3;
+  /* Build 243 — make the plan footer ALWAYS VISIBLE inside the
+     sidebar's scroll. `position: sticky; bottom: 0;` pins the row
+     to the bottom of the visible viewport regardless of how many
+     nav groups are expanded above. The negative horizontal margin
+     + matching padding bleed the footer's background out to the
+     sidebar's edges so a scrolling nav item can't peek through the
+     gap between footer and aside border. A solid bg + top border
+     keep the boundary visible when content scrolls underneath. */
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  background: #ffffff;
+  margin-left: -14px;   /* cancels .db-nav padding-left */
+  margin-right: -14px;  /* cancels .db-nav padding-right */
+  padding: 12px 24px 10px;  /* 10 base + 14 to replace what we cancelled */
+  border-top: 1px solid #eaebef;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -8507,6 +8516,11 @@ button.oc-kind:disabled { cursor: default; }
   color: #ffffff;
 }
 :root[data-theme="dark"] .db-nav-foot {
+  /* Build 243 — match the sidebar's dark background (#0f1119, see
+     :root[data-theme="dark"] .db-nav above) so the sticky footer
+     doesn't show a brighter strip behind itself when content scrolls
+     underneath. */
+  background: #0f1119;
   border-top-color: #1f2230;
   color: #8a8e9c;
 }
