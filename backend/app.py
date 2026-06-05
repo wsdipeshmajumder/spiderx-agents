@@ -117,7 +117,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 240
+APP_BUILD = 241
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1211,16 +1211,86 @@ async def auth_otp_request(request: Request) -> dict:
         from . import email_stub as _es
         subject = f"Your SpiderX.AI sign-in code · {code}"
         text = (
+            f"You requested to sign in to your SpiderX.AI account.\n\n"
             f"Your sign-in code is: {code}\n\n"
-            f"It expires in 10 minutes. If you didn't request this, ignore this email.\n"
+            f"It expires in 10 minutes. If you didn't request this, ignore this email.\n\n"
+            f"SpiderX AI, 84 W Santa Clara St, Suite 700, San Jose, CA 95113, USA\n"
         )
+        # Build 239 — brand-friendly OTP email: dark navy outer page,
+        # white rounded card with a gradient header carrying the
+        # SpiderX wordmark, big grey code block, "Valid for 10
+        # Minutes" caption, divider, safety instructions, address
+        # footer. Email-safe HTML: every layout block is a <table>,
+        # every colour/typography rule is inline (most clients strip
+        # <style>), no flex/grid.
         html_body = (
-            f"<p>Your sign-in code is:</p>"
-            f"<p style='font-family:monospace;font-size:28px;letter-spacing:6px;"
-            f"font-weight:700;color:#1f2230;background:#f3f4f7;padding:14px 18px;"
-            f"border-radius:10px;display:inline-block;'>{code}</p>"
-            f"<p style='color:#6a6f7d;font-size:13px;margin-top:14px;'>"
-            f"Expires in 10 minutes. If you didn't request this, ignore this email.</p>"
+            "<!doctype html><html><body style='margin:0;padding:32px 16px;"
+            "background:#0a0d2e;font-family:-apple-system,BlinkMacSystemFont,"
+            "\"Segoe UI\",Helvetica,Arial,sans-serif;color:#1f2230;'>"
+            "<table cellpadding='0' cellspacing='0' border='0' width='100%' "
+            "style='max-width:540px;margin:0 auto;background:#ffffff;"
+            "border-radius:14px;overflow:hidden;'>"
+            # ── Header banner (dark gradient + SpiderX wordmark) ────
+            "<tr><td style='padding:24px 28px 0;'>"
+            "<table cellpadding='0' cellspacing='0' border='0' width='100%' "
+            "style='background:linear-gradient(120deg,#1a1138 0%,#2a1a4d 55%,#3a1d52 100%);"
+            "border-radius:12px;'>"
+            "<tr><td style='padding:18px 22px;' valign='middle' align='left'>"
+            "<table cellpadding='0' cellspacing='0' border='0'><tr>"
+            "<td valign='middle' style='padding-right:14px;'>"
+            "<div style='width:36px;height:36px;border-radius:50%;"
+            "background:linear-gradient(135deg,#ec4899,#a855f7);'></div>"
+            "</td>"
+            "<td valign='middle'>"
+            "<div style='font-size:16px;font-weight:700;color:#ffffff;"
+            "letter-spacing:.04em;'>SPIDERX.AI</div>"
+            "<div style='font-size:12px;color:rgba(255,255,255,0.75);margin-top:2px;'>"
+            "Phone AI Agent Builder</div>"
+            "</td></tr></table>"
+            "</td>"
+            "<td align='right' valign='middle' style='padding:18px 22px;'>"
+            "<img src='https://spiderx.ai/assets/spiderx-white-logo-DOHUzGmy.svg' "
+            "alt='SpiderX.AI' height='22' style='display:inline-block;height:22px;width:auto;' />"
+            "</td>"
+            "</tr></table>"
+            "</td></tr>"
+            # ── Intro text ─────────────────────────────────────────
+            "<tr><td style='padding:24px 30px 4px;font-size:15px;line-height:1.6;color:#3a3f4d;'>"
+            "Hi there — here's the one-time code to finish signing in to "
+            "<b>SpiderX.AI</b>. Pop it into the browser tab you came from:"
+            "</td></tr>"
+            # ── Code block ─────────────────────────────────────────
+            "<tr><td align='center' style='padding:18px 30px 6px;'>"
+            "<div style='background:#f4f5f9;border-radius:14px;padding:36px 24px;'>"
+            f"<div style='font-family:ui-monospace,\"SF Mono\",Menlo,Consolas,monospace;"
+            f"font-size:46px;font-weight:600;letter-spacing:0.12em;"
+            f"color:#1f2230;line-height:1;'>{code}</div>"
+            "</div>"
+            "</td></tr>"
+            # ── Caption ───────────────────────────────────────────
+            "<tr><td align='center' style='padding:14px 30px 22px;'>"
+            "<div style='font-size:15px;font-weight:700;color:#1f2230;'>One-time sign-in code</div>"
+            "<div style='font-size:12.5px;color:#6a6f7d;margin-top:3px;'>Expires in 10 minutes</div>"
+            "</td></tr>"
+            # ── Divider ───────────────────────────────────────────
+            "<tr><td style='padding:0 30px;'>"
+            "<div style='height:1px;background:#eef0f4;'></div>"
+            "</td></tr>"
+            # ── Safety note ───────────────────────────────────────
+            "<tr><td style='padding:22px 30px 18px;font-size:13.5px;line-height:1.6;color:#3a3f4d;'>"
+            "Didn't ask for this code? You can safely ignore the email — "
+            "the code expires on its own. If you've noticed anything off "
+            "with your account, drop us a line at "
+            "<a href='mailto:support@spiderx.ai' style='color:#3b82f6;text-decoration:none;'>"
+            "support@spiderx.ai</a> and we'll take a look."
+            "</td></tr>"
+            # ── Footer (address) ──────────────────────────────────
+            "<tr><td align='center' style='padding:22px 30px 28px;font-size:12px;"
+            "color:#9095a3;line-height:1.6;'>"
+            "SpiderX AI, 84 W Santa Clara St, Suite 700, San Jose, CA 95113, USA"
+            "</td></tr>"
+            "</table>"
+            "</body></html>"
         )
         await _es._send(email, subject, text, html_body=html_body)
     except Exception as e:  # noqa: BLE001
