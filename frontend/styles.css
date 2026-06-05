@@ -7727,6 +7727,29 @@ button.oc-kind:disabled { cursor: default; }
     radial-gradient(circle at 60% 35%, rgba(59, 130, 246, 0.10), transparent 70%),
     linear-gradient(180deg, #0a0617 0%, #06050c 60%, #1a0d33 100%);
 }
+/* Build 237 — background video covers the left panel; object-fit:cover
+ * keeps it filling regardless of viewport aspect ratio. The veil is a
+ * dark overlay (radial spotlight on the centre) so foreground text +
+ * showcase stay legible without dimming the video into mud. */
+.sx-auth-bgvideo {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  z-index: 0;
+  pointer-events: none;
+  /* Prevent any flash of system controls on Safari. */
+  background: transparent;
+}
+.sx-auth-veil {
+  position: absolute; inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 50% at 50% 50%, rgba(6, 5, 12, 0.18) 0%, rgba(6, 5, 12, 0.55) 100%),
+    linear-gradient(180deg, rgba(6, 5, 12, 0.35) 0%, rgba(6, 5, 12, 0.55) 100%);
+}
+/* Lift the inner content above the video + veil. */
+.sx-auth-left-inner { position: relative; z-index: 2; }
 /* Star field — CSS-only, no image, no animation cost. Uses a stacked
  * radial-gradient pattern of tiny white dots to simulate stars. */
 .sx-auth-stars {

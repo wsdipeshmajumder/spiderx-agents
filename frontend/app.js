@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 236;
+const SXAI_BUILD = 237;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -3468,7 +3468,17 @@ function AuthPage({ mode, defaults, onAuthed, onSwitch }) {
     <div class="sx-auth-split">
       <!-- Left panel: dark starry background, brand + showcase + trust strip -->
       <aside class="sx-auth-left">
+        <!-- Build 237 — animated SpiderX background video. autoPlay +
+             muted + loop + playsInline so it plays on iOS and never
+             triggers an audio-permission prompt. The CSS-only stars
+             rule below stays as a fallback for the rare case the
+             video fails to decode. -->
+        <video class="sx-auth-bgvideo" aria-hidden="true"
+               autoPlay muted loop playsInline preload="auto">
+          <source src="/static/assets/spiderx-background.mp4" type="video/mp4" />
+        </video>
         <div class="sx-auth-stars" aria-hidden="true"></div>
+        <div class="sx-auth-veil" aria-hidden="true"></div>
         <div class="sx-auth-left-inner">
           <a class="sx-auth-logo" href="/" aria-label="SpiderX.AI">
             <img src="https://spiderx.ai/assets/spiderx-white-logo-DOHUzGmy.svg"
