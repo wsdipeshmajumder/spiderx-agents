@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 221;
+const SXAI_BUILD = 222;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -3658,12 +3658,15 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
           <span class="db-topbar-logo">
             <${SpiderXLogo} height=${29} />
           </span>
-          <span class="db-topbar-tag">AI Agent Builder</span>
-          <!-- Agent switcher moved INTO the sidebar primary block — see
-               .db-nav-primary-switch below. The topbar stays focused on
-               brand + plan + user, the sidebar owns "what am I looking at +
-               where do I want to go". -->
+          <!-- Build 222 — "AI Agent Builder" tag retained on the homepage
+               header but suppressed in the dashboard topbar so the
+               workspace selector + breadcrumb get room to breathe. -->
         </a>
+        <!-- Build 222 — workspace selector + breadcrumb live between the
+             brand mark and the right-side cluster. Workspace tells you
+             WHICH org you're in; breadcrumb tells you WHERE in it. -->
+        <${WorkspaceSelector} onNav=${navTo} />
+        <${Breadcrumb} agent=${agent} title=${title} onNav=${navTo} />
         <div class="db-topbar-right">
           <button class="db-topbar-support" type="button" onClick=${() => setSupportOpen(true)}>Help</button>
           <div class="db-topbar-minutes">
@@ -4413,6 +4416,104 @@ function CostBreakdownCard({ agentId }) {
     </section>
   `;
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// WorkspaceSelector (build 222) — small pill in the topbar showing the
+// active workspace name + member count, with a popover to switch orgs
+// when the user belongs to more than one. Single-workspace users get
+// a quiet name-only chip with no dropdown affordance.
+// ─────────────────────────────────────────────────────────────────────────
+function WorkspaceSelector({ onNav }) {
+  const [orgs, setOrgs] = useState(null);
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    fetch("/api/me/orgs")
+      .then((r) => r.ok ? r.json() : [])
+      .then((arr) => setOrgs(Array.isArray(arr) ? arr : []))
+      .catch(() => setOrgs([]));
+  }, []);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  if (!orgs || orgs.length === 0) return null;
+  const current = orgs.find((o) => o.is_current) || orgs[0];
+  const hasMany = orgs.length > 1;
+  return html`
+    <div class="db-topbar-ws" ref=${ref}>
+      <button class=${"db-topbar-ws-pill" + (hasMany ? " has-many" : "")}
+              type="button"
+              onClick=${hasMany ? () => setOpen((o) => !o) : () => onNav && onNav("/account/org")}
+              title=${hasMany ? "Switch workspace" : "Open workspace settings"}>
+        <span class="db-topbar-ws-name">${current.name}</span>
+        <span class="db-topbar-ws-meta">${current.members_n} Member${current.members_n === 1 ? "" : "s"}</span>
+        ${hasMany ? html`
+          <svg class="db-topbar-ws-chev" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 9l6 6 6-6"/></svg>
+        ` : ""}
+      </button>
+      ${open && hasMany ? html`
+        <div class="db-topbar-ws-menu" role="listbox">
+          <div class="db-topbar-ws-menu-head">Switch workspace</div>
+          ${orgs.map((o) => html`
+            <button key=${o.id} type="button"
+                    class=${"db-topbar-ws-item" + (o.is_current ? " is-current" : "")}
+                    onClick=${() => { setOpen(false); /* TODO: switch — needs POST /api/me/org */ }}>
+              <span class="db-topbar-ws-item-name">${o.name}</span>
+              <span class="db-topbar-ws-item-meta">${o.members_n} Member${o.members_n === 1 ? "" : "s"} · ${o.role}</span>
+              ${o.is_current ? html`<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>` : ""}
+            </button>
+          `)}
+          <div class="db-topbar-ws-menu-foot">
+            <button class="db-topbar-ws-foot-btn" type="button"
+                    onClick=${() => { setOpen(false); onNav && onNav("/account/org"); }}>
+              Workspace settings →
+            </button>
+          </div>
+        </div>
+      ` : ""}
+    </div>
+  `;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Breadcrumb (build 222) — light text crumb that sits in the topbar
+// to the right of the brand. Derives segments from the agent (if any)
+// + the page's title prop so each dashboard page renders its own
+// route string without a global router. Clicking each segment
+// navigates one level up.
+// ─────────────────────────────────────────────────────────────────────────
+function Breadcrumb({ agent, title, onNav }) {
+  // Crumbs from root → current. Root is "Agents" since the dashboard
+  // shell is per-agent and the operator never lands on a true root.
+  // Agent name links back to that agent's Overview.
+  const segs = [{ label: "Agents", route: "/agents" }];
+  if (agent && agent.name) {
+    segs.push({ label: agent.name, route: `/agent/${agent.slug || agent.id}` });
+  }
+  if (title && (!agent || title !== "Overview")) {
+    segs.push({ label: title, route: null });  // current page — no link
+  }
+  return html`
+    <nav class="db-topbar-crumb" aria-label="Breadcrumb">
+      ${segs.map((s, i) => html`
+        ${i > 0 ? html`<span class="db-topbar-crumb-sep" aria-hidden="true">/</span>` : ""}
+        ${s.route
+          ? html`<button class="db-topbar-crumb-link" type="button"
+                         onClick=${() => onNav && onNav(s.route)}>${s.label}</button>`
+          : html`<span class="db-topbar-crumb-now">${s.label}</span>`}
+      `)}
+    </nav>
+  `;
+}
+
 
 function AgentOverviewPage({ agent, agents, presets, plan, stats, onTest, onGoLive, onEdit, onTestPhone, onNav }) {
   const labelFor = (list, id) => (list || []).find((x) => x.id === id)?.label || _prettifyEnumId(id);

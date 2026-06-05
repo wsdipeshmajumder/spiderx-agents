@@ -97,7 +97,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 221
+APP_BUILD = 222
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -159,6 +159,32 @@ async def get_my_org(request: Request) -> dict:
     if not org:
         raise HTTPException(status_code=404, detail="org not found")
     return org
+
+
+@app.get("/api/me/orgs")
+async def list_my_orgs(request: Request) -> list[dict]:
+    """Every org the user is a member of, with their role + member
+    count. Powers the workspace selector pill in the dashboard topbar
+    (build 222). Tiny payload — fetched once on shell mount."""
+    user = await current_user(request)
+    rows = await db.list_orgs_for_user(user["id"])
+    # Enrich each row with member count + active flag so the selector
+    # can render "Dipesh's workspace · 2 Members" + a tick on the
+    # current org without a second round-trip.
+    primary = await db.get_org_for_user(user["id"])
+    primary_id = primary.get("id") if primary else None
+    out = []
+    for r in rows:
+        members = await db.list_org_members(int(r["id"])) or []
+        out.append({
+            "id":           r["id"],
+            "name":         r.get("name") or "your workspace",
+            "country":      r.get("country"),
+            "role":         r.get("role"),
+            "members_n":    len(members),
+            "is_current":   r["id"] == primary_id,
+        })
+    return out
 
 
 @app.patch("/api/me/org")
