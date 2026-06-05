@@ -3459,15 +3459,19 @@ function AuthPage({ mode, defaults, onAuthed, onSwitch }) {
     }
   };
 
-  // Feature pills on the left showcase. Sector-agnostic so the page
-  // doesn't lie when the operator's about to log into any kind of
-  // agent — these describe the platform, not one demo agent.
+  // Build 238 — pills genuinely sector-agnostic now. The previous list
+  // ("Make & modify reservations", "Manage multiple venues") was
+  // restaurant-specific copy lying under a "sector-agnostic" comment.
+  // These are HIGH-LEVEL platform benefits any operator recognises
+  // — booking, qualifying, FAQ, transfer, recording — irrespective
+  // of whether they run a dental clinic, dealership or salon.
   const showcasePills = [
-    "Make & modify reservations",
-    "Adds guest notes and tags",
-    "Manage multiple venues",
-    "Customer feedback collection",
-    "Real-time analytics and insights",
+    "Answers every call · 24×7",
+    "Books appointments on the spot",
+    "Qualifies leads + captures intent",
+    "Speaks your customer's language",
+    "Transfers when a human is needed",
+    "Full transcript + recording every call",
   ];
 
   return html`
@@ -3487,20 +3491,28 @@ function AuthPage({ mode, defaults, onAuthed, onSwitch }) {
         <div class="sx-auth-veil" aria-hidden="true"></div>
         <div class="sx-auth-left-inner">
           <a class="sx-auth-logo" href="/" aria-label="SpiderX.AI">
-            <img src="https://spiderx.ai/assets/spiderx-white-logo-DOHUzGmy.svg"
-                 alt="SpiderX.AI" height="40" />
+            <!-- Build 238 — was an <img> pointing at a hashed
+                 marketing-site URL that 404'd, leaving a broken-image
+                 icon. Swap to the in-app inline SVG wordmark, which
+                 inherits currentColor (white on this dark panel). -->
+            <${SpiderXLogo} height=${36} />
           </a>
           <div class="sx-auth-showcase">
-            <div class="sx-auth-showcase-eyebrow">You have selected</div>
+            <div class="sx-auth-showcase-eyebrow">Your front office, on autopilot</div>
             <div class="sx-auth-showcase-card">
-              <div class="sx-auth-showcase-avatar" aria-hidden="true">D</div>
-              <div class="sx-auth-showcase-meta">
-                <div class="sx-auth-showcase-name">Dineo</div>
-                <div class="sx-auth-showcase-role">Restaurant booking agent</div>
+              <!-- Build 238 — was "Dineo · Restaurant booking agent",
+                   which lied at users from non-restaurant industries.
+                   Replaced with the platform's own brand mark + a
+                   sector-neutral one-liner. -->
+              <div class="sx-auth-showcase-avatar" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 2.08 4.18 2 2 0 0 1 4 2h3a2 2 0 0 1 2 1.72c.13.96.37 1.9.7 2.81a2 2 0 0 1-.45 2.11L8 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.33 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/>
+                </svg>
               </div>
-              <button class="sx-auth-showcase-switch" type="button" aria-label="Switch agent">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M7 7h10M17 7l-3-3M17 7l-3 3M17 17H7M7 17l3-3M7 17l3 3"/></svg>
-              </button>
+              <div class="sx-auth-showcase-meta">
+                <div class="sx-auth-showcase-name">Phone AI agents</div>
+                <div class="sx-auth-showcase-role">Built in minutes · works in any industry</div>
+              </div>
             </div>
             <div class="sx-auth-pills">
               ${showcasePills.map((p, i) => html`

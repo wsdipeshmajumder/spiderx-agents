@@ -7831,6 +7831,7 @@ button.oc-kind:disabled { cursor: default; }
   font-size: 18px; font-weight: 700;
   flex: 0 0 48px;
 }
+.sx-auth-showcase-avatar svg { display: block; }
 .sx-auth-showcase-meta { flex: 1; text-align: left; }
 .sx-auth-showcase-name { font-size: 18px; font-weight: 700; letter-spacing: -0.005em; }
 .sx-auth-showcase-role { font-size: 12.5px; color: #6a6f7d; margin-top: 2px; }
@@ -7863,15 +7864,34 @@ button.oc-kind:disabled { cursor: default; }
   letter-spacing: 0.01em;
 }
 
-/* Right panel — white card. */
+/* Right panel — soft canvas behind the actual login card.
+ * Build 238 — was solid white with the form floating raw on it; user
+ * asked for the form to read as a rounded card. So the PANEL goes
+ * soft grey + the CARD goes white-on-white with a border, rounded
+ * corners and a subtle elevation. */
 .sx-auth-right {
   display: flex; align-items: center; justify-content: center;
-  background: #ffffff;
+  background: #f5f6fa;
   padding: 40px 32px;
 }
 .sx-auth-card {
-  width: 100%; max-width: 420px;
+  width: 100%; max-width: 440px;
   display: flex; flex-direction: column; gap: 16px;
+  background: #ffffff;
+  border: 1px solid #e6e7ec;
+  border-radius: 20px;
+  padding: 36px 36px 32px;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 12px 32px rgba(15, 23, 42, 0.06);
+}
+:root[data-theme="dark"] .sx-auth-right { background: #0b0d14; }
+:root[data-theme="dark"] .sx-auth-card {
+  background: #14171f;
+  border-color: rgba(255,255,255,0.08);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    0 12px 32px rgba(0, 0, 0, 0.45);
 }
 .sx-auth-title {
   margin: 0;
