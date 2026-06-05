@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 245;
+const SXAI_BUILD = 246;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -16697,6 +16697,12 @@ function App() {
           && !accountPage
         );
         const fevaVisible = (
+          // Build 244 — admin feature flag. `features.eva_assist` lives
+          // in platform_settings; /api/me ships it as `user.features.eva_assist`.
+          // Default to TRUE when the field is missing so older /me payloads
+          // (or boot races where user hasn't loaded yet) don't accidentally
+          // disable the helper.
+          (user?.features?.eva_assist !== false) &&
           agents.length > 0 &&
           splashGone &&
           view === "landing" &&

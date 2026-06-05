@@ -117,7 +117,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 245
+APP_BUILD = 247
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -169,6 +169,16 @@ async def get_me(request: Request) -> dict:
     user["plan_state"] = await db.get_user_plan_state(user["id"])
     user["org"] = await db.get_org_for_user(user["id"])
     user["is_super_admin"] = await db.is_super_admin(user["id"])
+    # Build 244 — publish the small set of platform feature flags the
+    # SPA gates UI on. Settings live in the platform_settings table
+    # (cached by backend/settings.py); read the ones the frontend
+    # actually consults and pass them through as a small `features`
+    # object. Keep the list narrow so /me stays tight.
+    from . import settings as cfg
+    user["features"] = {
+        "eva_assist":   bool(await cfg.get("features.eva_assist", True)),
+        "ambience_beta": bool(await cfg.get("features.ambience_beta", True)),
+    }
     return user
 
 
@@ -1181,28 +1191,23 @@ def _otp_make() -> str:
     return f"{_secrets.randbelow(1_000_000):06d}"
 
 
-# ─── Brand-mark data URI for transactional email (build 245) ────────────
-# Read the white-on-transparent SpiderX logo once at module load and
-# base64-encode it. Embedded as a data URI inside every OTP email's
-# <img> tag so:
-#   - No external HTTP fetch — every email client renders the same
-#     mark regardless of network reachability to our static server.
-#   - No 404 risk — the previous version pointed at a hashed
-#     marketing-site asset that drifted.
-#   - Gmail / Apple Mail / Outlook-web all render embedded data URIs.
-#     Outlook desktop (pre-2019, Word renderer) is the lone weak spot
-#     and shows the alt-text; acceptable trade-off.
-def _load_brand_data_uri() -> str:
+# ─── Brand-mark bytes for transactional email (build 246) ──────────────
+# Load the white-on-transparent SpiderX logo once at module import.
+# Used as a MIME inline attachment (Content-ID: <spiderx-logo>) on
+# every OTP email. Previous data-URI attempt (build 245) didn't render
+# in Gmail — Gmail BLOCKS `data:` URIs in <img src> for security.
+# CID-attached <img src="cid:spiderx-logo"> is the only path that
+# reliably shows in Gmail + Apple Mail + Outlook all at once.
+_BRAND_LOGO_CID = "spiderx-logo"
+def _load_brand_bytes() -> bytes:
     try:
-        import base64 as _b64
         svg_path = Path(__file__).resolve().parent.parent / "frontend" / "assets" / "spiderx-logo-white.svg"
-        raw = svg_path.read_bytes()
-        return "data:image/svg+xml;base64," + _b64.b64encode(raw).decode("ascii")
+        return svg_path.read_bytes()
     except Exception as _e:  # noqa: BLE001
-        log.warning("brand.data_uri_load_failed err=%s", _e)
-        return ""
+        log.warning("brand.bytes_load_failed err=%s", _e)
+        return b""
 
-_BRAND_LOGO_DATA_URI = _load_brand_data_uri()
+_BRAND_LOGO_BYTES = _load_brand_bytes()
 
 
 @app.post("/api/auth/otp/request")
@@ -1271,19 +1276,21 @@ async def auth_otp_request(request: Request) -> dict:
             "<table cellpadding='0' cellspacing='0' border='0' width='100%' "
             "style='background:linear-gradient(120deg,#1a1138 0%,#2a1a4d 55%,#3a1d52 100%);'>"
             "<tr><td align='center' style='padding:34px 28px 30px;'>"
-            # Build 245 — real SpiderX SVG logo (white wordmark + red X)
-            # embedded as a base64 data URI. Renders pixel-perfect in
-            # Gmail / Apple Mail / Outlook-web. If a client strips
-            # data-URI images (older Outlook desktop), the alt text
-            # "spiderX.ai" still reads the brand.
+            # Build 246 — real SpiderX SVG (white wordmark + red X)
+            # attached as a MIME inline image with Content-ID
+            # `<spiderx-logo>`, referenced via cid:spiderx-logo. This
+            # is the ONLY reliable path: Gmail blocks data: URIs and
+            # rate-limits external image fetches, so neither inline
+            # nor hosted <img src> worked. The CID-attached pattern
+            # ships the bytes alongside the HTML body in a
+            # multipart/related envelope. If the brand bytes failed
+            # to load at module import, fall back to the styled-text
+            # wordmark so the email still has SOMETHING brand-correct.
             + (
-                f"<img src='{_BRAND_LOGO_DATA_URI}' alt='spiderX.ai' "
+                f"<img src='cid:{_BRAND_LOGO_CID}' alt='spiderX.ai' "
                 f"height='44' style='display:inline-block;height:44px;"
                 f"width:auto;border:0;outline:none;text-decoration:none;' />"
-                if _BRAND_LOGO_DATA_URI else
-                # Fallback to the styled-text wordmark if the SVG file
-                # couldn't be loaded at module import — keeps the email
-                # from going out logo-less.
+                if _BRAND_LOGO_BYTES else
                 "<a href='#' style='display:inline-block;font-size:32px;"
                 "font-weight:800;letter-spacing:-0.02em;text-decoration:none !important;"
                 "color:#ffffff !important;line-height:1;'>"
@@ -1336,7 +1343,17 @@ async def auth_otp_request(request: Request) -> dict:
             "</table>"
             "</body></html>"
         )
-        await _es._send(email, subject, text, html_body=html_body)
+        # Build 246 — attach the brand SVG as an inline MIME image so
+        # the cid:spiderx-logo reference in the HTML resolves to a real
+        # asset in the recipient's client. Empty dict if the bytes
+        # failed to load at import time; the email template falls back
+        # to the styled-text wordmark in that case.
+        inline_imgs = (
+            {_BRAND_LOGO_CID: _BRAND_LOGO_BYTES}
+            if _BRAND_LOGO_BYTES else None
+        )
+        await _es._send(email, subject, text, html_body=html_body,
+                        inline_images=inline_imgs)
     except Exception as e:  # noqa: BLE001
         log.warning("auth.otp.request email_failed addr=%s err=%s", email, e)
     return {"ok": True}

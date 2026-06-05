@@ -15,9 +15,10 @@ import json
 import logging
 import os
 import smtplib
+from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.utils import formataddr
+from email.utils import formataddr, make_msgid
 from typing import Optional
 from urllib import request as urlrequest
 
@@ -54,20 +55,25 @@ def _report_recipient() -> Optional[str]:
 
 
 async def _send(to: str, subject: str, body: str,
-                *, html_body: Optional[str] = None) -> None:
+                *, html_body: Optional[str] = None,
+                inline_images: Optional[dict] = None) -> None:
     """The single chokepoint. Selects a provider, never raises.
 
     Build 198 — also emits a notify.email.sent / notify.email.failed
-    event so the Observability page tracks delivery health. Provider
-    failures stay best-effort: the event captures the failure mode
-    so ops can see Gmail rate-limiting or auth misconfig without
-    sifting through logs."""
+    event so the Observability page tracks delivery health.
+
+    Build 246 — optional `inline_images` dict (cid → bytes) for
+    embedded brand assets that don't survive an external <img src>
+    in Gmail (which blocks data: URIs and rate-limits external image
+    fetches). Each cid is referenced in the HTML as `cid:<cid>`. The
+    Gmail SMTP path wraps everything in multipart/related; other
+    providers ignore the param for now."""
     provider = _provider()
     sent_ok = False
     err_msg = None
     try:
         if provider == "gmail":
-            _send_gmail(to, subject, body, html_body=html_body)
+            _send_gmail(to, subject, body, html_body=html_body, inline_images=inline_images)
         elif provider == "postmark":
             _send_postmark(to, subject, body, html_body=html_body)
         elif provider == "resend":
@@ -113,35 +119,71 @@ def _post_json(url: str, headers: dict, payload: dict) -> dict:
 
 
 def _send_gmail(to: str, subject: str, body: str,
-                *, html_body: Optional[str] = None) -> None:
+                *, html_body: Optional[str] = None,
+                inline_images: Optional[dict] = None) -> None:
     """Send via Gmail's SMTP-over-SSL endpoint. Requires an App Password —
     the regular account password no longer works once 2-Step Verification
     is on. Generate at https://myaccount.google.com/apppasswords.
 
-    Multipart alternative — recipients with HTML rendering get the rich
-    layout, plain-text clients (terminal mail, screen-readers) get the
-    text body we already build. Email is multipart by design, not via
-    fallback, so both representations are available."""
+    MIME structure:
+      no inline images           → multipart/alternative (text + html)
+      with inline images (build  → multipart/related
+        246, e.g. brand logo)        ├── multipart/alternative (text + html)
+                                     └── MIMEImage(s) with Content-ID
+
+    Why multipart/related: Gmail BLOCKS `data:` URIs in <img src> for
+    security AND aggressively caches/strips external image fetches.
+    The CID-attached pattern is the only path that reliably renders
+    an embedded brand mark in every major client (Gmail, Apple Mail,
+    Outlook). The CID has to be wrapped in <...> in the Content-ID
+    header but referenced WITHOUT the angle brackets in the HTML
+    (e.g. `<img src='cid:spiderx-logo'>` references `<spiderx-logo>`).
+    """
     user = os.environ.get("EMAIL_USER")
     pwd = os.environ.get("EMAIL_PWD")
     if not (user and pwd):
         log.warning("gmail.creds_missing; falling back to log")
         log.info("email.send to=%s subject=%r\n%s", to, subject, body)
         return
-    msg = MIMEMultipart("alternative")
+
+    # Build the alternative (text + html) part first — it's always
+    # there regardless of inline-image attachments.
+    alt = MIMEMultipart("alternative")
+    alt.attach(MIMEText(body, "plain", "utf-8"))
+    if html_body:
+        alt.attach(MIMEText(html_body, "html", "utf-8"))
+
+    # If we have inline images, wrap the alternative in a `related`
+    # container and attach each MIMEImage with its Content-ID. The
+    # HTML references each one as `cid:<the-cid>`.
+    if inline_images:
+        msg = MIMEMultipart("related")
+        msg.attach(alt)
+        for cid, raw in inline_images.items():
+            if not raw:
+                continue
+            # Detect SVG by signature; everything else we treat as
+            # PNG (the most common email-friendly raster). subtype
+            # controls the MIME Content-Type the client sees.
+            subtype = "svg+xml" if raw.lstrip().startswith(b"<svg") or raw[:5] == b"<?xml" else "png"
+            img = MIMEImage(raw, _subtype=subtype)
+            img.add_header("Content-ID", f"<{cid}>")
+            img.add_header("Content-Disposition", "inline", filename=cid)
+            msg.attach(img)
+    else:
+        msg = alt
+
     msg["Subject"] = subject
     msg["From"] = formataddr(("SpiderX.AI", _from_address()))
     msg["To"] = to
-    msg.attach(MIMEText(body, "plain", "utf-8"))
-    if html_body:
-        msg.attach(MIMEText(html_body, "html", "utf-8"))
     # Gmail App Passwords ignore the visible spaces but accept them for
     # paste-convenience; strip just in case any provider tightens this.
     clean_pwd = (pwd or "").replace(" ", "")
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as s:
         s.login(user, clean_pwd)
         s.sendmail(_from_address(), [to], msg.as_string())
-    log.info("gmail.sent to=%s subject=%r", to, subject)
+    log.info("gmail.sent to=%s subject=%r inline=%d",
+             to, subject, len(inline_images or {}))
 
 
 def _send_postmark(to: str, subject: str, body: str,
