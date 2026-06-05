@@ -7706,6 +7706,235 @@ button.oc-kind:disabled { cursor: default; }
 }
 .db-user-item:hover { background: #f5f6f8; }
 
+/* ─── Split-layout auth page (build 236) ────────────────────────────────
+   Left: dark starry panel with the white SpiderX logo + showcase + trust
+   strip. Right: white card with the email → OTP → Google form. */
+.sx-auth-split {
+  position: fixed; inset: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: #06050c;
+  color: #f7f5ff;
+  overflow: hidden;
+  z-index: 50;
+}
+.sx-auth-left {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 25% 15%, rgba(99, 102, 241, 0.18), transparent 55%),
+    radial-gradient(circle at 80% 85%, rgba(168, 85, 247, 0.16), transparent 55%),
+    radial-gradient(circle at 60% 35%, rgba(59, 130, 246, 0.10), transparent 70%),
+    linear-gradient(180deg, #0a0617 0%, #06050c 60%, #1a0d33 100%);
+}
+/* Star field — CSS-only, no image, no animation cost. Uses a stacked
+ * radial-gradient pattern of tiny white dots to simulate stars. */
+.sx-auth-stars {
+  position: absolute; inset: 0;
+  background-image:
+    radial-gradient(1px 1px at 12% 18%, rgba(255,255,255,0.7), transparent 60%),
+    radial-gradient(1px 1px at 27% 62%, rgba(255,255,255,0.45), transparent 60%),
+    radial-gradient(1.5px 1.5px at 44% 9%,  rgba(255,255,255,0.55), transparent 60%),
+    radial-gradient(1px 1px at 65% 40%,  rgba(255,255,255,0.65), transparent 60%),
+    radial-gradient(1px 1px at 80% 75%,  rgba(255,255,255,0.4),  transparent 60%),
+    radial-gradient(1.5px 1.5px at 88% 25%, rgba(255,255,255,0.55), transparent 60%),
+    radial-gradient(1px 1px at 33% 88%,  rgba(255,255,255,0.5),  transparent 60%),
+    radial-gradient(1px 1px at 55% 78%,  rgba(255,255,255,0.45), transparent 60%),
+    radial-gradient(1.5px 1.5px at 18% 72%, rgba(255,255,255,0.55), transparent 60%),
+    radial-gradient(1px 1px at 92% 58%,  rgba(255,255,255,0.5),  transparent 60%),
+    radial-gradient(1px 1px at 7% 45%,   rgba(255,255,255,0.45), transparent 60%);
+  background-repeat: no-repeat;
+  pointer-events: none;
+}
+.sx-auth-left-inner {
+  position: relative;
+  height: 100%;
+  display: flex; flex-direction: column;
+  padding: 56px 64px;
+  gap: 48px;
+}
+.sx-auth-logo {
+  display: inline-flex; align-items: center;
+  line-height: 0;
+}
+.sx-auth-logo img { height: 40px; width: auto; }
+.sx-auth-showcase {
+  display: flex; flex-direction: column; gap: 22px;
+  margin: auto 0;
+  align-items: center; text-align: center;
+}
+.sx-auth-showcase-eyebrow {
+  font-size: 14px; color: rgba(255,255,255,0.6);
+  letter-spacing: 0.01em;
+}
+.sx-auth-showcase-card {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 22px 14px 14px;
+  background: rgba(255,255,255,0.94);
+  border-radius: 999px;
+  color: #1a1a1a;
+  box-shadow: 0 18px 40px rgba(0,0,0,0.35);
+  min-width: 320px;
+}
+.sx-auth-showcase-avatar {
+  width: 48px; height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ec4899, #a855f7);
+  color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 18px; font-weight: 700;
+  flex: 0 0 48px;
+}
+.sx-auth-showcase-meta { flex: 1; text-align: left; }
+.sx-auth-showcase-name { font-size: 18px; font-weight: 700; letter-spacing: -0.005em; }
+.sx-auth-showcase-role { font-size: 12.5px; color: #6a6f7d; margin-top: 2px; }
+.sx-auth-showcase-switch {
+  width: 36px; height: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  border: 0; border-radius: 50%;
+  color: #fff; cursor: pointer;
+}
+.sx-auth-pills {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  justify-content: center;
+  max-width: 520px;
+}
+.sx-auth-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.14);
+  font-size: 13px; color: #e7e9ee;
+  font-weight: 500;
+}
+.sx-auth-pill svg { color: #34d399; }
+.sx-auth-trust {
+  font-size: 12.5px;
+  color: rgba(255,255,255,0.55);
+  text-align: center;
+  letter-spacing: 0.01em;
+}
+
+/* Right panel — white card. */
+.sx-auth-right {
+  display: flex; align-items: center; justify-content: center;
+  background: #ffffff;
+  padding: 40px 32px;
+}
+.sx-auth-card {
+  width: 100%; max-width: 420px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+.sx-auth-title {
+  margin: 0;
+  font-size: 30px; font-weight: 700;
+  letter-spacing: -0.015em;
+  color: #1a1a1a;
+  line-height: 1.2;
+}
+.sx-auth-sub {
+  margin: 0;
+  font-size: 14.5px; color: #6a6f7d;
+  line-height: 1.5;
+}
+.sx-auth-form {
+  display: flex; flex-direction: column; gap: 10px;
+  margin-top: 8px;
+}
+.sx-auth-input {
+  width: 100%;
+  padding: 14px 16px;
+  font: inherit; font-size: 15px;
+  background: #f7f8fa;
+  border: 1px solid #e6e7ec;
+  border-radius: 10px;
+  color: #1a1a1a;
+  outline: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.sx-auth-input::placeholder { color: #9aa0ad; }
+.sx-auth-input:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.14);
+  background: #ffffff;
+}
+.sx-auth-input-otp {
+  text-align: center;
+  letter-spacing: 0.6em;
+  font-size: 22px; font-weight: 600;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+.sx-auth-error {
+  font-size: 13px;
+  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.sx-auth-cta {
+  margin-top: 6px;
+  padding: 14px 18px;
+  font: inherit; font-size: 15px; font-weight: 600;
+  background: #2563eb;
+  color: #ffffff;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: filter 0.12s ease, transform 0.06s ease;
+}
+.sx-auth-cta:hover:not(:disabled) { filter: brightness(1.06); }
+.sx-auth-cta:active:not(:disabled) { transform: translateY(1px); }
+.sx-auth-cta:disabled { opacity: 0.55; cursor: not-allowed; }
+.sx-auth-switch {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: 13.5px; color: #6a6f7d;
+  margin-top: 2px;
+}
+.sx-auth-switch button {
+  background: transparent; border: 0; padding: 0;
+  font: inherit; font-size: 13.5px; font-weight: 600;
+  color: #2563eb; cursor: pointer;
+}
+.sx-auth-switch button:hover:not(:disabled) { text-decoration: underline; }
+.sx-auth-switch button:disabled { color: #9aa0ad; cursor: not-allowed; }
+.sx-auth-or {
+  position: relative;
+  text-align: center;
+  margin: 8px 0;
+  color: #9aa0ad;
+  font-size: 12.5px;
+}
+.sx-auth-or::before, .sx-auth-or::after {
+  content: ""; position: absolute; top: 50%;
+  width: calc(50% - 60px); height: 1px;
+  background: #e6e7ec;
+}
+.sx-auth-or::before { left: 0; }
+.sx-auth-or::after { right: 0; }
+.sx-auth-google {
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 12px 16px;
+  font: inherit; font-size: 14.5px; font-weight: 500;
+  background: #ffffff;
+  color: #1a1a1a;
+  border: 1px solid #e6e7ec;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.sx-auth-google:hover:not(:disabled) { background: #f7f8fa; border-color: #d8dbe4; }
+.sx-auth-google:disabled { opacity: 0.55; cursor: not-allowed; }
+
+@media (max-width: 900px) {
+  .sx-auth-split { grid-template-columns: 1fr; }
+  .sx-auth-left { display: none; }
+  .sx-auth-right { padding: 24px 18px; }
+}
+
+/* Old auth (kept as fallback, not used by the new AuthPage) ─────────── */
 /* Auth pages — centred card, light theme */
 .db-auth {
   position: fixed;

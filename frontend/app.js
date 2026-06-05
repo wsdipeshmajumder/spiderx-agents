@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 235;
+const SXAI_BUILD = 236;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -3298,44 +3298,115 @@ function WizardView({ industry, locale, initialText, presets, onClose, onSwitchT
   `;
 }
 
-// Sign-in / sign-up — share the same shell so the visual rhythm matches.
-// Form fields render inside a centred card with the SpiderX wordmark up top
-// and the friendly tagline. Submitting hits /api/auth/(login|signup) and on
-// success persists the user via saveAuth() and routes home.
+// ─────────────────────────────────────────────────────────────────────────
+// AuthPage (build 236) — split-layout passwordless login: email + 6-digit
+// OTP on the right card, marketing showcase on the left dark panel,
+// Firebase-backed Google sign-in at the bottom.
+//
+// Three states drive the right card:
+//   "email" — collect the email, POST /api/auth/otp/request, advance
+//   "otp"   — collect the 6-digit code, POST /api/auth/otp/verify
+//   "google"— Firebase popup running (button busy spinner only)
+//
+// Firebase Web SDK is loaded lazily on the first Google click so the
+// initial bundle stays small. Config comes from FIREBASE_CONFIG at the
+// top of this module.
+// ─────────────────────────────────────────────────────────────────────────
+
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyD-spiderx-ai-placeholder",  // injected at build time
+  authDomain: "spiderx-ai-agents.firebaseapp.com",
+  projectId: "spiderx-ai-agents",
+  storageBucket: "spiderx-ai-agents.firebasestorage.app",
+  messagingSenderId: "664233906256",
+  appId: "1:664233906256:web:16f9b5699a5fd297884155",
+  measurementId: "G-LG7990DBEH",
+};
+
+// Cached Firebase auth handle — initialised on first popup.
+let _firebaseAuthPromise = null;
+function _getFirebaseAuth() {
+  if (_firebaseAuthPromise) return _firebaseAuthPromise;
+  _firebaseAuthPromise = (async () => {
+    const [{ initializeApp }, { getAuth, GoogleAuthProvider, signInWithPopup }] = await Promise.all([
+      import("https://esm.sh/firebase@10.13.2/app"),
+      import("https://esm.sh/firebase@10.13.2/auth"),
+    ]);
+    const app = initializeApp(FIREBASE_CONFIG);
+    const auth = getAuth(app);
+    return { auth, GoogleAuthProvider, signInWithPopup };
+  })().catch((err) => {
+    _firebaseAuthPromise = null;  // let next click retry
+    throw err;
+  });
+  return _firebaseAuthPromise;
+}
+
 function AuthPage({ mode, defaults, onAuthed, onSwitch }) {
   const [email, setEmail] = useState(defaults?.email || "");
-  const [name, setName] = useState(defaults?.name || "");
-  const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [code, setCode]   = useState("");
+  const [step, setStep]   = useState("email");  // email | otp
+  const [busy, setBusy]   = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
   const [error, setError] = useState("");
+  const [resendIn, setResendIn] = useState(0);
+  const codeInputRef = useRef(null);
   const isSignup = mode === "signup";
-  const submit = async (e) => {
+
+  // Countdown for the "Resend code" affordance on the OTP step.
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const t = setTimeout(() => setResendIn((n) => Math.max(0, n - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [resendIn]);
+  // Autofocus the code field when the OTP step lands.
+  useEffect(() => {
+    if (step === "otp") setTimeout(() => codeInputRef.current?.focus(), 60);
+  }, [step]);
+
+  const requestCode = async (e) => {
     e?.preventDefault();
+    const addr = email.trim().toLowerCase();
+    if (!addr || !addr.includes("@")) {
+      setError("Enter a valid email.");
+      return;
+    }
     setError(""); setBusy(true);
     try {
-      const body = { email: email.trim() };
-      if (isSignup) body.name = name.trim() || null;
-      if (password) body.password = password;
-      let res = await fetch(isSignup ? "/api/auth/signup" : "/api/auth/login", {
+      const r = await fetch("/api/auth/otp/request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ email: addr }),
       });
-      // Mock convenience: signing in with an email that has no account yet
-      // transparently creates one (Auth0 will replace this). Without it, a
-      // fresh visitor hitting the build gate would get a dead-end 404.
-      if (!res.ok && !isSignup && res.status === 404) {
-        res = await fetch("/api/auth/signup", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: email.trim() }),
-        });
+      if (!r.ok) throw new Error("Couldn't send code. Try again.");
+      setStep("otp");
+      setResendIn(30);
+    } catch (err) {
+      setError(String(err.message || err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const verifyCode = async (e) => {
+    e?.preventDefault();
+    const c = code.trim();
+    if (!/^\d{6}$/.test(c)) {
+      setError("Enter the 6-digit code from your email.");
+      return;
+    }
+    setError(""); setBusy(true);
+    try {
+      const r = await fetch("/api/auth/otp/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), code: c }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error((d && (d.detail?.message || d.detail)) || "That code didn't work.");
       }
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        throw new Error((d && (d.detail?.message || d.detail)) || "Something went wrong");
-      }
-      const user = await res.json();
+      const user = await r.json();
       saveAuth(user);
       onAuthed && onAuthed(user);
     } catch (err) {
@@ -3344,73 +3415,157 @@ function AuthPage({ mode, defaults, onAuthed, onSwitch }) {
       setBusy(false);
     }
   };
-  // Mock Google sign-in. Real OAuth lands with Auth0; for now we upsert a
-  // demo Google identity server-side so the login→resume flow is demoable.
+
   const googleSignIn = async () => {
-    setError(""); setBusy(true);
+    setError(""); setGoogleBusy(true);
     try {
-      const guess = email.trim() && email.includes("@") ? email.trim() : "demo.user@gmail.com";
-      const res = await fetch("/api/auth/google", {
+      const { auth, GoogleAuthProvider, signInWithPopup } = await _getFirebaseAuth();
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: "select_account" });
+      const result = await signInWithPopup(auth, provider);
+      const fbUser = result.user;
+      const idToken = await fbUser.getIdToken();
+      const r = await fetch("/api/auth/google", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: guess, name: name.trim() || null }),
+        body: JSON.stringify({
+          email: fbUser.email,
+          name: fbUser.displayName || null,
+          id_token: idToken,
+        }),
       });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
         throw new Error(d.detail || "Google sign-in failed");
       }
-      const user = await res.json();
+      const user = await r.json();
       saveAuth(user);
       onAuthed && onAuthed(user);
     } catch (err) {
-      setError(String(err.message || err));
+      const msg = String(err?.code || err?.message || err);
+      // Quiet the "user closed the popup" cancel — that's not an error
+      // worth shouting about, it's just an aborted flow.
+      if (!msg.includes("popup-closed") && !msg.includes("cancelled")) {
+        setError(msg);
+      }
     } finally {
-      setBusy(false);
+      setGoogleBusy(false);
     }
   };
+
+  // Feature pills on the left showcase. Sector-agnostic so the page
+  // doesn't lie when the operator's about to log into any kind of
+  // agent — these describe the platform, not one demo agent.
+  const showcasePills = [
+    "Make & modify reservations",
+    "Adds guest notes and tags",
+    "Manage multiple venues",
+    "Customer feedback collection",
+    "Real-time analytics and insights",
+  ];
+
   return html`
-    <div class="db-auth">
-      <div class="db-auth-card">
-        <div class="db-auth-brand">
-          <span class="db-topbar-wordmark" aria-label="SpiderX.AI">
-            <span class="db-topbar-wm-spider">Spider</span><span class="db-topbar-wm-x">X</span><span class="db-topbar-wm-ai">.AI</span>
-          </span>
-          <span class="db-topbar-tag">AI Agent Builder</span>
+    <div class="sx-auth-split">
+      <!-- Left panel: dark starry background, brand + showcase + trust strip -->
+      <aside class="sx-auth-left">
+        <div class="sx-auth-stars" aria-hidden="true"></div>
+        <div class="sx-auth-left-inner">
+          <a class="sx-auth-logo" href="/" aria-label="SpiderX.AI">
+            <img src="https://spiderx.ai/assets/spiderx-white-logo-DOHUzGmy.svg"
+                 alt="SpiderX.AI" height="40" />
+          </a>
+          <div class="sx-auth-showcase">
+            <div class="sx-auth-showcase-eyebrow">You have selected</div>
+            <div class="sx-auth-showcase-card">
+              <div class="sx-auth-showcase-avatar" aria-hidden="true">D</div>
+              <div class="sx-auth-showcase-meta">
+                <div class="sx-auth-showcase-name">Dineo</div>
+                <div class="sx-auth-showcase-role">Restaurant booking agent</div>
+              </div>
+              <button class="sx-auth-showcase-switch" type="button" aria-label="Switch agent">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M7 7h10M17 7l-3-3M17 7l-3 3M17 17H7M7 17l3-3M7 17l3 3"/></svg>
+              </button>
+            </div>
+            <div class="sx-auth-pills">
+              ${showcasePills.map((p, i) => html`
+                <span key=${i} class="sx-auth-pill">
+                  <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>
+                  ${p}
+                </span>
+              `)}
+            </div>
+          </div>
+          <div class="sx-auth-trust">Trusted by teams shipping AI-first call experiences worldwide.</div>
         </div>
-        <h1 class="db-auth-title">${isSignup ? "Create your account" : "Welcome back"}</h1>
-        <p class="db-auth-sub">${isSignup ? "Build phone AI agents that ring real numbers. Free for the first 300 minutes." : "Pick up where you left off."}</p>
-        <form class="db-form" onSubmit=${submit}>
-          ${isSignup ? html`
-            <label class="db-form-field">
-              <span class="db-form-label">Your name <span class="db-form-opt">(optional)</span></span>
-              <input class="db-input" type="text" value=${name} onInput=${(e) => setName(e.target.value)} placeholder="e.g. Dipesh" />
-            </label>
-          ` : ""}
-          <label class="db-form-field">
-            <span class="db-form-label">Email</span>
-            <input class="db-input" type="email" autoComplete="email" autoFocus value=${email} onInput=${(e) => setEmail(e.target.value)} placeholder="you@company.com" required />
-          </label>
-          <label class="db-form-field">
-            <span class="db-form-label">Password</span>
-            <input class="db-input" type="password" autoComplete=${isSignup ? "new-password" : "current-password"} value=${password} onInput=${(e) => setPassword(e.target.value)} placeholder="••••••••" />
-            <span class="db-form-help">Auth0 takes over later — for now any value works.</span>
-          </label>
-          ${error ? html`<div class="golive-error">${error}</div>` : ""}
-          <button type="submit" class="db-btn-primary db-auth-cta" disabled=${busy || !email.trim()}>
-            ${busy ? (isSignup ? "Creating…" : "Signing in…") : (isSignup ? "Create account" : "Sign in")}
+      </aside>
+
+      <!-- Right panel: white card with the actual form -->
+      <main class="sx-auth-right">
+        <div class="sx-auth-card">
+          <h1 class="sx-auth-title">${isSignup ? "Welcome" : "Welcome Back"}</h1>
+          <p class="sx-auth-sub">
+            ${step === "otp"
+              ? html`Enter the 6-digit code we sent to <b>${email}</b>.`
+              : (isSignup ? "Sign up to start building your phone AI agents." : "Log in to continue using your agent.")}
+          </p>
+
+          ${step === "email" ? html`
+            <form class="sx-auth-form" onSubmit=${requestCode}>
+              <input class="sx-auth-input" type="email" autoComplete="email" autoFocus
+                     placeholder="you@company.com"
+                     value=${email} onInput=${(e) => setEmail(e.target.value)} required />
+              ${error ? html`<div class="sx-auth-error">${error}</div>` : ""}
+              <button class="sx-auth-cta" type="submit" disabled=${busy || !email.trim()}>
+                ${busy ? "Sending…" : "Continue"}
+              </button>
+            </form>
+            <div class="sx-auth-switch">
+              <span>${isSignup ? "Already have an account?" : "Don't have an account?"}</span>
+              <button type="button" onClick=${() => onSwitch && onSwitch(isSignup ? "login" : "signup")}>
+                ${isSignup ? "Sign in" : "Sign up"}
+              </button>
+            </div>
+          ` : html`
+            <form class="sx-auth-form" onSubmit=${verifyCode}>
+              <input class="sx-auth-input sx-auth-input-otp" type="text"
+                     inputmode="numeric" pattern="\\d{6}" maxLength="6"
+                     placeholder="• • • • • •"
+                     ref=${codeInputRef}
+                     value=${code}
+                     onInput=${(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} />
+              ${error ? html`<div class="sx-auth-error">${error}</div>` : ""}
+              <button class="sx-auth-cta" type="submit" disabled=${busy || code.length !== 6}>
+                ${busy ? "Verifying…" : "Verify and continue"}
+              </button>
+            </form>
+            <div class="sx-auth-switch">
+              <span>Didn't get a code?</span>
+              <button type="button"
+                      disabled=${resendIn > 0}
+                      onClick=${() => requestCode()}>
+                ${resendIn > 0 ? `Resend in ${resendIn}s` : "Resend code"}
+              </button>
+              <span aria-hidden="true">·</span>
+              <button type="button" onClick=${() => { setStep("email"); setCode(""); setError(""); }}>
+                Use a different email
+              </button>
+            </div>
+          `}
+
+          <div class="sx-auth-or"><span>or continue with</span></div>
+
+          <button class="sx-auth-google" type="button"
+                  onClick=${googleSignIn} disabled=${googleBusy || busy}>
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <path fill="#4285F4" d="M21.6 12.2c0-.7-.1-1.3-.2-2H12v3.9h5.4a4.6 4.6 0 0 1-2 3v2.5h3.3c1.9-1.8 3-4.4 3-7.4z"/>
+              <path fill="#34A853" d="M12 22c2.7 0 5-.9 6.7-2.4l-3.3-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.7-5.6-4.1H3v2.5C4.6 19.7 8 22 12 22z"/>
+              <path fill="#FBBC05" d="M6.4 14a6 6 0 0 1 0-3.9V7.5H3a10 10 0 0 0 0 9z"/>
+              <path fill="#EA4335" d="M12 5.9c1.5 0 2.8.5 3.8 1.5l2.9-2.8C16.9 2.9 14.7 2 12 2 8 2 4.6 4.3 3 7.5l3.4 2.6c.8-2.4 3-4.2 5.6-4.2z"/>
+            </svg>
+            <span>${googleBusy ? "Opening Google…" : "Continue with Google"}</span>
           </button>
-        </form>
-        <button class="db-auth-google" type="button" onClick=${googleSignIn} disabled=${busy}>
-          <svg viewBox="0 0 24 24" width="16" height="16"><path fill="#4285F4" d="M21.6 12.2c0-.7-.1-1.3-.2-2H12v3.9h5.4a4.6 4.6 0 0 1-2 3v2.5h3.3c1.9-1.8 3-4.4 3-7.4z"/><path fill="#34A853" d="M12 22c2.7 0 5-.9 6.7-2.4l-3.3-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.7-5.6-4.1H3v2.5C4.6 19.7 8 22 12 22z"/><path fill="#FBBC05" d="M6.4 14a6 6 0 0 1 0-3.9V7.5H3a10 10 0 0 0 0 9z"/><path fill="#EA4335" d="M12 5.9c1.5 0 2.8.5 3.8 1.5l2.9-2.8C16.9 2.9 14.7 2 12 2 8 2 4.6 4.3 3 7.5l3.4 2.6c.8-2.4 3-4.2 5.6-4.2z"/></svg>
-          <span>Continue with Google</span>
-        </button>
-        <div class="db-auth-switch">
-          ${isSignup
-            ? html`<span>Already have an account?</span> <button type="button" onClick=${() => onSwitch && onSwitch("login")}>Sign in</button>`
-            : html`<span>New here?</span> <button type="button" onClick=${() => onSwitch && onSwitch("signup")}>Create account</button>`
-          }
         </div>
-      </div>
+      </main>
     </div>
   `;
 }
