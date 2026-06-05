@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 233;
+const SXAI_BUILD = 234;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -3558,7 +3558,7 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
     // post-launch analytics — "Call logs" had nothing to do with launching)
     // made the mental model fuzzy and the labels lie.
     //
-    //   1. About the business — what she IS and what she KNOWS.
+    //   1. General Info — what she IS and what she KNOWS.
     //   2. Voice & behaviour — how she SOUNDS and what she will / won't do.
     //   3. Test & launch — pre-launch ACTIONS only (try her, publish her).
     //   4. Insights — post-launch RESULTS (call activity + outcomes report).
@@ -3568,7 +3568,7 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
     // workflow stays visually distinct from workspace administration.
     agent ? {
       key: "about",
-      label: "About the business",
+      label: "General Info",
       // Build 230 — sidebar adapted to match the admin shell's pattern.
       // Group icon stays for the collapsed-section affordance, but each
       // ITEM now carries its own Material Symbol so the nav reads as a
