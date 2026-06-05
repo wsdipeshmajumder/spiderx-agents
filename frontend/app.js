@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 220;
+const SXAI_BUILD = 221;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -4337,6 +4337,83 @@ function AgentExtraInfoPage({ agent, agents, presets, plan, onNav, refreshAgent 
   `;
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// CostBreakdownCard (build 221) — itemised per-minute pricing on the
+// agent's Overview page. Reads /api/agents/{id}/cost-breakdown which
+// pulls from pricing.py + the pricing_versions table. Operator no
+// longer has to dig into the admin LLM ledger to know what they're
+// paying per minute.
+// ─────────────────────────────────────────────────────────────────────────
+function CostBreakdownCard({ agentId }) {
+  const [data, setData] = useState(null);
+  const [err,  setErr]  = useState("");
+  useEffect(() => {
+    if (!agentId) return;
+    fetch(`/api/agents/${agentId}/cost-breakdown`)
+      .then((r) => r.ok ? r.json() : Promise.reject(new Error("status " + r.status)))
+      .then(setData)
+      .catch((e) => setErr(String(e.message || e)));
+  }, [agentId]);
+  if (err) return html`
+    <section class="db-panel db-cost-card">
+      <h3 class="db-cost-title">Cost Breakdown</h3>
+      <p class="db-form-help" style=${{ color: "#b91c1c" }}>Couldn't load: ${err}</p>
+    </section>
+  `;
+  if (!data) return html`
+    <section class="db-panel db-cost-card">
+      <h3 class="db-cost-title">Cost Breakdown</h3>
+      <div class="db-loading">Loading…</div>
+    </section>
+  `;
+  const fmtInr = (n) => (n == null || !Number.isFinite(n)) ? "—"
+    : (n === 0 ? "Included" : `₹${Number(n).toFixed(2)}/min`);
+  const items = data.items || [];
+  const totalLines = items.filter((it) => it.status === "included");
+  const passThrough = items.filter((it) => it.status === "pass_through");
+  return html`
+    <section class="db-panel db-cost-card">
+      <h3 class="db-cost-title">Cost Breakdown</h3>
+      <table class="db-cost-table">
+        <tbody>
+          ${items.map((it) => html`
+            <tr key=${it.label} class=${"db-cost-row db-cost-row-" + it.status}>
+              <td class="db-cost-cell-label">
+                <div class="db-cost-cell-name">${it.label}</div>
+                ${it.vendor ? html`<div class="db-cost-cell-vendor">${it.vendor}</div>` : ""}
+              </td>
+              <td class="db-cost-cell-status">
+                ${it.status === "included" ? html`
+                  <span class="db-cost-badge db-cost-badge-included">
+                    <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>
+                    Included
+                  </span>
+                ` : html`
+                  <span class="db-cost-badge db-cost-badge-passthrough" title=${it.note || ""}>
+                    Pass-through
+                  </span>
+                `}
+              </td>
+            </tr>
+          `)}
+        </tbody>
+      </table>
+      <div class="db-cost-total">
+        <div class="db-cost-total-label">Total per minute</div>
+        <div class="db-cost-total-value">₹${(data.total_inr_per_min || 0).toFixed(2)}<span>/min</span></div>
+      </div>
+      <div class="db-cost-foot">
+        ${data.basis}
+        ${passThrough.length ? html`
+          <div class="db-cost-foot-pass">
+            ${passThrough.map((it) => html`+ ${it.label}: ₹${(it.inr_per_min || 0).toFixed(2)}/min (real phone calls only)`).join(" · ")}
+          </div>
+        ` : ""}
+      </div>
+    </section>
+  `;
+}
+
 function AgentOverviewPage({ agent, agents, presets, plan, stats, onTest, onGoLive, onEdit, onTestPhone, onNav }) {
   const labelFor = (list, id) => (list || []).find((x) => x.id === id)?.label || _prettifyEnumId(id);
   const sectorLabel = labelFor(presets?.sectors, agent.sector);
@@ -4460,6 +4537,24 @@ function AgentOverviewPage({ agent, agents, presets, plan, stats, onTest, onGoLi
               </span>
             </div>
             <h2 class="db-hero-name">${agent.name}</h2>
+            <!-- Build 221 — status row directly under the name so
+                 "is this live?" is answerable in one glance. -->
+            <div class="db-hero-status-row">
+              ${agent.published ? html`
+                <span class="db-status-pill db-status-pill-active">
+                  <span class="db-status-dot"></span> Active
+                </span>
+              ` : html`
+                <span class="db-status-pill db-status-pill-draft">
+                  <span class="db-status-dot"></span> Draft
+                </span>
+              `}
+              ${(stats?.total || 0) > 0 && !agent.published ? html`
+                <span class="db-status-pill db-status-pill-preview">
+                  <span class="db-status-dot"></span> In Preview
+                </span>
+              ` : ""}
+            </div>
             <p class="db-hero-tagline">${tagline.slice(0, 160)}</p>
             <div class="db-hero-pills">
               ${sectorLabel ? html`<span class="db-pill">${sectorLabel}</span>` : ""}
@@ -4477,28 +4572,34 @@ function AgentOverviewPage({ agent, agents, presets, plan, stats, onTest, onGoLi
           </div>
         </section>
 
-        <aside class="db-next-steps">
-          <header class="db-next-steps-head">
-            <h3 class="db-next-steps-title">Next steps</h3>
-            ${isFresh ? html`<span class="db-next-steps-fresh"><span aria-hidden="true">✨</span> New</span>` : ""}
-          </header>
-          <ol class="db-next-steps-list">
-            ${steps.map((s, i) => html`
-              <li class=${"db-next-step" + (s.done ? " done" : "")} key=${s.key}>
-                <span class="db-next-step-num">${s.done ? html`<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>` : i + 1}</span>
-                <div class="db-next-step-body">
-                  <div class="db-next-step-title">${s.title}</div>
-                  <div class="db-next-step-sub">${s.sub}</div>
-                </div>
-                <button type="button"
-                        class=${"db-btn-sm " + (s.primary ? "db-btn-primary" : "db-btn-ghost")}
-                        onClick=${s.onClick}>
-                  ${s.cta}
-                </button>
-              </li>
-            `)}
-          </ol>
-        </aside>
+        <!-- Build 221 — right rail wraps Next steps + Cost Breakdown
+             so they stack neatly in the second grid column instead of
+             one wrapping to a new row. -->
+        <div class="db-overview-rail">
+          <aside class="db-next-steps">
+            <header class="db-next-steps-head">
+              <h3 class="db-next-steps-title">Next steps</h3>
+              ${isFresh ? html`<span class="db-next-steps-fresh"><span aria-hidden="true">✨</span> New</span>` : ""}
+            </header>
+            <ol class="db-next-steps-list">
+              ${steps.map((s, i) => html`
+                <li class=${"db-next-step" + (s.done ? " done" : "")} key=${s.key}>
+                  <span class="db-next-step-num">${s.done ? html`<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>` : i + 1}</span>
+                  <div class="db-next-step-body">
+                    <div class="db-next-step-title">${s.title}</div>
+                    <div class="db-next-step-sub">${s.sub}</div>
+                  </div>
+                  <button type="button"
+                          class=${"db-btn-sm " + (s.primary ? "db-btn-primary" : "db-btn-ghost")}
+                          onClick=${s.onClick}>
+                    ${s.cta}
+                  </button>
+                </li>
+              `)}
+            </ol>
+          </aside>
+          <${CostBreakdownCard} agentId=${agent.id} />
+        </div>
       </div>
 
       <!--

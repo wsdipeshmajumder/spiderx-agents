@@ -97,7 +97,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 220
+APP_BUILD = 221
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1430,6 +1430,24 @@ async def get_agent_outcome_report(agent_id: int, days: int = 30, request: Reque
     d = max(1, min(int(days), 365))
     analytics = await db.agent_analytics(agent_id, days=d)
     return call_outcomes.assemble_report(agent, analytics)
+
+
+@app.get("/api/agents/{agent_id}/cost-breakdown")
+async def get_agent_cost_breakdown(agent_id: int, request: Request) -> dict:
+    """Structured per-minute cost breakdown for the agent's Overview
+    'Cost Breakdown' card. Itemised line items (Platform / STT / TTS /
+    AI Model / Telephony) each with vendor + status + per-minute INR,
+    ending in `total_inr_per_min`.
+
+    Source of truth: pricing.per_minute_inr() for the AI model line +
+    pricing_versions table for the Plivo telephony rate. No call data
+    needed — this is the projected rate; real per-call cost is still
+    computed from actual token counts in `cost_paise`.
+    """
+    from . import pricing
+    user = await current_user(request)
+    agent = await _require_agent_owned(agent_id, user)
+    return await pricing.cost_breakdown_for_agent(agent)
 
 
 @app.get("/api/agents/{agent_id}/chip-schema")
