@@ -8770,20 +8770,51 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
 :root[data-theme="dark"] .db-provider-coverage { color: #8a91a4; }
 
 /* ── Test-call page: two-up layout with an "or" divider between halves ── */
+/* Build 227 — the page used to "breakdance" as elements reflowed on
+ * load (cards expanding as the icon + copy + bullets arrived in
+ * stages). Stable min-height on every card + CSS containment on the
+ * container + a 200 ms entry fade make the layout settle invisibly. */
 .db-testcall {
   display: grid;
+  /* Build 227 — agent strip spans the full grid before the 2-col cards */
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   gap: 0;
   align-items: stretch;
+  contain: layout;
+  animation: db-testcall-fade-in 200ms ease-out both;
+}
+.db-testcall-agent-strip {
+  grid-column: 1 / -1;
+  margin: 0 0 18px;
+}
+.db-testcall-agent-name {
+  font-size: 26px; font-weight: 700;
+  color: #1a1d2b;
+  letter-spacing: -0.018em;
+  line-height: 1.2;
+  margin: 0;
+}
+.db-testcall-agent-sub {
+  font-size: 13.5px; color: #6a6f7d;
+  margin-top: 4px;
+}
+:root[data-theme="dark"] .db-testcall-agent-name { color: #f1f3f8; }
+:root[data-theme="dark"] .db-testcall-agent-sub  { color: #9aa0ad; }
+@keyframes db-testcall-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 .db-testcall-card {
   background: #fff;
-  border: 1px solid #e6e8ef;
+  border: 1px solid var(--db-border, #e6e8ef);
   border-radius: 16px;
   padding: 28px;
   display: flex; flex-direction: column;
   gap: 14px;
-  min-height: 100%;
+  /* Build 227 — explicit min-height reserves space so icon + copy +
+   * bullets + button don't shift cards as content arrives. */
+  min-height: 340px;
+  contain: layout style;
 }
 .db-testcall-head {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
@@ -8813,10 +8844,13 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
   letter-spacing: -0.01em;
 }
 .db-testcall-sub {
-  font-size: 13.5px; color: #4b5263;
+  /* Build 227 — bumped down 13.5 → 12.5px so the blurb sits one tier
+   * below the title visually. Title carries the "what", sub carries
+   * the supporting one-liner. */
+  font-size: 12.5px; color: #6a6f7d;
   line-height: 1.5;
   margin: 0;
-  max-width: 38ch;
+  max-width: 42ch;
 }
 .db-testcall-bullets {
   list-style: none; padding: 0; margin: 4px 0 0;

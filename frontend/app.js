@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 226;
+const SXAI_BUILD = 227;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -9434,6 +9434,14 @@ function AgentTestCallPage({ agent, agents, presets, plan, onNav, onTest, onTest
 
   const body = html`
     <div class="db-testcall">
+      <!-- Build 227 — agent name strip above the test-call cards. Was
+           buried in subtitle copy on each card; now leads as the
+           prominent identifier on the page so the operator knows
+           which agent they're about to call. -->
+      <header class="db-testcall-agent-strip">
+        <div class="db-testcall-agent-name">${agent.name}</div>
+        <div class="db-testcall-agent-sub">Two ways to hear ${pronouns(agent).obj} live — pick whichever's closer to hand.</div>
+      </header>
       <section class="db-testcall-card db-testcall-web">
         <div class="db-testcall-head">
           <div class="db-testcall-icon" aria-hidden="true">
@@ -9442,7 +9450,7 @@ function AgentTestCallPage({ agent, agents, presets, plan, onNav, onTest, onTest
           <span class="db-testcall-tag">Web call</span>
         </div>
         <h3 class="db-testcall-title">Talk in your browser</h3>
-        <p class="db-testcall-sub">Use your mic right now. The fastest way to hear ${agent.name} say ${pronouns(agent).poss} greeting and answer a quick question.</p>
+        <p class="db-testcall-sub">Use your mic. Fastest way to hear ${pronouns(agent).poss} greeting + answer a quick question.</p>
         <ul class="db-testcall-bullets">
           <li><span class="db-testcall-bullet-tick" aria-hidden="true">✓</span> No phone number needed</li>
           <li><span class="db-testcall-bullet-tick" aria-hidden="true">✓</span> Instant — works on any device</li>
@@ -9467,7 +9475,7 @@ function AgentTestCallPage({ agent, agents, presets, plan, onNav, onTest, onTest
           <span class="db-testcall-tag">Phone callback</span>
         </div>
         <h3 class="db-testcall-title">Get a real call on your phone</h3>
-        <p class="db-testcall-sub">${agent.name} rings you within a few seconds. The honest test — proves the carrier route, DTMF, and IVR setup all work end-to-end.</p>
+        <p class="db-testcall-sub">${pronouns(agent).subjCap} rings you in seconds. Honest test of the carrier route, DTMF, and IVR.</p>
         <ul class="db-testcall-bullets">
           <li><span class="db-testcall-bullet-tick" aria-hidden="true">✓</span> Tests the live carrier path</li>
           <li><span class="db-testcall-bullet-tick" aria-hidden="true">✓</span> Works on the move</li>
@@ -9497,7 +9505,7 @@ function AgentTestCallPage({ agent, agents, presets, plan, onNav, onTest, onTest
       agents=${agents}
       plan=${plan}
       title="Get a test call"
-      subtitle=${`Two ways to hear ${agent.name} live — pick whichever's closer to hand.`}
+      subtitle=""
       onNav=${onNav}
       body=${body}
     />
@@ -14859,6 +14867,19 @@ function App() {
     // Drop back to / when a session ends, unless we're showing a cockpit.
     if (location.pathname !== "/" && !revealAgent) goRoute("/");
     refreshAgents();
+    // Build 227 — refetch the cockpit stats so the Overview's "calls
+    // today" / "calls this month" counters reflect the just-ended
+    // call. The stats useEffect only runs when revealAgent.id
+    // changes, so we have to kick the fetch explicitly here. Small
+    // delay to let the server finish writing the call row.
+    if (revealAgent?.id) {
+      setTimeout(() => {
+        fetch(`/api/agents/${revealAgent.id}/stats`)
+          .then((r) => r.ok ? r.json() : null)
+          .then((s) => { if (s) setCockpitStats(s); })
+          .catch(() => {});
+      }, 800);
+    }
   }, [refreshAgents, revealAgent, goRoute]);
 
   // Ambience helper — pick the right loop for this agent and start it on
