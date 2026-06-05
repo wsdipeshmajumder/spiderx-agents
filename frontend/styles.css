@@ -6217,8 +6217,11 @@ button.db-stat:disabled { cursor: default; opacity: 0.7; }
   border-radius: 12px;
 }
 .db-headline-text {
-  margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.012em;
-  color: #0f172a; line-height: 1.4;
+  /* Build 228 — dropped 18 → 17px to match the .db-panel-title
+   * benchmark. The Overview headline now reads at the same density
+   * as every section title across the dashboard. */
+  margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em;
+  color: #0f172a; line-height: 1.3;
 }
 .db-headline-sub {
   margin: 4px 0 0; font-size: 13.5px; line-height: 1.5; color: #6a6f7e;
@@ -8838,10 +8841,15 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
   border-radius: 99px;
 }
 .db-testcall-title {
-  font-size: 20px; font-weight: 600;
+  /* Build 228 — dropped 20 → 17px to match the .db-panel-title
+   * benchmark. Was the only outlier card heading on any per-agent
+   * page; now reads at the same density as every other section
+   * title across the dashboard. */
+  font-size: 17px; font-weight: 700;
   color: #1a1d2b;
   margin: 4px 0 0;
   letter-spacing: -0.01em;
+  line-height: 1.3;
 }
 .db-testcall-sub {
   /* Build 227 — bumped down 13.5 → 12.5px so the blurb sits one tier
