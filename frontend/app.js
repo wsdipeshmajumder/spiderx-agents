@@ -1736,6 +1736,30 @@ function SpiderXLogo({ height = 28 }) {
   `;
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// MIcon — Google Material Symbols (outlined) wrapper. The font is loaded
+// in index.html; this component just renders the span that resolves the
+// ligature glyph. Centralised so every site can swap variation axes or
+// the icon name in one place.
+//
+// Usage:  <${MIcon} name="dashboard" />
+//         <${MIcon} name="settings" size=20 />
+//
+// `name` is any Material Symbol identifier (see fonts.google.com/icons).
+// `size` defaults to 20 px — matches the inline-SVG sizing we'd otherwise
+// hand-roll in nav lists. Material recommends 20/24/40/48 — stick to
+// those to avoid sub-pixel blur on most displays.
+// ─────────────────────────────────────────────────────────────────────────
+function MIcon({ name, size = 20, className = "", style }) {
+  return html`
+    <span class=${"material-symbols-outlined sxai-micon" + (className ? " " + className : "")}
+          style=${{ fontSize: `${size}px`, ...(style || {}) }}
+          aria-hidden="true">
+      ${name}
+    </span>
+  `;
+}
+
 // Light/dark toggle. Pure visual — flips data-theme on <html> and persists.
 // ─────────────────────────────────────────────────────────────────────────
 // ─── Industry presets (landing composer dropdown + /for-<industry>) ───────
@@ -3532,70 +3556,75 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
     agent ? {
       key: "about",
       label: "About the business",
-      icon: html`<svg class="db-nav-group-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>`,
+      // Build 230 — sidebar adapted to match the admin shell's pattern.
+      // Group icon stays for the collapsed-section affordance, but each
+      // ITEM now carries its own Material Symbol so the nav reads as a
+      // proper menu instead of a wall of labels. Same icon family as
+      // /admin (Material Symbols Outlined) for visual consistency.
+      icon: "info",
       items: [
-        { key: "overview",  label: "Overview",         route: `/agent/${agentSlug}` },
+        { key: "overview",  label: "Overview",         icon: "space_dashboard", route: `/agent/${agentSlug}` },
         // Core purpose sits right under Overview because it answers
         // the most important "what" question — what is she built to
         // do? It was previously embedded inside the Overview page; now
         // it has its own dashboard surface so it's discoverable from
         // the sidebar, deep-linkable, and not buried under stats tiles.
-        { key: "purpose",    label: "Core purpose",     route: `/agent/${agentSlug}/purpose` },
-        { key: "profile",    label: "Business profile", route: `/agent/${agentSlug}/profile` },
-        { key: "extra-info", label: "Additional info",  route: `/agent/${agentSlug}/extra-info` },
-        { key: "knowledge",  label: "Knowledge base",   route: `/agent/${agentSlug}/knowledge` },
+        { key: "purpose",    label: "Core purpose",     icon: "flag",           route: `/agent/${agentSlug}/purpose` },
+        { key: "profile",    label: "Business profile", icon: "apartment",      route: `/agent/${agentSlug}/profile` },
+        { key: "extra-info", label: "Additional info",  icon: "list_alt",       route: `/agent/${agentSlug}/extra-info` },
+        { key: "knowledge",  label: "Knowledge base",   icon: "menu_book",      route: `/agent/${agentSlug}/knowledge` },
       ],
     } : null,
     agent ? {
       key: "voice",
       label: "Voice & behaviour",
-      icon: html`<svg class="db-nav-group-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>`,
+      icon: "mic",
       items: [
-        { key: "persona",        label: "Persona & tone", route: `/agent/${agentSlug}/persona` },
-        { key: "voice-settings", label: "Voice settings", route: `/agent/${agentSlug}/voice` },
-        { key: "small-talk",     label: "Small talk",     route: `/agent/${agentSlug}/small-talk` },
-        { key: "guardrails",     label: "Guardrails",     route: `/agent/${agentSlug}/guardrails` },
+        { key: "persona",        label: "Persona & tone", icon: "face",       route: `/agent/${agentSlug}/persona` },
+        { key: "voice-settings", label: "Voice settings", icon: "tune",       route: `/agent/${agentSlug}/voice` },
+        { key: "small-talk",     label: "Small talk",     icon: "chat_bubble",route: `/agent/${agentSlug}/small-talk` },
+        { key: "guardrails",     label: "Guardrails",     icon: "shield",     route: `/agent/${agentSlug}/guardrails` },
       ],
     } : null,
     agent ? {
       key: "launch",
       label: "Test & launch",
-      icon: html`<svg class="db-nav-group-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 11l7-7 7 7"/><path d="M12 4v14"/><path d="M5 21h14"/></svg>`,
+      icon: "rocket_launch",
       items: [
         // Pre-launch ACTIONS only. Activity / outcomes moved to Insights
         // below so this group is purely "make it real".
-        { key: "test-call", label: "Get a test call",  route: `/agent/${agentSlug}/test-call` },
-        { key: "live",      label: "Go live",          route: `/agent/${agentSlug}/go-live`, statusBadge: agent.published ? "live" : "draft" },
+        { key: "test-call", label: "Get a test call", icon: "headset_mic", route: `/agent/${agentSlug}/test-call` },
+        { key: "live",      label: "Go live",         icon: "bolt",        route: `/agent/${agentSlug}/go-live`, statusBadge: agent.published ? "live" : "draft" },
       ],
     } : null,
     agent ? {
       key: "insights",
       label: "Call Analytics",
-      icon: html`<svg class="db-nav-group-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-7"/></svg>`,
+      icon: "monitoring",
       items: [
         // Logs = what happened. Outcomes = what was the result.
         // Both are POST-launch surfaces — separate from Test & launch.
-        { key: "calls",    label: "Call logs",     route: `/agent/${agentSlug}/calls` },
-        { key: "outcomes", label: "Call outcomes", route: `/agent/${agentSlug}/outcomes` },
+        { key: "calls",    label: "Call logs",     icon: "format_list_bulleted", route: `/agent/${agentSlug}/calls` },
+        { key: "outcomes", label: "Call outcomes", icon: "donut_large",          route: `/agent/${agentSlug}/outcomes` },
       ],
     } : null,
     agent ? {
       key: "developer",
       label: "Developer",
-      icon: html`<svg class="db-nav-group-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M16 18l6-6-6-6"/><path d="M8 6l-6 6 6 6"/></svg>`,
+      icon: "code",
       items: [
-        { key: "developer", label: "Webhooks & data", route: `/agent/${agentSlug}/developer` },
+        { key: "developer", label: "Webhooks & data", icon: "webhook", route: `/agent/${agentSlug}/developer` },
       ],
     } : null,
     {
       key: "admin",
       label: "Account",
-      icon: html`<svg class="db-nav-group-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M12 1v3M12 20v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M1 12h3M20 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>`,
+      icon: "manage_accounts",
       items: [
-        { key: "org",          label: "Workspace",      route: "/account/org" },
-        { key: "team",         label: "Team & invites", route: "/account/team" },
-        { key: "billing",      label: "Billing & plan", route: "/account/billing" },
-        { key: "integrations", label: "Integrations",   route: "/account/integrations" },
+        { key: "org",          label: "Workspace",      icon: "corporate_fare", route: "/account/org" },
+        { key: "team",         label: "Team & invites", icon: "group",          route: "/account/team" },
+        { key: "billing",      label: "Billing & plan", icon: "credit_card",    route: "/account/billing" },
+        { key: "integrations", label: "Integrations",   icon: "extension",      route: "/account/integrations" },
       ],
     },
   ].filter(Boolean);
@@ -3697,9 +3726,11 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
             ${groups.map((g) => html`
               <div key=${g.key} class=${"db-nav-group" + (openGroups[g.key] ? " open" : "")}>
                 <button class="db-nav-group-head" onClick=${() => toggleGroup(g.key)}>
-                  ${g.icon}
+                  ${typeof g.icon === "string"
+                    ? html`<${MIcon} name=${g.icon} size=18 className="db-nav-group-icon" />`
+                    : g.icon}
                   <span>${g.label}</span>
-                  <svg class="db-nav-group-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+                  <${MIcon} name="expand_more" size=18 className="db-nav-group-chev" />
                 </button>
                 ${openGroups[g.key] ? html`
                   <div class="db-nav-group-items">
@@ -3707,8 +3738,12 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
                       <button key=${it.key}
                               class=${"db-nav-item" + (itemActive(it.key) ? " active" : "") + (it.key === "live" ? " db-nav-item-golive" : "")}
                               onClick=${() => navTo(it.route)}>
-                        ${it.key === "live" ? html`<span class="db-nav-golive-dot" aria-hidden="true"></span>` : ""}
-                        <span>${it.label}</span>
+                        ${it.icon
+                          ? html`<${MIcon} name=${it.icon} size=18 className="db-nav-item-icon" />`
+                          : (it.key === "live"
+                              ? html`<span class="db-nav-golive-dot" aria-hidden="true"></span>`
+                              : "")}
+                        <span class="db-nav-item-label">${it.label}</span>
                         ${it.statusBadge === "live" ? html`<span class="db-nav-item-badge is-live">Live</span>` : ""}
                         ${it.statusBadge === "draft" ? html`<span class="db-nav-item-badge is-draft">Draft</span>` : ""}
                       </button>
@@ -11235,18 +11270,22 @@ function AdminShell({ section, currentUser, onNav }) {
   // Internal section keys are PRESERVED from build 198 so every
   // existing /admin/<section> URL still resolves; only the chrome
   // and grouping change.
+  // Build 230 — Material Symbols for the admin sidebar. The Icon map
+  // is now just a string-keyed registry of symbol names; <MIcon> does
+  // the actual rendering downstream. Single icon family across both
+  // the admin shell and the per-agent dashboard.
   const Icon = {
-    dashboard: html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>`,
-    orgs:      html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 21V9l9-6 9 6v12"/><path d="M9 21V12h6v9"/></svg>`,
-    users:     html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
-    shield:    html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
-    calls:     html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 16.92v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 2.08 4.18 2 2 0 0 1 4 2h3a2 2 0 0 1 2 1.72 13 13 0 0 0 .67 2.81 2 2 0 0 1-.45 2.11L8 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 13 13 0 0 0 2.81.67A2 2 0 0 1 22 16.92z"/></svg>`,
-    pnl:       html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v20M5 9h14M5 15h14"/></svg>`,
-    obs:       html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-7"/></svg>`,
-    audit:     html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h6"/></svg>`,
-    chart:     html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>`,
-    ledger:    html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`,
-    cog:       html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
+    dashboard: "space_dashboard",
+    orgs:      "corporate_fare",
+    users:     "group",
+    shield:    "shield",
+    calls:     "call",
+    pnl:       "query_stats",
+    obs:       "monitor_heart",
+    audit:     "history",
+    chart:     "bar_chart",
+    ledger:    "receipt_long",
+    cog:       "settings",
   };
 
   // Pinned items (above the group sections, no header)
@@ -11331,7 +11370,7 @@ function AdminShell({ section, currentUser, onNav }) {
                 <button key=${it.key}
                         class=${"ax-nav-item" + (it.key === sec ? " is-active" : "")}
                         onClick=${() => goSection(it.key)}>
-                  <span class="ax-nav-icon">${it.icon}</span>
+                  <${MIcon} name=${it.icon} size=18 className="ax-nav-icon" />
                   <span class="ax-nav-label">${it.label}</span>
                 </button>
               `)}
@@ -11341,7 +11380,7 @@ function AdminShell({ section, currentUser, onNav }) {
               <div key=${g.key} class=${"ax-group" + (openGroups[g.key] ? " is-open" : "")}>
                 <button class="ax-group-head" onClick=${() => toggleGroup(g.key)}>
                   <span class="ax-group-label">${g.label.toUpperCase()}</span>
-                  <svg class="ax-group-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+                  <${MIcon} name="expand_more" size=18 className="ax-group-chev" />
                 </button>
                 ${openGroups[g.key] ? html`
                   <div class="ax-group-items">
@@ -11349,7 +11388,7 @@ function AdminShell({ section, currentUser, onNav }) {
                       <button key=${it.key}
                               class=${"ax-nav-item" + (it.key === sec ? " is-active" : "")}
                               onClick=${() => goSection(it.key)}>
-                        <span class="ax-nav-icon">${it.icon}</span>
+                        <${MIcon} name=${it.icon} size=18 className="ax-nav-icon" />
                         <span class="ax-nav-label">${it.label}</span>
                       </button>
                     `)}

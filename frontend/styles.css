@@ -64,6 +64,40 @@ body {
 
 button { border: 0; background: transparent; cursor: pointer; padding: 0; color: inherit; font: inherit; }
 
+/* ── Material Symbols (build 230) ──────────────────────────────────────────
+ * Single base rule for every Material Symbol the app renders. Loaded as a
+ * Google Fonts variable font in index.html. Variation axes pinned here so
+ * every icon picks up the same outlined, 400-weight, optical-size-20 look
+ * regardless of which sidebar / page renders it.
+ *
+ * `font-variation-settings` is the modern way to drive Material Symbols —
+ * the four axes are FILL (0=outline, 1=filled), wght (300-700 stroke),
+ * GRAD (-50..200 emphasis), opsz (20..48 optical size). We pick a clean
+ * outlined 400/0/20 default and let component-level overrides tune.
+ * `user-select:none` so the icon ligature text never appears in a copy. */
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'liga';
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+  user-select: none;
+  -webkit-user-select: none;
+  vertical-align: middle;
+}
+/* The wrapper component sets font-size inline; this guards width
+ * from a stretched cap-height in flex layouts. */
+.sxai-micon { flex-shrink: 0; }
+
 /* ── stage ─────────────────────────────────────────────────────────────── */
 
 .stage {
@@ -5729,35 +5763,41 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   text-align: left;
 }
 .db-nav-group-head:hover { background: #f5f6f8; }
+/* Build 230 — group icons are now Material Symbols spans (not SVGs).
+   Same target dimensions; selectors cover both for back-compat. */
+.db-nav-group-head .db-nav-group-icon { flex: 0 0 18px; color: #4a4a4a; line-height: 1; }
 .db-nav-group-head svg.db-nav-group-icon { width: 17px; height: 17px; flex: 0 0 17px; color: #4a4a4a; stroke-width: 1.7; }
+.db-nav-group-head .db-nav-group-chev {
+  margin-left: auto;
+  color: #8a8a8a;
+  transition: transform 0.2s ease;
+}
 .db-nav-group-head svg.db-nav-group-chev {
   width: 12px; height: 12px;
   margin-left: auto;
   color: #8a8a8a;
   transition: transform 0.18s ease;
 }
+.db-nav-group.open .db-nav-group-head .db-nav-group-chev,
 .db-nav-group.open .db-nav-group-head svg.db-nav-group-chev {
   transform: rotate(180deg);
 }
 .db-nav-group-items {
   display: flex; flex-direction: column;
-  padding: 2px 0 6px 26px;
-  gap: 0;
+  /* Build 230 — items now carry their own Material Symbol icon, so
+     drop the left-rail indent that previously substituted for one.
+     The icon column establishes its own visual hierarchy. */
+  padding: 2px 4px 6px 4px;
+  gap: 2px;
   position: relative;
 }
-.db-nav-group-items::before {
-  content: "";
-  position: absolute;
-  left: 18px; top: 4px; bottom: 8px;
-  width: 1px;
-  background: #e6e7ec;
-}
+/* No more left guide-line — the icon column already groups items. */
 .db-nav-item {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: 10px;
   /* Slightly taller hit-target + larger label — 13px was too dense for
      a top-level navigation that's used dozens of times per session. */
   padding: 9px 12px;
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 14px;
   line-height: 1.35;
   color: #4a4a4a;
@@ -5771,11 +5811,23 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   position: relative;
 }
 .db-nav-item:hover { background: #f5f6f8; color: #1a1a1a; }
+/* Build 230 — match the admin shell's pink → purple gradient on active.
+   Same visual language as /admin so the operator's eye learns ONE active
+   state across both sidebars. Icon + label go to white via currentColor. */
 .db-nav-item.active {
-  background: #ebebed;
-  color: #1a1a1a;
-  font-weight: 500;
+  background: linear-gradient(135deg, #ec4899 0%, #a855f7 100%);
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
+.db-nav-item.active:hover { background: linear-gradient(135deg, #ec4899 0%, #a855f7 100%); color: #ffffff; }
+.db-nav-item.active .db-nav-item-icon { color: #ffffff; }
+.db-nav-item-icon {
+  flex: 0 0 18px;
+  color: #6a6f7d;
+  line-height: 1;
+}
+.db-nav-item-label { flex: 1; min-width: 0; }
 /* "Go live" gets a green treatment so it pops in the menu as the
    money-moment action — green text + a small pulsing dot, deeper green
    tint when it's the active page. */
