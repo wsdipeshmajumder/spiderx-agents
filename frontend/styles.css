@@ -8357,6 +8357,95 @@ button.oc-kind:disabled { cursor: default; }
   pointer-events: auto;
   animation: lpfadein 0.7s ease 0.05s both;
 }
+
+/* ─── Landing topbar nav (build 247) ───────────────────────────────────
+ * Sits between the brandbar (top-left) and the theme toggle (top-right).
+ * Two affordances: a quiet "Pricing" link and a primary pill that says
+ * "Login" (logged-out) or "Dashboard" (logged-in). The pill is the
+ * visual anchor — its colour matches the SpiderX accent so the
+ * returning operator's eye lands on Dashboard the moment the page
+ * settles. */
+.lp-topbar-nav {
+  position: fixed;
+  /* Anchored to the same top as the theme toggle, then offset just to
+   * its LEFT so the two never overlap. The exact gap is tuned to the
+   * theme-toggle's ~36 px width plus a comfortable 12 px breathing room. */
+  top: clamp(16px, 2.4vh, 28px);
+  right: clamp(64px, calc(2.4vw + 52px), 76px);
+  z-index: 5;
+  display: inline-flex; align-items: center; gap: 10px;
+  pointer-events: auto;
+  animation: lpfadein 0.7s ease 0.05s both;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+}
+.lp-topbar-link {
+  display: inline-flex; align-items: center;
+  padding: 7px 12px;
+  border-radius: 8px;
+  text-decoration: none;
+  color: rgba(255, 255, 255, 0.78);
+  transition: color 0.15s ease, background 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.lp-topbar-link:hover,
+.lp-topbar-link:focus-visible {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+  outline: none;
+}
+.lp-topbar-cta {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.10);
+  color: #ffffff;
+  font: inherit;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+.lp-topbar-cta:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.36);
+}
+.lp-topbar-cta:active { transform: scale(0.97); }
+.lp-topbar-cta:focus-visible {
+  outline: 2px solid rgba(167, 139, 250, 0.65);
+  outline-offset: 2px;
+}
+
+/* Light theme — the landing background is light, so the nav inverts. */
+:root[data-theme="light"] .lp-topbar-link,
+:root:not([data-theme]) .lp-topbar-link { color: rgba(31, 34, 48, 0.72); }
+:root[data-theme="light"] .lp-topbar-link:hover,
+:root:not([data-theme]) .lp-topbar-link:hover {
+  color: #1f2230;
+  background: rgba(15, 23, 42, 0.06);
+}
+:root[data-theme="light"] .lp-topbar-cta,
+:root:not([data-theme]) .lp-topbar-cta {
+  background: #1f2230;
+  border-color: #1f2230;
+  color: #ffffff;
+}
+:root[data-theme="light"] .lp-topbar-cta:hover,
+:root:not([data-theme]) .lp-topbar-cta:hover {
+  background: #0f172a;
+  border-color: #0f172a;
+}
+
+/* Mobile — drop the Pricing link below ~520 px to keep just the CTA
+ * pill next to the brandbar; the full pricing surface is still one
+ * tap away from the user menu after sign-in. */
+@media (max-width: 520px) {
+  .lp-topbar-nav { right: clamp(60px, calc(2.4vw + 50px), 70px); gap: 6px; }
+  .lp-topbar-link { display: none; }
+  .lp-topbar-cta { padding: 7px 14px; font-size: 13.5px; }
+}
 /* Landing toggle — dark theme variant (glass on near-black) */
 .landing-theme .theme-toggle {
   background: rgba(255, 255, 255, 0.07);

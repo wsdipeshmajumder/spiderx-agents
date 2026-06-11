@@ -10050,6 +10050,409 @@ function AgentTestCallPage({ agent, agents, presets, plan, onNav, onTest, onTest
   `;
 }
 
+// ─── TelephonyPanel (build 251) ─────────────────────────────────────────
+//
+// Phone Number tab for HTTP-webhook providers (Plivo Application mode,
+// Twilio Programmable Voice). Two paths inside one panel:
+//
+//   • Auto-setup  — operator pastes their carrier Auth ID + Auth Token,
+//     we test the creds, list their owned numbers, then on Provision we
+//     call the carrier's REST API to CREATE the Application with our
+//     URLs pre-filled and BIND the chosen number to it. No leaving SpiderX.
+//
+//   • Manual setup (under "Or, do it manually") — same URLs are shown as
+//     readonly with copy buttons; operator pastes them into the carrier's
+//     dashboard themselves. After they've done it, "Verify live" reads
+//     the carrier's current binding back and tells them exactly what's
+//     misconfigured if anything is.
+//
+// Distinct from the existing SIP-trunk card below: SIP trunks (Voniz,
+// Vobiz) use a different contract (SIP signaling + RTP audio) that's
+// handled by backend/sip_config.py.
+function TelephonyPanel({ agent, refreshAgent }) {
+  const [state, setState] = useState(null);            // server view
+  const [loading, setLoading] = useState(true);
+  const [providerName, setProviderName] = useState(""); // selected provider
+  const [authId, setAuthId] = useState("");
+  const [authToken, setAuthToken] = useState("");
+  const [tokenVisible, setTokenVisible] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testInfo, setTestInfo] = useState(null);      // verify result
+  const [testErr, setTestErr] = useState("");
+  const [numbersLoading, setNumbersLoading] = useState(false);
+  const [numbers, setNumbers] = useState([]);
+  const [pickedNumber, setPickedNumber] = useState("");
+  const [provisioning, setProvisioning] = useState(false);
+  const [provisionErr, setProvisionErr] = useState("");
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualNumber, setManualNumber] = useState("");
+  const [manualSaving, setManualSaving] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState(null);
+  const [copied, setCopied] = useState("");            // last-copied field
+
+  const load = useCallback(async (provQuery) => {
+    if (!agent?.id) return;
+    setLoading(true);
+    try {
+      const q = provQuery ? "?provider=" + encodeURIComponent(provQuery) : "";
+      const r = await fetch(`/api/agents/${agent.id}/telephony${q}`);
+      if (!r.ok) throw new Error("Couldn't load telephony state");
+      const data = await r.json();
+      setState(data);
+      const next = provQuery || data.selected_provider
+        || data.configured_provider
+        || (data.providers && data.providers[0] && data.providers[0].id)
+        || "plivo";
+      setProviderName(next);
+      // Seed the auth id from any stored creds — token stays masked.
+      setAuthId(data.creds?.auth_id || "");
+      setManualNumber(data.config?.number || "");
+    } catch (e) {
+      // non-fatal — operator just sees the loading state cleared
+    } finally {
+      setLoading(false);
+    }
+  }, [agent?.id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Re-fetch the previewed webhook URLs when the provider changes.
+  const switchProvider = useCallback((next) => {
+    setProviderName(next);
+    setTestInfo(null); setTestErr(""); setNumbers([]); setPickedNumber("");
+    setProvisionErr(""); setVerifyResult(null);
+    load(next);
+  }, [load]);
+
+  const providerMeta = (state?.providers || []).find((p) => p.id === providerName) || null;
+  const supportsAuto = !!providerMeta?.auto_provision;
+  const webhooks = state?.webhooks || {};
+  const cfg = state?.config || {};
+  const isConfigured = !!(state?.configured_provider && cfg.number);
+  const statusLabel = isConfigured
+    ? `Live on ${cfg.number} via ${state.configured_provider} · ${cfg.setup_mode === "auto" ? "auto-setup" : "manual setup"}`
+    : "Not connected";
+  const statusClass = isConfigured ? "db-tag-blue" : "db-tag-yellow";
+
+  const testCreds = useCallback(async () => {
+    setTesting(true); setTestErr(""); setTestInfo(null);
+    try {
+      const r = await fetch(`/api/agents/${agent.id}/telephony/test-creds`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: providerName, auth_id: authId.trim(), auth_token: authToken.trim() }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.detail || "Couldn't verify credentials");
+      setTestInfo(data);
+      // After a successful test, list numbers too.
+      setNumbersLoading(true);
+      try {
+        const r2 = await fetch(`/api/agents/${agent.id}/telephony/numbers`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ provider: providerName, auth_id: authId.trim(), auth_token: authToken.trim() }),
+        });
+        const d2 = await r2.json();
+        if (r2.ok) setNumbers(d2.numbers || []);
+      } catch {}
+      finally { setNumbersLoading(false); }
+    } catch (e) {
+      setTestErr(String(e.message || e));
+    } finally {
+      setTesting(false);
+    }
+  }, [agent?.id, providerName, authId, authToken]);
+
+  const provision = useCallback(async () => {
+    setProvisioning(true); setProvisionErr("");
+    try {
+      const r = await fetch(`/api/agents/${agent.id}/telephony/provision`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: providerName,
+          auth_id: authId.trim(), auth_token: authToken.trim(),
+          number: pickedNumber,
+          alias: `SpiderX-${(agent.name || "Eva").replace(/\s+/g, "-")}-Inbound`,
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.detail || "Provisioning failed");
+      setState(data);
+      // Token is now stored; clear the local input so it can't be re-sent.
+      setAuthToken("");
+      refreshAgent && refreshAgent();
+    } catch (e) {
+      setProvisionErr(String(e.message || e));
+    } finally {
+      setProvisioning(false);
+    }
+  }, [agent?.id, providerName, authId, authToken, pickedNumber, agent?.name, refreshAgent]);
+
+  const saveManual = useCallback(async () => {
+    setManualSaving(true); setProvisionErr("");
+    try {
+      const r = await fetch(`/api/agents/${agent.id}/telephony/manual-config`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: providerName, number: manualNumber.trim() }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.detail || "Couldn't save");
+      setState(data);
+      refreshAgent && refreshAgent();
+    } catch (e) {
+      setProvisionErr(String(e.message || e));
+    } finally {
+      setManualSaving(false);
+    }
+  }, [agent?.id, providerName, manualNumber, refreshAgent]);
+
+  const verifyLive = useCallback(async () => {
+    setVerifying(true); setVerifyResult(null);
+    try {
+      const r = await fetch(`/api/agents/${agent.id}/telephony/verify-live`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+      });
+      const data = await r.json();
+      setVerifyResult({ ...data, http: r.status });
+    } catch (e) {
+      setVerifyResult({ ok: false, drift: String(e.message || e) });
+    } finally {
+      setVerifying(false);
+    }
+  }, [agent?.id]);
+
+  const disconnect = useCallback(async () => {
+    if (!confirm("Disconnect this number from SpiderX? This won't touch your carrier account — your Plivo/Twilio Application and number stay where they are.")) return;
+    try {
+      const r = await fetch(`/api/agents/${agent.id}/telephony`, { method: "DELETE" });
+      const data = await r.json();
+      setState(data);
+      setAuthId(""); setAuthToken(""); setNumbers([]); setPickedNumber("");
+      setTestInfo(null); setTestErr(""); setVerifyResult(null);
+      refreshAgent && refreshAgent();
+    } catch {}
+  }, [agent?.id, refreshAgent]);
+
+  const copy = useCallback((field, value) => {
+    try { navigator.clipboard.writeText(value); } catch {}
+    setCopied(field);
+    setTimeout(() => setCopied(""), 1400);
+  }, []);
+
+  if (loading) return html`<section class="db-panel db-panel-tall">
+    <div class="db-panel-head"><h3 class="db-panel-title">Phone number</h3></div>
+    <div class="db-panel-body"><div class="db-loading-sm">Loading…</div></div>
+  </section>`;
+
+  if (!state) return "";
+
+  return html`
+    <section class="db-panel db-panel-tall tel-panel">
+      <div class="db-panel-head">
+        <h3 class="db-panel-title">
+          Phone number
+          <span class=${"sip-status-pill " + statusClass}>${statusLabel}</span>
+        </h3>
+        <p class="db-panel-sub">
+          Pick your carrier, paste your account credentials, and we'll create
+          the Application + bind a number — without leaving SpiderX.
+        </p>
+      </div>
+
+      <label class="db-form-field tel-provider-row">
+        <span class="db-form-label">Carrier</span>
+        <div class="tel-provider-chips">
+          ${(state.providers || []).filter((p) => !p.sip_trunk).map((p) => html`
+            <button type="button" key=${p.id}
+                    class=${"tel-provider-chip" + (p.id === providerName ? " tel-provider-chip-on" : "")}
+                    onClick=${() => switchProvider(p.id)}>
+              ${p.name}
+              ${p.auto_provision ? html`<span class="tel-chip-tag">auto-setup</span>` : ""}
+            </button>
+          `)}
+        </div>
+      </label>
+
+      ${isConfigured ? html`
+        <div class="tel-current">
+          <div class="tel-current-row">
+            <span class="tel-current-key">Number</span>
+            <span class="tel-current-val">${cfg.number}</span>
+          </div>
+          ${cfg.app_id ? html`<div class="tel-current-row">
+            <span class="tel-current-key">Application</span>
+            <span class="tel-current-val tel-mono">${cfg.app_id}</span>
+          </div>` : ""}
+          ${cfg.last_verified_at ? html`<div class="tel-current-row">
+            <span class="tel-current-key">Last verified</span>
+            <span class="tel-current-val">${new Date(cfg.last_verified_at).toLocaleString()}</span>
+          </div>` : ""}
+          <div class="tel-current-actions">
+            <button class="db-btn-ghost db-btn-sm" type="button" onClick=${verifyLive} disabled=${verifying}>
+              ${verifying ? "Checking…" : "Verify live"}
+            </button>
+            <button class="db-btn-ghost db-btn-sm tel-btn-danger" type="button" onClick=${disconnect}>
+              Disconnect
+            </button>
+          </div>
+          ${verifyResult ? html`
+            <div class=${"tel-verify " + (verifyResult.ok ? "tel-verify-ok" : "tel-verify-drift")}>
+              ${verifyResult.ok
+                ? html`✓ Number is bound to the right Application.`
+                : html`✕ ${verifyResult.drift || "Couldn't verify."}`}
+            </div>
+          ` : ""}
+        </div>
+      ` : supportsAuto ? html`
+        <!-- Auto-setup card -->
+        <div class="tel-auto">
+          <div class="tel-auto-head">
+            <span class="tel-recom">recommended</span>
+            <span class="tel-auto-title">Paste your ${providerMeta?.name || "carrier"} credentials</span>
+          </div>
+          <p class="tel-auto-sub">
+            We'll use these to create the Application + bind a number on your
+            behalf. Stored encrypted; you can disconnect any time.
+          </p>
+          <div class="tel-auto-grid">
+            <label class="db-form-field">
+              <span class="db-form-label">Auth ID${providerName === "twilio" ? " (Account SID)" : ""}</span>
+              <input class="db-input" type="text" autocomplete="off"
+                     value=${authId} onInput=${(e) => setAuthId(e.target.value)}
+                     placeholder=${providerName === "twilio" ? "AC…" : "MAxxxxxxxxxxxxxxxxxxxx"} />
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Auth Token</span>
+              <div class="tel-token-wrap">
+                <input class="db-input" type=${tokenVisible ? "text" : "password"} autocomplete="off"
+                       value=${authToken} onInput=${(e) => setAuthToken(e.target.value)}
+                       placeholder=${state.creds?.auth_token_mask || "••••••••"} />
+                <button type="button" class="tel-token-eye" title=${tokenVisible ? "Hide" : "Show"}
+                        onClick=${() => setTokenVisible((v) => !v)}>${tokenVisible ? "🙈" : "👁"}</button>
+              </div>
+              ${state.creds?.has_token ? html`<span class="db-form-help">Stored securely · re-enter to change.</span>` : ""}
+            </label>
+          </div>
+          <div class="tel-auto-actions">
+            <button class="db-btn-primary db-btn-sm" type="button"
+                    onClick=${testCreds}
+                    disabled=${testing || !authId.trim() || !authToken.trim()}>
+              ${testing ? "Testing…" : "Test connection"}
+            </button>
+            ${testInfo ? html`
+              <span class="tel-test-ok">✓ Connected as "${testInfo.account_name || "your account"}"${testInfo.balance != null ? html` · balance ${testInfo.balance} ${testInfo.currency || ""}` : ""}</span>
+            ` : ""}
+          </div>
+          ${testErr ? html`<div class="tel-err">${testErr}</div>` : ""}
+
+          ${testInfo ? html`
+            <div class="tel-numbers">
+              <div class="tel-numbers-head">Pick a number for ${agent.name}</div>
+              ${numbersLoading ? html`<div class="db-loading-sm">Loading numbers…</div>` :
+                (numbers && numbers.length) ? html`
+                  <div class="tel-numbers-list">
+                    ${numbers.map((n) => html`
+                      <label class=${"tel-number-row" + (pickedNumber === n.number ? " tel-number-row-on" : "")} key=${n.number}>
+                        <input type="radio" name="tel-pick-num" value=${n.number}
+                               checked=${pickedNumber === n.number}
+                               onChange=${() => setPickedNumber(n.number)} />
+                        <span class="tel-number-num">${n.number}</span>
+                        <span class="tel-number-meta">
+                          ${[n.region || n.country, n.type, n.alias].filter(Boolean).join(" · ")}
+                        </span>
+                        ${n.current_app_id ? html`<span class="tel-number-warn" title="Already bound to Application ${n.current_app_id}">in use</span>` : ""}
+                      </label>
+                    `)}
+                  </div>
+                ` : html`<div class="tel-numbers-empty">
+                  No numbers in your ${providerMeta?.name} account yet.
+                  ${providerMeta?.id === "plivo" ? html`Buy one at <a href="https://console.plivo.com/numbers/" target="_blank" rel="noopener">Plivo console</a> and come back.` : ""}
+                  ${providerMeta?.id === "twilio" ? html`Buy one at <a href="https://console.twilio.com/" target="_blank" rel="noopener">Twilio console</a> and come back.` : ""}
+                </div>`}
+              ${pickedNumber ? html`
+                <div class="tel-provision">
+                  <p class="tel-provision-note">
+                    On <strong>Wire it up</strong> we'll create an Application called
+                    <em>SpiderX-${(agent.name || "Eva").replace(/\s+/g, "-")}-Inbound</em>
+                    in your ${providerMeta?.name} account and bind ${pickedNumber} to it.
+                  </p>
+                  <button class="db-btn-primary" type="button" onClick=${provision} disabled=${provisioning}>
+                    ${provisioning ? "Wiring up…" : "Wire it up"}
+                  </button>
+                </div>
+              ` : ""}
+            </div>
+          ` : ""}
+          ${provisionErr ? html`<div class="tel-err">${provisionErr}</div>` : ""}
+        </div>
+      ` : html`
+        <div class="tel-manual-only">
+          ${providerMeta?.name || "This provider"} doesn't support auto-setup —
+          fill in the manual section below.
+        </div>
+      `}
+
+      <!-- Manual fallback — always available; collapsed by default once
+           auto-setup is in play, expanded by default if auto isn't supported. -->
+      <div class="tel-manual">
+        <button type="button" class="tel-manual-toggle"
+                aria-expanded=${manualOpen ? "true" : "false"}
+                onClick=${() => setManualOpen((v) => !v)}>
+          Or, do it manually
+          <span class=${"tel-manual-caret" + (manualOpen ? " open" : "")} aria-hidden="true">▾</span>
+        </button>
+        ${manualOpen || !supportsAuto ? html`
+          <div class="tel-manual-body">
+            <ol class="tel-manual-steps">
+              <li>
+                In ${providerMeta?.name || "your carrier"}'s dashboard → <strong>Applications</strong> → <strong>Create</strong>, paste:
+                <div class="tel-copyrow">
+                  <span class="tel-copyrow-key">Answer URL</span>
+                  <input class="db-input tel-copy-input" type="text" readonly value=${webhooks.answer_url || ""} />
+                  <button type="button" class="db-btn-ghost db-btn-sm" onClick=${() => copy("answer", webhooks.answer_url)}>${copied === "answer" ? "✓ Copied" : "Copy"}</button>
+                </div>
+                <div class="tel-copyrow">
+                  <span class="tel-copyrow-key">Hangup URL</span>
+                  <input class="db-input tel-copy-input" type="text" readonly value=${webhooks.hangup_url || ""} />
+                  <button type="button" class="db-btn-ghost db-btn-sm" onClick=${() => copy("hangup", webhooks.hangup_url)}>${copied === "hangup" ? "✓ Copied" : "Copy"}</button>
+                </div>
+                <div class="tel-copyrow">
+                  <span class="tel-copyrow-key">Fallback URL</span>
+                  <input class="db-input tel-copy-input" type="text" readonly value=${webhooks.fallback_url || ""} />
+                  <button type="button" class="db-btn-ghost db-btn-sm" onClick=${() => copy("fallback", webhooks.fallback_url)}>${copied === "fallback" ? "✓ Copied" : "Copy"}</button>
+                </div>
+              </li>
+              <li>
+                In ${providerMeta?.name || "your carrier"}'s dashboard → <strong>Numbers</strong>, pick a number and set its Application to the one you just created.
+              </li>
+              <li>
+                Tell SpiderX which number you bound:
+                <div class="tel-copyrow">
+                  <input class="db-input tel-copy-input" type="text"
+                         placeholder="+91…"
+                         value=${manualNumber}
+                         onInput=${(e) => setManualNumber(e.target.value)} />
+                  <button type="button" class="db-btn-primary db-btn-sm"
+                          onClick=${saveManual}
+                          disabled=${manualSaving || !manualNumber.trim()}>
+                    ${manualSaving ? "Saving…" : "I've done it"}
+                  </button>
+                </div>
+              </li>
+            </ol>
+            ${!webhooks.answer_url || webhooks.answer_url.includes("YOUR-NGROK-HOST") ? html`
+              <div class="tel-warn">
+                <strong>PUBLIC_HOST not set</strong> — these URLs won't reach SpiderX. Ask your admin to set <code>PUBLIC_HOST</code> in the server env (ngrok host for local, your Railway domain for prod).
+              </div>
+            ` : ""}
+          </div>
+        ` : ""}
+      </div>
+    </section>
+  `;
+}
+
+
 // Go live — the friendly number-request flow as its own page.
 function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, org }) {
   // History of past number-request submissions for this agent — folded in
@@ -15464,13 +15867,19 @@ function App() {
         setRevealAgent(null);
         setAuthPage(path === "/signup" ? "signup" : "login");
         return;   // skip the default `setAuthPage(null)` below
-      } else if (path === "/account/billing" || path === "/account/integrations" || path === "/account/org" || path === "/account/team") {
-        // Account-scoped pages — no agent context.
+      } else if (path === "/account/billing" || path === "/account/integrations" || path === "/account/org" || path === "/account/team" || path === "/pricing") {
+        // Account-scoped pages — no agent context. Build 247: `/pricing`
+        // aliases to the same Billing surface so the homepage's "Pricing"
+        // nav button has a real route. Logged-out visitors hit the
+        // existing sign-in gate first; logged-in users see the plan
+        // ladder immediately. A dedicated public pricing page can
+        // replace this alias later without changing the URL the topbar
+        // points at.
         setAgentsListOpen(false);
         setRevealAgent(null);
         setAuthPage(null);
         setAccountPage(
-          path === "/account/billing" ? "billing"
+          path === "/account/billing" || path === "/pricing" ? "billing"
           : path === "/account/integrations" ? "integrations"
           : path === "/account/team" ? "team"
           : "org",
@@ -16425,6 +16834,34 @@ function App() {
         <a class="brandbar" href="/" aria-label="SpiderX.AI · home">
           <${SpiderXLogo} height=${20} />
         </a>
+        <!-- Build 247 — homepage topbar nav. Renders different chips
+             depending on auth state:
+               · logged out → "Pricing" + "Login" (login is the primary
+                              action, painted as a pill)
+               · logged in  → "Pricing" + "Dashboard" (dashboard is
+                              the primary action; their name no longer
+                              needs to be sold the product)
+             Locale state already drives currency / language defaults
+             via the picker inside LandingHero, so currency-aware
+             pricing tags can be wired into the Pricing route later
+             without touching this header. -->
+        <nav class="lp-topbar-nav" aria-label="Primary">
+          <a class="lp-topbar-link" href="/pricing"
+             onClick=${(e) => { e.preventDefault(); goRoute("/pricing"); }}>
+            Pricing
+          </a>
+          ${user ? html`
+            <button class="lp-topbar-cta" type="button"
+                    onClick=${() => goRoute("/agents")}>
+              Dashboard
+            </button>
+          ` : html`
+            <button class="lp-topbar-cta" type="button"
+                    onClick=${() => goRoute("/login")}>
+              Login
+            </button>
+          `}
+        </nav>
         <div class="landing-theme">
           <${ThemeToggle} theme=${theme} onToggle=${toggleTheme} />
         </div>
