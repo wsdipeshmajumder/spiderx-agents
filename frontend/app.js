@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 247;
+const SXAI_BUILD = 248;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -2848,6 +2848,139 @@ function UserMenu({ user, onSignOut, onNav }) {
   `;
 }
 
+// ─── YAML lite parser + question-slot mapper ──────────────────────────────
+//
+// The Firecrawl pull returns a condensed YAML brief (business_name, about,
+// phone, hours, services[], …). For the wizard we want to PRE-FILL the form
+// fields instead of showing the YAML raw. That's a UX promise: every fact we
+// extracted should land where the operator can see + edit it.
+//
+// _parseYamlLite is intentionally minimal — it handles the keys our condenser
+// emits (string scalars, block scalars on `|`, list-of-strings, list-of-objects
+// flattened to their first useful key). It is NOT a general YAML parser.
+// _mapYamlToAnswers walks the form's questions and finds the best matching
+// YAML key (id / slot-leaf / a small synonym table). Anything we can't map
+// stays in the raw YAML — saved to the agent's knowledge block on Create,
+// just hidden behind a "View source data" toggle.
+function _parseYamlLite(text) {
+  const out = {};
+  const lines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
+  let i = 0;
+  const isTopKey = (s) => /^[A-Za-z][A-Za-z0-9_\-]*\s*:/.test(s);
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim() || line.trim().startsWith("#")) { i++; continue; }
+    const m = line.match(/^([A-Za-z][A-Za-z0-9_\-]*)\s*:\s*(.*)$/);
+    // Only act on top-level keys (column 0, no leading indent).
+    if (!m || /^[ \t]/.test(line)) { i++; continue; }
+    const key = m[1];
+    let rest = (m[2] || "").trim();
+    i++;
+    if (rest === "" || rest === "|" || rest === "|-" || rest === ">" || rest === ">-") {
+      // Block — could be scalar, list-of-strings, or list-of-objects.
+      const childLines = [];
+      while (i < lines.length && (/^[ \t]/.test(lines[i]) || lines[i].trim() === "")) {
+        childLines.push(lines[i]); i++;
+      }
+      const firstNonblank = childLines.find((l) => l.trim() !== "") || "";
+      if (/^[ \t]+-\s/.test(firstNonblank)) {
+        // List. Group items by their `-` marker indent.
+        const items = [];
+        let cur = null;
+        for (const l of childLines) {
+          if (!l.trim()) continue;
+          const lm = l.match(/^([ \t]+)-\s+(.*)$/);
+          if (lm) {
+            if (cur) items.push(cur);
+            cur = { __raw: lm[2].trim(), kv: {} };
+            // If the marker line is itself `- key: val`, capture it.
+            const kvm = lm[2].match(/^([A-Za-z][A-Za-z0-9_\-]*)\s*:\s*(.*)$/);
+            if (kvm) cur.kv[kvm[1]] = kvm[2].trim().replace(/^["']|["']$/g, "");
+          } else if (cur) {
+            const km = l.match(/^[ \t]+([A-Za-z][A-Za-z0-9_\-]*)\s*:\s*(.*)$/);
+            if (km) cur.kv[km[1]] = km[2].trim().replace(/^["']|["']$/g, "");
+          }
+        }
+        if (cur) items.push(cur);
+        // Flatten: if every item has a `name` field, use names. Else use raw.
+        const named = items.map((it) => (it.kv.name || it.kv.q || it.kv.title || it.__raw || "").trim()).filter(Boolean);
+        if (named.length) out[key] = named;
+      } else {
+        // Block scalar.
+        const text = childLines.map((l) => l.replace(/^[ \t]+/, "")).join(" ").replace(/\s+/g, " ").trim();
+        if (text) out[key] = text;
+      }
+      continue;
+    }
+    // Inline value.
+    rest = rest.replace(/\s+#.*$/, "");                  // strip trailing # comment
+    rest = rest.replace(/^["']|["']$/g, "");             // strip surrounding quotes
+    if (rest) out[key] = rest;
+  }
+  return out;
+}
+
+// Alias table — maps a wizard question id/slot to the YAML keys our condenser
+// is likely to emit for that concept. Order doesn't matter; FIRST hit wins.
+const _YAML_ANSWER_ALIASES = {
+  business_name: ["business_name", "name", "company", "company_name", "brand"],
+  business_summary: ["about", "summary", "description", "tagline", "blurb"],
+  primary_job: ["primary_job", "main_goal", "goal", "purpose"],
+  phone: ["phone", "transfer_number", "contact_number", "primary_phone", "telephone"],
+  email: ["email", "contact_email"],
+  website: ["website", "url", "homepage"],
+  hours: ["hours", "opening_hours", "working_hours", "open_hours"],
+  address: ["address", "location", "street", "full_address"],
+  city: ["city", "town"],
+  services: ["services", "offerings", "products"],
+  amenities: ["amenities", "features"],
+  policies: ["policies", "policy_notes", "rules"],
+  faqs: ["faqs", "qna", "questions"],
+};
+
+function _mapYamlToAnswers(parsed, questions) {
+  const result = {};
+  if (!parsed || typeof parsed !== "object") return result;
+  const used = new Set();
+  const pickFor = (q) => {
+    const qid = (q.id || "").toLowerCase();
+    const slot = String(q.slot || qid).split(".").pop().toLowerCase();
+    const aliases = new Set([qid, slot]);
+    // Pull canonical synonym groups that this id/slot matches into.
+    Object.keys(_YAML_ANSWER_ALIASES).forEach((canon) => {
+      const group = _YAML_ANSWER_ALIASES[canon];
+      if (canon === qid || canon === slot || group.includes(qid) || group.includes(slot)) {
+        group.forEach((a) => aliases.add(a));
+        aliases.add(canon);
+      }
+    });
+    for (const cand of aliases) {
+      if (!cand || used.has(cand)) continue;
+      if (parsed[cand] == null) continue;
+      let v = parsed[cand];
+      if (Array.isArray(v)) {
+        if (q.type === "text_list") {
+          // already list-shape — keep as array
+        } else if (q.type === "bool") {
+          v = v.length > 0;
+        } else {
+          v = v.join(", ");
+        }
+      }
+      used.add(cand);
+      return v;
+    }
+    return undefined;
+  };
+  (questions || []).forEach((q) => {
+    const v = pickFor(q);
+    if (v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0)) {
+      result[q.id] = v;
+    }
+  });
+  return result;
+}
+
 // ─── WizardView ────────────────────────────────────────────────────────────
 //
 // The DEFAULT build surface (PO direction): a deterministic, multi-step FORM
@@ -2870,8 +3003,12 @@ function WizardView({ industry, locale, initialText, presets, onClose, onSwitchT
   // True while the LLM is pre-filling fields from the operator's typed
   // description (landing prompt box). Surfaces a tiny "pre-filling…" note.
   const [prefilling, setPrefilling] = useState(false);
-  // Tracks which fields the LLM filled, so we can badge them as "from your
-  // description" — a light trust signal that the pre-fill is editable.
+  // Tracks which fields the LLM filled, AND which SOURCE filled them:
+  //   "desc"  — extracted from the operator's typed prompt (landing composer)
+  //   "url"   — pulled from a Firecrawl scrape of a website / Maps listing
+  //   "default" — template default (rare; suppressed in badges)
+  // Truthy semantics preserved so existing `prefilled[id] ? …` callers don't
+  // need to change. The source string drives badge copy.
   const [prefilled, setPrefilled] = useState({});
   // Fields the operator has touched — once touched, an incoming (slower)
   // LLM pre-fill must NOT clobber their edit.
@@ -2880,15 +3017,23 @@ function WizardView({ industry, locale, initialText, presets, onClose, onSwitchT
   // ── URL → Firecrawl → YAML pre-fill (knowledge base) ─────────────────────
   // Optional on step 1: the operator can paste a website / Google-Maps /
   // local-listing URL. We scrape it server-side via Firecrawl, the best model
-  // condenses it to a YAML brief, and they REVIEW + edit it before the agent
-  // is created. The YAML is folded into the agent's system prompt at save
-  // time under a clearly-bounded KNOWLEDGE block.
+  // condenses it to a YAML brief, the wizard PARSES the YAML client-side and
+  // POURS the values into matching form fields. The full YAML is still kept
+  // for the agent's KNOWLEDGE block — it's just collapsed behind a "View
+  // source data" toggle so the operator-facing surface is the form, not the
+  // raw blob.
   const [urlInput, setUrlInput] = useState("");
   // "idle" | "loading" | "preview" | "error"
   const [urlState, setUrlState] = useState("idle");
   const [urlErr, setUrlErr] = useState("");
-  // { yaml, source: {kind, url, title} } once a scrape has been condensed.
+  // { yaml, source: {kind, url, title}, mappedCount, mappedIds } — populated
+  // once a scrape has been condensed AND the YAML has been mapped to answers.
   const [knowledge, setKnowledge] = useState(null);
+  // Raw YAML is hidden by default after a successful pull; toggleable.
+  const [yamlOpen, setYamlOpen] = useState(false);
+  // Whether the operator has dismissed the "resuming your prompt" strip.
+  // Persists for this wizard mount only — re-mount restores it.
+  const [resumeDismissed, setResumeDismissed] = useState(false);
 
   const FIELDS_PER_STEP = 3;
   const preset = industry ? INDUSTRY_PRESETS[industry] : null;
@@ -2909,7 +3054,7 @@ function WizardView({ industry, locale, initialText, presets, onClose, onSwitchT
     });
     if (prefill && typeof prefill === "object") {
       const badge = {};
-      Object.keys(prefill).forEach((id) => { seed[id] = prefill[id]; badge[id] = true; });
+      Object.keys(prefill).forEach((id) => { seed[id] = prefill[id]; badge[id] = "desc"; });
       setPrefilled(badge);
     }
     setAnswers(seed);
@@ -2970,7 +3115,7 @@ function WizardView({ industry, locale, initialText, presets, onClose, onSwitchT
                 return next;
               });
               const badge = {};
-              ids.forEach((id) => { if (!touchedRef.current[id]) badge[id] = true; });
+              ids.forEach((id) => { if (!touchedRef.current[id]) badge[id] = "desc"; });
               setPrefilled((prev) => ({ ...prev, ...badge }));
             })
             .catch(() => {})
@@ -3029,15 +3174,57 @@ function WizardView({ industry, locale, initialText, presets, onClose, onSwitchT
       }
       const data = await res.json();
       if (!data || !data.yaml) throw new Error("Nothing useful was found on that page.");
-      setKnowledge({ yaml: data.yaml, source: data.source || { kind: "url", url: u, title: "" } });
+      // Parse YAML client-side and POUR the values into matching form fields.
+      // Anything we can't map is still preserved in the raw YAML, which
+      // travels with `knowledge` into the agent's KNOWLEDGE block on Create.
+      const parsed = _parseYamlLite(data.yaml);
+      const qs = (tpl && tpl.questions) || [];
+      const mapped = _mapYamlToAnswers(parsed, qs);
+      const mappedIds = Object.keys(mapped).filter((id) => !touchedRef.current[id]);
+      if (mappedIds.length) {
+        setAnswers((prev) => {
+          const next = { ...prev };
+          mappedIds.forEach((id) => { next[id] = mapped[id]; });
+          return next;
+        });
+        const badge = {};
+        mappedIds.forEach((id) => { badge[id] = "url"; });
+        setPrefilled((prev) => ({ ...prev, ...badge }));
+      }
+      setKnowledge({
+        yaml: data.yaml,
+        source: data.source || { kind: "url", url: u, title: "" },
+        mappedIds,
+        totalQuestions: qs.length,
+      });
+      setYamlOpen(false);
       setUrlState("preview");
     } catch (e) {
       setUrlErr(String(e.message || e));
       setUrlState("error");
     }
   };
+  // Discarding the pulled facts:
+  //   • drops the YAML so it won't be folded into the agent's prompt
+  //   • CLEARS the answers we populated from `url` (only the untouched ones)
+  //   • removes the "from website" badges
+  //   • returns the URL input to idle so the operator can try a different one
   const discardKnowledge = () => {
+    const urlIds = Object.keys(prefilled).filter((id) => prefilled[id] === "url" && !touchedRef.current[id]);
+    if (urlIds.length) {
+      setAnswers((prev) => {
+        const next = { ...prev };
+        urlIds.forEach((id) => { delete next[id]; });
+        return next;
+      });
+      setPrefilled((prev) => {
+        const next = { ...prev };
+        urlIds.forEach((id) => { delete next[id]; });
+        return next;
+      });
+    }
     setKnowledge(null); setUrlState("idle"); setUrlInput(""); setUrlErr("");
+    setYamlOpen(false);
   };
 
   const submit = async () => {
@@ -3108,7 +3295,7 @@ function WizardView({ industry, locale, initialText, presets, onClose, onSwitchT
       // observed overwriting "services_offered" with the same text.
       control = html`<input
         key=${"wiz-input-" + q.id}
-        class=${"wiz-input" + (err ? " wiz-input-err" : "") + (prefilled[q.id] ? " wiz-input-prefilled" : "")}
+        class=${"wiz-input" + (err ? " wiz-input-err" : "") + (prefilled[q.id] ? " wiz-input-prefilled" + (prefilled[q.id] === "url" ? " wiz-input-prefilled-url" : "") : "")}
         type=${inputType}
         name=${q.id}
         autoComplete="off"
@@ -3132,7 +3319,13 @@ function WizardView({ industry, locale, initialText, presets, onClose, onSwitchT
       <div class="wiz-field" key=${q.id}>
         <label class="wiz-label">
           ${q.label}${q.required ? html`<span class="wiz-req" aria-hidden="true"> *</span>` : ""}
-          ${prefilled[q.id] ? html`<span class="wiz-prefill-badge" title="Pulled from what you typed — edit if needed">✨ from your description</span>` : ""}
+          ${prefilled[q.id] === "url"
+            ? html`<span class="wiz-prefill-badge wiz-prefill-badge-url" title="Pulled from the website / listing you shared — edit if needed">🌐 from website</span>`
+            : prefilled[q.id] === "desc"
+              ? html`<span class="wiz-prefill-badge" title="Pulled from what you typed — edit if needed">✨ from your prompt</span>`
+              : prefilled[q.id]
+                ? html`<span class="wiz-prefill-badge" title="Pulled from what you typed — edit if needed">✨ from your prompt</span>`
+                : ""}
         </label>
         ${q.prompt && q.prompt !== q.label ? html`<div class="wiz-prompt">${q.prompt}</div>` : ""}
         ${control}
@@ -3230,53 +3423,110 @@ function WizardView({ industry, locale, initialText, presets, onClose, onSwitchT
                 : isLast ? "Last details — then meet your agent" : "A few more details"}
             </h1>
             ${step === 0 && tpl.intro ? html`<p class="wiz-intro">${tpl.intro.trim()}</p>` : ""}
+            ${step === 0 && !resumeDismissed && (initialText || "").trim() ? html`
+              <div class="wiz-resume" role="status">
+                <div class="wiz-resume-emoji" aria-hidden="true">↺</div>
+                <div class="wiz-resume-body">
+                  <div class="wiz-resume-title">Picking up where you left off</div>
+                  <div class="wiz-resume-quote">"${(initialText || "").trim()}"</div>
+                </div>
+                <button class="wiz-resume-dismiss" type="button"
+                        title="Hide this — your prompt is still in use"
+                        onClick=${() => setResumeDismissed(true)}>✕</button>
+              </div>
+            ` : ""}
             ${step === 0 ? html`
-              <div class="wiz-knowledge">
-                ${urlState !== "preview" ? html`
+              <div class=${"wiz-knowledge"
+                + (urlState === "preview" ? " wiz-knowledge-filled" : "")
+                + (urlState === "loading" ? " wiz-knowledge-loading" : "")}>
+                ${urlState === "loading" ? html`
+                  <!-- Build 248 — non-blocking fetch banner. The form below
+                       stays fully interactive so the operator can keep
+                       filling it while we scrape in the background; once
+                       the scrape finishes we MERGE its values into any
+                       still-untouched fields (touchedRef.current guards
+                       overwriting anything the operator has typed). -->
+                  <div class="wiz-knowledge-head">
+                    <span class="wiz-spinner-sm wiz-knowledge-spin" aria-hidden="true"></span>
+                    <div class="wiz-knowledge-meta">
+                      <div class="wiz-knowledge-title">
+                        Pulling facts from <a href=${urlInput} target="_blank" rel="noopener" class="wiz-knowledge-link">${urlInput}</a>…
+                      </div>
+                      <div class="wiz-knowledge-sub">
+                        Keep filling out the form — we'll merge what we find into the blanks once the scrape lands. Anything you've already typed is safe.
+                      </div>
+                    </div>
+                    <button class="wiz-knowledge-discard" type="button"
+                            onClick=${() => { setUrlState("idle"); setUrlErr(""); }}>Cancel</button>
+                  </div>
+                ` : urlState !== "preview" ? html`
                   <div class="wiz-knowledge-head">
                     <span class="wiz-knowledge-emoji" aria-hidden="true">🌐</span>
                     <div class="wiz-knowledge-meta">
                       <div class="wiz-knowledge-title">Got a website, Google Maps listing, or local-listing URL?</div>
-                      <div class="wiz-knowledge-sub">Paste it — Eva pulls the facts (hours, services, pricing, FAQs) and shows you a YAML preview to review before saving.</div>
+                      <div class="wiz-knowledge-sub">Paste it — Eva pulls the facts (hours, services, pricing, FAQs) and fills the form below for you to review.</div>
                     </div>
                   </div>
                   <div class="wiz-knowledge-row">
                     <input class="wiz-input wiz-knowledge-input" type="url"
                            placeholder="https://your-business.com or a Google Maps link"
                            value=${urlInput}
-                           onInput=${(e) => { setUrlInput(e.target.value); if (urlState === "error") { setUrlErr(""); setUrlState("idle"); } }}
-                           disabled=${urlState === "loading"} />
+                           onInput=${(e) => { setUrlInput(e.target.value); if (urlState === "error") { setUrlErr(""); setUrlState("idle"); } }} />
                     <button class="wiz-btn-primary wiz-knowledge-go" type="button"
                             onClick=${pullFromUrl}
-                            disabled=${!urlInput.trim() || urlState === "loading"}>
-                      ${urlState === "loading"
-                        ? html`<span class="wiz-spinner-sm" aria-hidden="true"></span> Pulling…`
-                        : "Pull facts"}
+                            disabled=${!urlInput.trim()}>
+                      Pull facts
                     </button>
                   </div>
-                  ${urlState === "error" ? html`<div class="wiz-knowledge-err">${urlErr}</div>` : ""}
-                  <div class="wiz-knowledge-foot">Skip this if you'd rather just fill the form below.</div>
-                ` : html`
-                  <div class="wiz-knowledge-head">
-                    <span class="wiz-knowledge-emoji" aria-hidden="true">✅</span>
-                    <div class="wiz-knowledge-meta">
-                      <div class="wiz-knowledge-title">
-                        Facts pulled from <a href=${knowledge.source?.url || "#"} target="_blank" rel="noopener" class="wiz-knowledge-link">${knowledge.source?.title || knowledge.source?.url || "your URL"}</a>
-                      </div>
-                      <div class="wiz-knowledge-sub">Review and edit — saved to ${agentName === "Your agent" ? "your agent" : agentName}'s knowledge base on Create.</div>
+                  ${urlState === "error" ? html`
+                    <div class="wiz-knowledge-err">
+                      <span>${urlErr}</span>
+                      <button class="wiz-knowledge-skip" type="button"
+                              onClick=${() => { setUrlState("idle"); setUrlErr(""); }}>Skip — I'll fill it manually</button>
                     </div>
-                    <button class="wiz-knowledge-discard" type="button" onClick=${discardKnowledge} title="Discard these facts">Discard</button>
-                  </div>
-                  <textarea class="wiz-knowledge-yaml"
-                            rows="9"
-                            spellCheck="false"
-                            value=${knowledge.yaml || ""}
-                            onInput=${(e) => setKnowledge((k) => ({ ...(k || {}), yaml: e.target.value }))}></textarea>
-                  <div class="wiz-knowledge-foot">YAML format — edit freely. Eva uses this verbatim to answer callers.</div>
-                `}
+                  ` : ""}
+                  <div class="wiz-knowledge-foot">Skip this if you'd rather just fill the form below.</div>
+                ` : (() => {
+                    // Build 248 — leaner success state. The form fields
+                    // below are already populated (via setAnswers during
+                    // pullFromUrl), so the panel just needs to tell the
+                    // operator "review + fill the blanks" and offer a
+                    // discreet way to view the raw source if they want.
+                    const mc = (knowledge && knowledge.mappedIds && knowledge.mappedIds.length) || 0;
+                    const tc = (knowledge && knowledge.totalQuestions) || ((tpl && tpl.questions) || []).length;
+                    const src = knowledge.source || {};
+                    const srcLabel = src.title || src.url || "your URL";
+                    return html`
+                      <div class="wiz-knowledge-head">
+                        <span class="wiz-knowledge-emoji" aria-hidden="true">✅</span>
+                        <div class="wiz-knowledge-meta">
+                          <div class="wiz-knowledge-title">
+                            ${mc > 0
+                              ? html`Filled <strong>${mc}${tc ? html` of ${tc}` : ""}</strong> field${mc === 1 ? "" : "s"} from <a href=${src.url || "#"} target="_blank" rel="noopener" class="wiz-knowledge-link">${srcLabel}</a> — review and fill the blanks below.`
+                              : html`Pulled context from <a href=${src.url || "#"} target="_blank" rel="noopener" class="wiz-knowledge-link">${srcLabel}</a> — review the form below.`}
+                          </div>
+                          <div class="wiz-knowledge-sub">
+                            <button class="wiz-knowledge-srclink" type="button"
+                                    onClick=${() => setYamlOpen((v) => !v)}>
+                              ${yamlOpen ? "Hide source data" : "View source data"}
+                            </button>
+                          </div>
+                        </div>
+                        <button class="wiz-knowledge-discard" type="button" onClick=${discardKnowledge} title="Discard these facts and start over">Discard</button>
+                      </div>
+                      ${yamlOpen ? html`
+                        <textarea class="wiz-knowledge-yaml"
+                                  rows="9"
+                                  spellCheck="false"
+                                  value=${knowledge.yaml || ""}
+                                  onInput=${(e) => setKnowledge((k) => ({ ...(k || {}), yaml: e.target.value }))}></textarea>
+                        <div class="wiz-knowledge-foot">YAML format — edit freely. Eva uses this verbatim to answer callers.</div>
+                      ` : ""}
+                    `;
+                  })()}
               </div>
             ` : ""}
-            ${prefilling ? html`<div class="wiz-prefilling"><span class="wiz-spinner-sm" aria-hidden="true"></span> Pre-filling from your description…</div>` : ""}
+            ${prefilling ? html`<div class="wiz-prefilling"><span class="wiz-spinner-sm" aria-hidden="true"></span> Pre-filling from your prompt…</div>` : ""}
             <div class="wiz-fields">
               ${stepQuestions.map((q) => renderField(q))}
             </div>

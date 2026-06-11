@@ -2191,6 +2191,29 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   padding: 7px 10px;
 }
 .wiz-knowledge-foot { font-size: 11.5px; color: #8a8f9e; }
+/* Build 248 — loading variant. Slim banner over the URL panel that
+   reads as a background task; the form below stays fully interactive
+   so the operator can keep filling while the scrape resolves. */
+.wiz-knowledge-loading {
+  background: linear-gradient(180deg, #eef2ff 0%, #f5f7ff 100%);
+  border-color: #c7d2fe;
+}
+.wiz-knowledge-spin {
+  margin-top: 4px;
+}
+/* Discreet text-button "view source data" — sits inline under the
+   success header, NOT a big blocky toggle that fights the form for
+   the operator's eye. */
+.wiz-knowledge-srclink {
+  font: inherit; font-size: 12.5px; font-weight: 600;
+  color: #6366f1; background: transparent; border: 0; padding: 0;
+  cursor: pointer; line-height: 1.45;
+}
+.wiz-knowledge-srclink:hover { text-decoration: underline; }
+:root[data-theme="dark"] .wiz-knowledge-loading {
+  background: linear-gradient(180deg, #1a1f3a 0%, #1a1a2e 100%);
+  border-color: #3b4275;
+}
 .wiz-knowledge-yaml {
   width: 100%; box-sizing: border-box; font: 12.5px/1.55 ui-monospace, SF Mono, Menlo, monospace;
   color: #1f2937;
@@ -2209,6 +2232,78 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 :root[data-theme="dark"] .wiz-knowledge-yaml { background: #14171f; border-color: #2a2f3e; color: #f1f3f8; }
 :root[data-theme="dark"] .wiz-knowledge-discard:hover { background: #2a1a1f; border-color: #6b2a36; }
 :root[data-theme="dark"] .wiz-knowledge-err { background: #2a1a1f; border-color: #6b2a36; color: #fca5a5; }
+
+/* "Picking up where you left off" strip — shows the original prompt the
+   visitor typed before login so they know what triggered the wizard. */
+.wiz-resume {
+  display: flex; align-items: flex-start; gap: 12px;
+  margin: 4px 0 16px; padding: 12px 14px;
+  background: linear-gradient(180deg, #f0f8ff 0%, #f7fbff 100%);
+  border: 1px solid #d5e7fb; border-radius: 12px;
+}
+.wiz-resume-emoji {
+  flex: 0 0 auto; width: 26px; height: 26px; border-radius: 50%;
+  background: #4f46e5; color: #fff; display: inline-flex;
+  align-items: center; justify-content: center; font-size: 16px; font-weight: 700;
+  margin-top: 1px;
+}
+.wiz-resume-body { flex: 1; min-width: 0; }
+.wiz-resume-title { font-size: 12px; font-weight: 700; color: #4f46e5;
+  text-transform: uppercase; letter-spacing: 0.04em; }
+.wiz-resume-quote {
+  margin-top: 4px; font-size: 13.5px; line-height: 1.5; color: #1f2937;
+  font-style: italic;
+  overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+}
+.wiz-resume-dismiss {
+  flex: 0 0 auto; font: inherit; font-size: 14px; line-height: 1;
+  color: #6a6f7e; background: transparent; border: 0; cursor: pointer;
+  padding: 4px 6px; border-radius: 6px;
+}
+.wiz-resume-dismiss:hover { background: rgba(15, 23, 42, 0.06); color: #1f2937; }
+:root[data-theme="dark"] .wiz-resume {
+  background: linear-gradient(180deg, #1c2030 0%, #181b26 100%);
+  border-color: #2a3550;
+}
+:root[data-theme="dark"] .wiz-resume-title { color: #c4b5fd; }
+:root[data-theme="dark"] .wiz-resume-quote { color: #e7e9ee; }
+:root[data-theme="dark"] .wiz-resume-dismiss:hover { background: rgba(255,255,255,0.06); color: #f1f3f8; }
+
+/* Collapsed knowledge card after a successful pull — emphasises the
+   "Filled N fields" pill, hides raw YAML behind a toggle. */
+.wiz-knowledge-filled { background: linear-gradient(180deg, #f0fdf4 0%, #f7fbf9 100%); border-color: #c5ead5; }
+:root[data-theme="dark"] .wiz-knowledge-filled {
+  background: linear-gradient(180deg, #14241c 0%, #131a16 100%); border-color: #2a4a3a;
+}
+.wiz-knowledge-toggle {
+  align-self: flex-start;
+  font: inherit; font-size: 12px; font-weight: 600; color: #4f46e5;
+  background: transparent; border: 0; border-radius: 6px;
+  padding: 2px 6px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.wiz-knowledge-toggle:hover { color: #312e81; background: rgba(99, 102, 241, 0.08); }
+.wiz-knowledge-toggle-caret { transition: transform 0.15s ease; display: inline-block; }
+.wiz-knowledge-toggle-caret.open { transform: rotate(180deg); }
+:root[data-theme="dark"] .wiz-knowledge-toggle { color: #a5b4fc; }
+:root[data-theme="dark"] .wiz-knowledge-toggle:hover { color: #c7d2fe; background: rgba(165, 180, 252, 0.1); }
+
+.wiz-knowledge-err { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.wiz-knowledge-skip {
+  font: inherit; font-size: 12px; font-weight: 600; color: #4f46e5;
+  background: transparent; border: 0; border-radius: 6px; padding: 4px 8px; cursor: pointer;
+  white-space: nowrap;
+}
+.wiz-knowledge-skip:hover { background: rgba(99, 102, 241, 0.08); }
+:root[data-theme="dark"] .wiz-knowledge-skip { color: #a5b4fc; }
+
+/* "from website" badge — emerald, distinct from the violet "from your prompt"
+   badge so the operator can see at a glance which source filled each field. */
+.wiz-prefill-badge-url { color: #047857; background: #ecfdf5; border-color: #b9ead5; }
+:root[data-theme="dark"] .wiz-prefill-badge-url { color: #6ee7b7; background: #11281f; border-color: #1c3d2d; }
+.wiz-input-prefilled.wiz-input-prefilled-url,
+.wiz-input.wiz-input-prefilled.wiz-input-prefilled-url { border-color: #6ee7b7; background: #f6fdf9; }
 
 .wiz-prefilling {
   display: inline-flex; align-items: center; gap: 8px;
