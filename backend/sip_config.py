@@ -49,11 +49,33 @@ from .presets import SIP_PROVIDERS
 
 
 # Inbound SIP host — where Voniz (or any forwarder) should send INVITEs.
-# Set via env so the operator's "paste this URI into Voniz" instruction is
-# always correct for the deployment. Default is a placeholder for local /
-# unconfigured environments; production should set SIP_INBOUND_HOST to
-# the public SIP server hostname.
-SIP_INBOUND_HOST = os.environ.get("SIP_INBOUND_HOST", "sip.spiderx.ai")
+# Resolution order so the URI in the dashboard always points at a real
+# deployment:
+#   1. SIP_INBOUND_HOST env var — explicit override for when a dedicated
+#      SIP subdomain (e.g. sip.example.com) is provisioned.
+#   2. PUBLIC_BASE_URL hostname — same domain the SPA is served from.
+#      Falls back to this so an operator who's set PUBLIC_BASE_URL to
+#      https://agents.spiderx.ai automatically gets
+#      sip:agent-N@agents.spiderx.ai, not a phantom sip.spiderx.ai.
+#   3. Hardcoded fallback "agents.spiderx.ai" — the real customer-
+#      facing host, not a phantom subdomain. Operators on a different
+#      deployment should set one of the env vars above.
+def _resolve_inbound_host() -> str:
+    explicit = (os.environ.get("SIP_INBOUND_HOST") or "").strip()
+    if explicit:
+        return explicit
+    base = (os.environ.get("PUBLIC_BASE_URL") or "").strip()
+    if base:
+        # urlparse handles missing scheme by treating the whole thing as
+        # `path`; guard with a manual scheme strip for that case.
+        from urllib.parse import urlparse
+        host = urlparse(base if "://" in base else f"https://{base}").hostname
+        if host:
+            return host
+    return "agents.spiderx.ai"
+
+
+SIP_INBOUND_HOST = _resolve_inbound_host()
 
 
 _DOMAIN_RE = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,62}\.)+[a-zA-Z]{2,}$")

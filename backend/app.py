@@ -6,7 +6,7 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, WebSocket
@@ -117,7 +117,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 248
+APP_BUILD = 252
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -2480,6 +2480,442 @@ async def ws_twilio(ws: WebSocket, agent_id: int) -> None:
             await ws.close()
         except Exception:
             pass
+
+
+# ──────────────────────── Generic telephony adapter ────────────────
+#
+# Build 250 — Plivo + any future webhook-based carrier shares one URL family.
+# `{provider}` is `plivo`, `twilio` (alias for the legacy route above), or
+# whatever the registry holds (Exotel etc. when added).
+#
+#   POST /api/sip/{provider}/answer/{agent_id}    → returns the provider's XML
+#   POST /api/sip/{provider}/hangup               → finalises the call row
+#   POST /api/sip/{provider}/fallback             → polite hangup on primary fail
+#    WS  /ws/{provider}/{agent_id}                → audio bridge into Gemini Live
+#
+# Plivo's dashboard wants exact URLs in its "Create Application" dialog.
+# Paste these:
+#   Answer URL:    https://<host>/api/sip/plivo/answer/<agent_id>
+#   Hangup URL:    https://<host>/api/sip/plivo/hangup
+#   Fallback URL:  https://<host>/api/sip/plivo/fallback
+
+
+def _public_wss_host() -> str:
+    """Public hostname for the carrier's WebSocket. Mirrors the Twilio
+    helper above — supports PUBLIC_HOST as either bare host, http(s) URL,
+    or ws(s) URL."""
+    public_host = os.environ.get("PUBLIC_HOST", "").rstrip("/")
+    if not public_host:
+        return "wss://YOUR-NGROK-HOST"
+    if public_host.startswith("http://"):
+        return "ws://" + public_host[len("http://"):]
+    if public_host.startswith("https://"):
+        return "wss://" + public_host[len("https://"):]
+    if not public_host.startswith(("ws://", "wss://")):
+        return "wss://" + public_host
+    return public_host
+
+
+@app.api_route("/api/sip/{provider}/answer/{agent_id}", methods=["GET", "POST"],
+               response_class=PlainTextResponse)
+async def telephony_answer(provider: str, agent_id: int):
+    """Generic carrier Answer URL — returns the XML/JSON the carrier expects
+    to start streaming audio to our WebSocket."""
+    from .telephony import get_provider
+    prov = get_provider(provider)
+    if prov is None:
+        raise HTTPException(status_code=404, detail=f"provider {provider!r} not registered")
+    a = await db.get_agent(agent_id)
+    if not a:
+        raise HTTPException(status_code=404, detail="agent not found")
+    stream_url = f"{_public_wss_host()}/ws/{prov.name}/{agent_id}"
+    body, content_type = prov.answer_xml(stream_url=stream_url, agent=a)
+    return PlainTextResponse(content=body, media_type=content_type)
+
+
+@app.api_route("/api/sip/{provider}/fallback", methods=["GET", "POST"],
+               response_class=PlainTextResponse)
+@app.api_route("/api/sip/{provider}/fallback/{agent_id}", methods=["GET", "POST"],
+               response_class=PlainTextResponse)
+async def telephony_fallback(provider: str, agent_id: Optional[int] = None):
+    """Carrier's Fallback URL — primary timed out or 5xx'd. We emit a
+    `telephony.fallback` event so observability shows the degradation
+    and return the provider's polite-hangup XML."""
+    from .telephony import get_provider
+    prov = get_provider(provider)
+    if prov is None:
+        raise HTTPException(status_code=404, detail=f"provider {provider!r} not registered")
+    a = await db.get_agent(agent_id) if agent_id else None
+    try:
+        from . import events
+        await events.emit(
+            kind="telephony.fallback",
+            title=f"{prov.display_name} fallback URL hit",
+            severity="warning",
+            source="webhook",
+            agent_id=agent_id,
+            payload={"provider": prov.name},
+        )
+    except Exception:  # noqa: BLE001 — observability shouldn't break the response
+        pass
+    body, content_type = prov.fallback_xml(agent=a)
+    return PlainTextResponse(content=body, media_type=content_type)
+
+
+@app.post("/api/sip/{provider}/hangup")
+@app.post("/api/sip/{provider}/hangup/{agent_id}")
+async def telephony_hangup(provider: str, request: Request, agent_id: Optional[int] = None) -> dict:
+    """Carrier's Hangup URL — fires once when the call ends. We normalise
+    the body and emit a `call.ended` event for observability + EOD digest."""
+    from .telephony import get_provider
+    prov = get_provider(provider)
+    if prov is None:
+        raise HTTPException(status_code=404, detail=f"provider {provider!r} not registered")
+    # Carriers POST form-encoded by default; accept JSON too.
+    body: dict[str, Any] = {}
+    ctype = (request.headers.get("content-type") or "").lower()
+    try:
+        if "application/json" in ctype:
+            body = await request.json() or {}
+        else:
+            form = await request.form()
+            body = dict(form)
+    except Exception:  # noqa: BLE001
+        body = {}
+    normalised = prov.parse_hangup_webhook(body)
+    try:
+        from . import events
+        cid = normalised.get("call_id") or "?"
+        dur = normalised.get("duration_seconds")
+        await events.emit(
+            kind="call.ended",
+            title=f"{prov.display_name} call {cid} ended" + (f" ({dur}s)" if dur else ""),
+            severity="info",
+            source="webhook",
+            agent_id=agent_id,
+            payload={
+                "provider": prov.name,
+                "call_id": normalised.get("call_id"),
+                "duration_seconds": normalised.get("duration_seconds"),
+                "hangup_cause": normalised.get("hangup_cause"),
+            },
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True}
+
+
+@app.websocket("/ws/{provider}/{agent_id}")
+async def ws_telephony(ws: WebSocket, provider: str, agent_id: int) -> None:
+    """Generic carrier WS → Gemini Live bridge. Dispatches by provider name."""
+    from .telephony import get_provider, run_call
+    prov = get_provider(provider)
+    if prov is None:
+        await ws.close(code=4004)
+        return
+    await ws.accept()
+    try:
+        await run_call(ws, prov, agent_id)
+    finally:
+        try:
+            await ws.close()
+        except Exception:
+            pass
+
+
+# ──────────────────────── Telephony provisioning (auto + manual) ───
+#
+# Build 251 — endpoints that drive the Phone Number tab on agent settings.
+# Operator pastes carrier creds (Plivo Auth ID + Token, Twilio SID + Token);
+# we hit the carrier's REST API to verify creds, list owned numbers, create
+# an Application with our webhook URLs pre-filled, and bind a chosen number
+# to that Application — all without leaving SpiderX.
+#
+# Manual fallback: same endpoints (minus the auto-create steps) plus a
+# "verify live" check that reads the carrier's current binding and tells
+# the operator exactly what's misconfigured if anything is.
+
+
+def _public_https_host() -> str:
+    """Public HTTPS hostname for the carrier's Answer / Hangup / Fallback URLs.
+    Mirrors `_public_wss_host` but emits https:// instead of wss://."""
+    public_host = os.environ.get("PUBLIC_HOST", "").rstrip("/")
+    if not public_host:
+        return "https://YOUR-NGROK-HOST"
+    if public_host.startswith(("ws://",)):
+        return "http://" + public_host[len("ws://"):]
+    if public_host.startswith(("wss://",)):
+        return "https://" + public_host[len("wss://"):]
+    if not public_host.startswith(("http://", "https://")):
+        return "https://" + public_host
+    return public_host
+
+
+def _webhook_urls(provider_name: str, agent_id: int) -> dict[str, str]:
+    """The URLs that go into the carrier's Application dialog."""
+    base = _public_https_host()
+    return {
+        "answer_url":   f"{base}/api/sip/{provider_name}/answer/{agent_id}",
+        "hangup_url":   f"{base}/api/sip/{provider_name}/hangup/{agent_id}",
+        "fallback_url": f"{base}/api/sip/{provider_name}/fallback/{agent_id}",
+        "stream_url":   f"{_public_wss_host()}/ws/{provider_name}/{agent_id}",
+    }
+
+
+def _telephony_view(agent: dict[str, Any], provider_name: Optional[str] = None) -> dict[str, Any]:
+    """Project the agent's stored telephony state into the shape the UI
+    consumes. Never returns the raw Auth Token — only the last-4 tail."""
+    from .telephony import available_providers
+    from .telephony.secrets import decrypt_creds, mask_token
+    cfg = agent.get("sip_config") or {}
+    stored_provider = (cfg.get("provider") or "").lower() if isinstance(cfg, dict) else ""
+    selected = (provider_name or stored_provider or "").lower()
+    creds = decrypt_creds(agent.get("telephony_secret_enc"))
+    auth_token = (creds.get("auth_token") or "")
+    return {
+        "providers": available_providers(),
+        "selected_provider": selected or None,
+        "configured_provider": stored_provider or None,
+        "config": {
+            "alias": (cfg.get("alias") if isinstance(cfg, dict) else None) or "",
+            "number": (cfg.get("number") if isinstance(cfg, dict) else None) or "",
+            "app_id": (cfg.get("app_id") if isinstance(cfg, dict) else None) or "",
+            "setup_mode": (cfg.get("setup_mode") if isinstance(cfg, dict) else None) or "",
+            "last_verified_at": (cfg.get("last_verified_at") if isinstance(cfg, dict) else None),
+        },
+        "creds": {
+            "auth_id": (creds.get("auth_id") or "") if creds else "",
+            "auth_token_mask": mask_token(auth_token) if auth_token else "",
+            "has_token": bool(auth_token),
+        },
+        "webhooks": _webhook_urls(selected or "plivo", int(agent["id"])),
+    }
+
+
+@app.get("/api/agents/{agent_id}/telephony")
+async def telephony_get(agent_id: int, request: Request, provider: Optional[str] = None) -> dict:
+    """Current telephony state for the agent. Optional `?provider=plivo`
+    switches the previewed webhook URLs without persisting anything."""
+    user = await current_user(request)
+    agent = await _require_agent_owned(agent_id, user)
+    return _telephony_view(agent, provider_name=provider)
+
+
+@app.post("/api/agents/{agent_id}/telephony/test-creds")
+async def telephony_test_creds(agent_id: int, request: Request) -> dict:
+    """Verify the operator's carrier credentials WITHOUT persisting them.
+    Returns `{ok, account_name, balance, currency}` on success."""
+    user = await current_user(request)
+    await _require_agent_admin(agent_id, user)
+    body = await request.json()
+    provider_name = (body.get("provider") or "").strip().lower()
+    from .telephony import get_provider
+    from .telephony.base import TelephonyAuthError
+    prov = get_provider(provider_name)
+    if prov is None:
+        raise HTTPException(status_code=400, detail=f"unknown provider {provider_name!r}")
+    if not prov.auto_provision_supported:
+        raise HTTPException(status_code=400, detail=f"{prov.display_name} doesn't support auto-setup")
+    creds = {
+        "auth_id":    (body.get("auth_id") or body.get("account_sid") or "").strip(),
+        "auth_token": (body.get("auth_token") or "").strip(),
+    }
+    try:
+        info = await prov.verify_creds(creds)
+    except TelephonyAuthError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return info
+
+
+@app.post("/api/agents/{agent_id}/telephony/numbers")
+async def telephony_list_numbers(agent_id: int, request: Request) -> dict:
+    """List the operator's owned numbers in the carrier's account. Creds
+    come in the POST body (we don't want them in a GET query string)."""
+    user = await current_user(request)
+    await _require_agent_admin(agent_id, user)
+    body = await request.json()
+    provider_name = (body.get("provider") or "").strip().lower()
+    from .telephony import get_provider
+    from .telephony.base import TelephonyAuthError
+    prov = get_provider(provider_name)
+    if prov is None:
+        raise HTTPException(status_code=400, detail=f"unknown provider {provider_name!r}")
+    creds = {
+        "auth_id":    (body.get("auth_id") or body.get("account_sid") or "").strip(),
+        "auth_token": (body.get("auth_token") or "").strip(),
+    }
+    try:
+        nums = await prov.list_numbers(creds)
+    except TelephonyAuthError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"{prov.display_name} API error: {e}")
+    return {"ok": True, "numbers": nums}
+
+
+@app.post("/api/agents/{agent_id}/telephony/provision")
+async def telephony_provision(agent_id: int, request: Request) -> dict:
+    """Auto-setup: create the Application in the carrier's dashboard with
+    our webhook URLs pre-filled, bind the chosen number to it, and persist
+    the encrypted creds + binding metadata onto the agent row."""
+    from datetime import datetime, timezone
+    from .telephony import get_provider
+    from .telephony.base import TelephonyAuthError
+    from .telephony.secrets import encrypt_creds
+    user = await current_user(request)
+    agent = await _require_agent_admin(agent_id, user)
+    body = await request.json()
+    provider_name = (body.get("provider") or "").strip().lower()
+    prov = get_provider(provider_name)
+    if prov is None:
+        raise HTTPException(status_code=400, detail=f"unknown provider {provider_name!r}")
+    if not prov.auto_provision_supported:
+        raise HTTPException(status_code=400, detail=f"{prov.display_name} doesn't support auto-setup")
+    number = (body.get("number") or "").strip()
+    if not number:
+        raise HTTPException(status_code=400, detail="number is required")
+    creds = {
+        "auth_id":    (body.get("auth_id") or body.get("account_sid") or "").strip(),
+        "auth_token": (body.get("auth_token") or "").strip(),
+    }
+    if not creds["auth_id"] or not creds["auth_token"]:
+        raise HTTPException(status_code=400, detail="auth_id and auth_token are required")
+    alias = (body.get("alias") or f"SpiderX-{agent.get('name') or 'Eva'}-Inbound").strip()[:120]
+    urls = _webhook_urls(prov.name, agent_id)
+    try:
+        app_info = await prov.create_application(
+            creds=creds, name=alias,
+            answer_url=urls["answer_url"],
+            hangup_url=urls["hangup_url"],
+            fallback_url=urls["fallback_url"],
+        )
+        await prov.bind_number(
+            creds=creds, number=number,
+            app_id=app_info["app_id"], alias=alias,
+        )
+    except TelephonyAuthError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"{prov.display_name} API error: {e}")
+    cfg = {
+        "provider": prov.name,
+        "alias": alias,
+        "number": number,
+        "app_id": app_info.get("app_id"),
+        "setup_mode": "auto",
+        "configured_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "last_verified_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    secret = encrypt_creds(creds)
+    updated = await db.update_agent(agent_id, {
+        "sip_config": cfg,
+        "telephony_secret_enc": secret,
+    })
+    if not updated:
+        raise HTTPException(status_code=404, detail="agent not found")
+    try:
+        from . import events
+        await events.emit(
+            kind="telephony.provisioned",
+            title=f"{prov.display_name} number {number} bound to agent {agent.get('name') or agent_id}",
+            severity="info", source="user", agent_id=agent_id,
+            payload={"provider": prov.name, "number": number, "app_id": app_info.get("app_id"), "mode": "auto"},
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    return _telephony_view(updated, provider_name=prov.name)
+
+
+@app.post("/api/agents/{agent_id}/telephony/manual-config")
+async def telephony_manual_config(agent_id: int, request: Request) -> dict:
+    """Operator did the setup manually in the carrier's dashboard — record
+    which provider + number so we can route inbound calls and show status."""
+    from datetime import datetime, timezone
+    from .telephony import get_provider
+    user = await current_user(request)
+    agent = await _require_agent_admin(agent_id, user)
+    body = await request.json()
+    provider_name = (body.get("provider") or "").strip().lower()
+    prov = get_provider(provider_name)
+    if prov is None:
+        raise HTTPException(status_code=400, detail=f"unknown provider {provider_name!r}")
+    number = (body.get("number") or "").strip()
+    if not number:
+        raise HTTPException(status_code=400, detail="number is required")
+    alias = (body.get("alias") or "").strip()[:120]
+    existing_cfg = agent.get("sip_config") or {}
+    cfg = {
+        **(existing_cfg if isinstance(existing_cfg, dict) else {}),
+        "provider": prov.name,
+        "number": number,
+        "alias": alias,
+        "setup_mode": "manual",
+        "configured_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    updated = await db.update_agent(agent_id, {"sip_config": cfg})
+    if not updated:
+        raise HTTPException(status_code=404, detail="agent not found")
+    return _telephony_view(updated, provider_name=prov.name)
+
+
+@app.post("/api/agents/{agent_id}/telephony/verify-live")
+async def telephony_verify_live(agent_id: int, request: Request) -> dict:
+    """Re-read the carrier's current binding for the configured number and
+    compare to what we expect. Surfaces the gap so the UI can tell the
+    operator exactly what's wrong (e.g. "Number is bound to a different
+    Application")."""
+    from datetime import datetime, timezone
+    from .telephony import get_provider
+    from .telephony.base import TelephonyAuthError
+    from .telephony.secrets import decrypt_creds
+    user = await current_user(request)
+    agent = await _require_agent_admin(agent_id, user)
+    cfg = agent.get("sip_config") or {}
+    if not isinstance(cfg, dict) or not cfg.get("provider") or not cfg.get("number"):
+        raise HTTPException(status_code=400, detail="No telephony provider configured yet.")
+    prov = get_provider(cfg["provider"])
+    if prov is None or not prov.auto_provision_supported:
+        # Manual-only providers can't be verified via API.
+        return {"ok": True, "verifiable": False,
+                "reason": f"{cfg['provider']} doesn't expose a read-back API; verification is by inbound test call."}
+    creds = decrypt_creds(agent.get("telephony_secret_enc"))
+    if not creds.get("auth_id") or not creds.get("auth_token"):
+        raise HTTPException(status_code=400,
+                            detail="Saved carrier credentials are missing — re-enter them under Auto-setup.")
+    try:
+        remote = await prov.read_number_config(creds=creds, number=cfg["number"])
+    except TelephonyAuthError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"{prov.display_name} API error: {e}")
+    expected_app_id = cfg.get("app_id")
+    remote_app_id = remote.get("app_id")
+    ok = bool(remote_app_id) and (not expected_app_id or remote_app_id == expected_app_id)
+    if ok:
+        cfg["last_verified_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        await db.update_agent(agent_id, {"sip_config": cfg})
+    return {
+        "ok": ok,
+        "verifiable": True,
+        "remote": remote,
+        "expected_app_id": expected_app_id,
+        "drift": None if ok else (
+            f"Number is bound to Application {remote_app_id!r}, expected {expected_app_id!r}."
+            if remote_app_id and expected_app_id and remote_app_id != expected_app_id
+            else "Number isn't bound to any Application in your carrier account."
+        ),
+    }
+
+
+@app.delete("/api/agents/{agent_id}/telephony")
+async def telephony_disconnect(agent_id: int, request: Request) -> dict:
+    """Wipe our copy of the carrier credentials + binding metadata. Does
+    NOT touch the carrier's account — the operator may want to keep the
+    Application/number for another purpose."""
+    user = await current_user(request)
+    agent = await _require_agent_admin(agent_id, user)
+    await db.update_agent(agent_id, {"sip_config": None, "telephony_secret_enc": None})
+    return _telephony_view({**agent, "sip_config": None, "telephony_secret_enc": None})
 
 
 # ─────────────────────── static frontend ──────────────────

@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 248;
+const SXAI_BUILD = 252;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -11380,6 +11380,10 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
         ${embedPanel}
         ${sipPanel}
       </div>
+      <!-- Build 251 — HTTP-webhook telephony (Plivo Application, Twilio
+           Programmable Voice) with auto-setup via the carrier's REST API +
+           copy-paste fallback. Distinct from the SIP-trunk card above. -->
+      <${TelephonyPanel} agent=${agent} refreshAgent=${refreshAgent} />
       <!-- Secondary fallback for operators who don't have a SIP
            provider yet — we provision a managed number for them. -->
       ${managedFallback}
