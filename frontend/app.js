@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 254;
+const SXAI_BUILD = 255;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -10128,13 +10128,17 @@ function TelephonyPanel({ agent, refreshAgent }) {
 
   useEffect(() => { load(); }, [load]);
 
-  // Auto-expand the manual flow when the operator has a saved-but-
-  // unverified manual config — they need the webhook URLs visible
-  // to finish setup on the carrier side.
+  // Auto-expand the manual flow whenever there is no fully-live
+  // config yet — saved-but-unverified manual config, OR no config at
+  // all. Showing the operator the webhook URLs they need to copy is
+  // the minimum-viable affordance even when they haven't touched the
+  // auto-setup form. Only collapses once the connection becomes
+  // genuinely live (setup_mode=auto OR last_verified_at).
   useEffect(() => {
-    if (state?.config?.setup_mode === "manual" && !state?.config?.last_verified_at) {
-      setManualOpen(true);
-    }
+    const cm = state?.config?.setup_mode;
+    const ver = state?.config?.last_verified_at;
+    const live = (cm === "auto") || !!ver;
+    if (!live) setManualOpen(true);
   }, [state?.config?.setup_mode, state?.config?.last_verified_at]);
 
   // Re-fetch the previewed webhook URLs when the provider changes.
@@ -10262,12 +10266,41 @@ function TelephonyPanel({ agent, refreshAgent }) {
     setTimeout(() => setCopied(""), 1400);
   }, []);
 
+  // Build 255 — never return an empty section. If the /telephony fetch
+  // is still loading OR errored, fall back to a stub state with the
+  // two known providers (twilio + plivo) so the operator ALWAYS sees
+  // the carrier picker + manual disclosure with the webhook URLs they
+  // need. The agent_id is in scope, so we can build deterministic
+  // webhook URLs client-side without the server response.
   if (loading) return html`<section class="db-panel db-panel-tall">
     <div class="db-panel-head"><h3 class="db-panel-title">Phone number</h3></div>
     <div class="db-panel-body"><div class="db-loading-sm">Loading…</div></div>
   </section>`;
 
-  if (!state) return "";
+  if (!state) {
+    // Synthesize a minimum-viable state so the panel still renders the
+    // manual flow. The webhook URLs use the agent_id + the current
+    // origin; the server's stored webhooks are richer (env-driven host)
+    // but this fallback at least keeps the operator unstuck if the
+    // /telephony GET errored.
+    const origin = (typeof window !== "undefined" ? window.location.origin : "").replace(/\/$/, "");
+    state = {
+      providers: [
+        { id: "twilio", name: "Twilio", auto_provision: true,  sip_trunk: false },
+        { id: "plivo",  name: "Plivo",  auto_provision: true,  sip_trunk: false },
+      ],
+      selected_provider: providerName || "twilio",
+      configured_provider: null,
+      config: {},
+      creds: { auth_id: "", auth_token_mask: "", has_token: false },
+      webhooks: {
+        answer_url:   `${origin}/api/sip/${providerName || "twilio"}/answer/${agent.id}`,
+        hangup_url:   `${origin}/api/sip/${providerName || "twilio"}/hangup/${agent.id}`,
+        fallback_url: `${origin}/api/sip/${providerName || "twilio"}/fallback/${agent.id}`,
+        stream_url:   "",
+      },
+    };
+  }
 
   return html`
     <section class="db-panel db-panel-tall tel-panel">
@@ -11401,8 +11434,14 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
   //   • A managed-number request already filed → "managed" pre-selected
   //     so the operator sees their ticket on return.
   //   • Otherwise → start at the picker, no provider chosen.
+  // Build 255 — only auto-jump to a sub-mode when there's actually
+  // something LIVE there. A stale sipConfig with a DID typed-in but
+  // never verified isn't enough — that would land an operator on a
+  // panel showing nothing actionable. Start at the picker; the user
+  // can pick the path they actually want.
   const _phoneInitial = (() => {
-    if (sipConfig) return "carrier";
+    const sipLive = sipConfig && (sipConfig.last_verified_at || (sipConfig.setup_mode === "auto"));
+    if (sipLive) return "carrier";
     if (managedHasActive) return "managed";
     return "pick";
   })();
@@ -11412,7 +11451,8 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
   // operator's explicit choice always wins.
   useEffect(() => {
     if (phoneMode === "pick") {
-      if (sipConfig) setPhoneMode("carrier");
+      const sipLive = sipConfig && (sipConfig.last_verified_at || (sipConfig.setup_mode === "auto"));
+      if (sipLive) setPhoneMode("carrier");
       else if (managedHasActive) setPhoneMode("managed");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
