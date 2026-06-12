@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 253;
+const SXAI_BUILD = 254;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -10092,6 +10092,9 @@ function TelephonyPanel({ agent, refreshAgent }) {
   const [pickedNumber, setPickedNumber] = useState("");
   const [provisioning, setProvisioning] = useState(false);
   const [provisionErr, setProvisionErr] = useState("");
+  // Build 254 — manual disclosure auto-opens when there's a saved
+  // manual number that hasn't been verified live (operator already
+  // chose this path; surface the webhook URLs they need to copy).
   const [manualOpen, setManualOpen] = useState(false);
   const [manualNumber, setManualNumber] = useState("");
   const [manualSaving, setManualSaving] = useState(false);
@@ -10125,6 +10128,15 @@ function TelephonyPanel({ agent, refreshAgent }) {
 
   useEffect(() => { load(); }, [load]);
 
+  // Auto-expand the manual flow when the operator has a saved-but-
+  // unverified manual config — they need the webhook URLs visible
+  // to finish setup on the carrier side.
+  useEffect(() => {
+    if (state?.config?.setup_mode === "manual" && !state?.config?.last_verified_at) {
+      setManualOpen(true);
+    }
+  }, [state?.config?.setup_mode, state?.config?.last_verified_at]);
+
   // Re-fetch the previewed webhook URLs when the provider changes.
   const switchProvider = useCallback((next) => {
     setProviderName(next);
@@ -10137,11 +10149,14 @@ function TelephonyPanel({ agent, refreshAgent }) {
   const supportsAuto = !!providerMeta?.auto_provision;
   const webhooks = state?.webhooks || {};
   const cfg = state?.config || {};
-  const isConfigured = !!(state?.configured_provider && cfg.number);
-  const statusLabel = isConfigured
-    ? `Live on ${cfg.number} via ${state.configured_provider} · ${cfg.setup_mode === "auto" ? "auto-setup" : "manual setup"}`
-    : "Not connected";
-  const statusClass = isConfigured ? "db-tag-blue" : "db-tag-yellow";
+  // Build 254 — "configured" = a number is saved.
+  // "live"      = the configuration was actually validated against the
+  //               carrier API (setup_mode=auto OR verify-live succeeded).
+  // We never claim "Live on …" for a number the operator just typed in
+  // without verification — that would surface stale / never-tested
+  // values as if they're authoritative.
+  const hasNumber = !!(state?.configured_provider && cfg.number);
+  const isLive = hasNumber && (cfg.setup_mode === "auto" || !!cfg.last_verified_at);
 
   const testCreds = useCallback(async () => {
     setTesting(true); setTestErr(""); setTestInfo(null);
@@ -10259,11 +10274,12 @@ function TelephonyPanel({ agent, refreshAgent }) {
       <div class="db-panel-head">
         <h3 class="db-panel-title">
           Phone number
-          <span class=${"sip-status-pill " + statusClass}>${statusLabel}</span>
+          ${isLive ? html`<span class="sip-status-pill db-tag-blue">Live on ${cfg.number}</span>` : ""}
         </h3>
         <p class="db-panel-sub">
-          Pick your carrier, paste your account credentials, and we'll create
-          the Application + bind a number — without leaving SpiderX.
+          ${isLive
+            ? html`Connected via ${providerMeta?.name || state.configured_provider}. Verify or disconnect below.`
+            : html`Pick your carrier and paste your account credentials — we'll create the Application + bind a number. If your account isn't reachable via API, do it manually.`}
         </p>
       </div>
 
@@ -10281,7 +10297,7 @@ function TelephonyPanel({ agent, refreshAgent }) {
         </div>
       </label>
 
-      ${isConfigured ? html`
+      ${isLive ? html`
         <div class="tel-current">
           <div class="tel-current-row">
             <span class="tel-current-key">Number</span>
