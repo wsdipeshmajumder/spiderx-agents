@@ -8438,6 +8438,30 @@ button.oc-kind:disabled { cursor: default; }
   border-color: #0f172a;
 }
 
+/* Build 249 — UserMenu lives inside the homepage topbar nav. Lift the
+ * avatar above the video-overlay z-index so the dropdown that opens
+ * below it isn't clipped by adjacent fixed elements (theme toggle,
+ * landing video veil). The avatar bubble itself already styles fine
+ * against either light or dark backgrounds — the pastel gradient
+ * holds contrast on both. The dropdown is a white card, so we leave
+ * its own styling alone. */
+.lp-topbar-nav .db-user { display: inline-flex; }
+.lp-topbar-nav .db-topbar-avatar {
+  /* Subtle ring so the avatar reads as an interactive control on the
+   * busy video bg — the bare gradient circle was easy to miss. */
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.35), 0 2px 8px rgba(0,0,0,0.25);
+}
+:root[data-theme="light"] .lp-topbar-nav .db-topbar-avatar,
+:root:not([data-theme]) .lp-topbar-nav .db-topbar-avatar {
+  box-shadow: 0 0 0 1px rgba(15,23,42,0.10), 0 2px 8px rgba(15,23,42,0.08);
+}
+.lp-topbar-nav .db-user-menu {
+  /* Dropdown opens DOWN-LEFT from the avatar, positioned by the
+   * existing `right: 0` in the base rule. Bump z-index so it floats
+   * above the theme toggle + landing-art layers. */
+  z-index: 30;
+}
+
 /* Mobile — drop the Pricing link below ~520 px to keep just the CTA
  * pill next to the brandbar; the full pricing surface is still one
  * tap away from the user menu after sign-in. */
@@ -13111,3 +13135,168 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
 :root[data-theme="dark"] .call-detail-tx-marker { background: rgba(167, 139, 250, 0.16); color: #c4b5fd; }
 :root[data-theme="dark"] .call-detail-rec-note { color: #6a6f7d; }
 :root[data-theme="dark"] .call-detail-chip { background: rgba(167, 139, 250, 0.20); color: #ddd6fe; border-color: rgba(167, 139, 250, 0.32); }
+
+/* ─────────────────────────────────────────────────────────────────────
+ * TelephonyPanel (Build 251) — Phone Number tab with auto-setup +
+ * copy-paste fallback for Plivo / Twilio / Exotel.
+ * ───────────────────────────────────────────────────────────────────── */
+.tel-panel { margin-top: 18px; }
+.tel-provider-row { margin-bottom: 14px; }
+.tel-provider-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.tel-provider-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  font: inherit; font-size: 13.5px; font-weight: 600;
+  background: #fff; color: #1f2937;
+  border: 1.5px solid #d8dae3; border-radius: 999px;
+  padding: 7px 14px; cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.tel-provider-chip:hover { border-color: #818cf8; background: #f8f7ff; }
+.tel-provider-chip-on { border-color: #4f46e5; background: #eef0ff; color: #312e81; }
+.tel-chip-tag {
+  font-size: 10.5px; font-weight: 700;
+  color: #047857; background: #ecfdf5; border-radius: 999px;
+  padding: 2px 7px; letter-spacing: 0.02em;
+}
+
+/* Auto-setup card */
+.tel-auto {
+  margin-top: 8px; padding: 16px 16px 14px;
+  background: linear-gradient(180deg, #f7f5ff 0%, #fbfaff 100%);
+  border: 1px solid #ece2ff; border-radius: 14px;
+}
+.tel-auto-head { display: flex; align-items: center; gap: 8px; }
+.tel-recom {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #fff; background: #4f46e5; border-radius: 999px; padding: 3px 8px;
+}
+.tel-auto-title { font-size: 14.5px; font-weight: 700; color: #0f172a; }
+.tel-auto-sub { font-size: 12.5px; color: #6a6f7e; margin: 4px 0 12px; line-height: 1.45; }
+.tel-auto-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 720px) { .tel-auto-grid { grid-template-columns: 1fr; } }
+.tel-token-wrap { position: relative; }
+.tel-token-eye {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  background: transparent; border: 0; font-size: 14px; cursor: pointer; padding: 4px;
+}
+.tel-auto-actions { display: flex; align-items: center; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
+.tel-test-ok { font-size: 12.5px; font-weight: 600; color: #047857; }
+.tel-err {
+  margin-top: 10px; padding: 8px 12px;
+  font-size: 12.5px; color: #b91c1c;
+  background: #fff4f4; border: 1px solid #fecaca; border-radius: 10px;
+}
+
+/* Numbers list */
+.tel-numbers { margin-top: 14px; }
+.tel-numbers-head { font-size: 13px; font-weight: 700; color: #0f172a; margin-bottom: 8px; }
+.tel-numbers-empty {
+  font-size: 12.5px; color: #6a6f7e;
+  padding: 10px 12px; background: #fff; border: 1px dashed #d8dae3; border-radius: 10px;
+}
+.tel-numbers-list { display: flex; flex-direction: column; gap: 6px; }
+.tel-number-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; background: #fff;
+  border: 1.5px solid #d8dae3; border-radius: 10px; cursor: pointer;
+  font-size: 13px;
+}
+.tel-number-row:hover { border-color: #818cf8; }
+.tel-number-row-on { border-color: #4f46e5; background: #f8f7ff; }
+.tel-number-num { font-weight: 700; color: #0f172a; font-family: ui-monospace, SF Mono, Menlo, monospace; }
+.tel-number-meta { color: #6a6f7e; font-size: 12px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tel-number-warn {
+  font-size: 10.5px; font-weight: 700; color: #b45309; background: #fef3c7;
+  border-radius: 999px; padding: 2px 8px; letter-spacing: 0.02em;
+}
+.tel-provision { margin-top: 12px; padding: 12px; background: #fff; border-radius: 10px; border: 1px solid #ece2ff; }
+.tel-provision-note { font-size: 12.5px; color: #4b5563; margin: 0 0 10px; line-height: 1.5; }
+
+/* Manual fallback */
+.tel-manual { margin-top: 18px; }
+.tel-manual-toggle {
+  font: inherit; font-size: 13px; font-weight: 600; color: #4f46e5;
+  background: transparent; border: 0; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 6px;
+}
+.tel-manual-toggle:hover { background: rgba(79, 70, 229, 0.08); }
+.tel-manual-caret { transition: transform 0.15s; display: inline-block; }
+.tel-manual-caret.open { transform: rotate(180deg); }
+.tel-manual-body {
+  margin-top: 12px; padding: 14px 16px;
+  background: #fff; border: 1px solid #e5e7ec; border-radius: 14px;
+}
+.tel-manual-steps { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 14px; font-size: 13px; line-height: 1.55; }
+.tel-copyrow {
+  display: flex; gap: 6px; align-items: center;
+  margin-top: 6px; flex-wrap: wrap;
+}
+.tel-copyrow-key {
+  font-size: 11.5px; font-weight: 700; color: #4f46e5; min-width: 92px;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.tel-copy-input { flex: 1; min-width: 220px; font-family: ui-monospace, SF Mono, Menlo, monospace; font-size: 12.5px; }
+.tel-warn {
+  margin-top: 14px; padding: 10px 12px;
+  font-size: 12.5px; color: #92400e;
+  background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px;
+}
+
+/* Current-binding view (post-provision) */
+.tel-current {
+  margin-top: 12px; padding: 14px 16px;
+  background: linear-gradient(180deg, #f0fdf4 0%, #f7fbf9 100%);
+  border: 1px solid #c5ead5; border-radius: 14px;
+}
+.tel-current-row { display: flex; gap: 12px; font-size: 13px; padding: 4px 0; }
+.tel-current-key { color: #4b5563; min-width: 110px; font-weight: 600; }
+.tel-current-val { color: #0f172a; font-weight: 600; word-break: break-all; }
+.tel-mono { font-family: ui-monospace, SF Mono, Menlo, monospace; font-size: 12px; }
+.tel-current-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.tel-btn-danger { color: #b91c1c; }
+.tel-btn-danger:hover { background: #fff1f1; }
+.tel-verify {
+  margin-top: 10px; padding: 8px 12px;
+  font-size: 12.5px; font-weight: 600;
+  border-radius: 10px;
+}
+.tel-verify-ok { color: #047857; background: #ecfdf5; border: 1px solid #b9ead5; }
+.tel-verify-drift { color: #b91c1c; background: #fff4f4; border: 1px solid #fecaca; }
+.tel-manual-only {
+  margin-top: 8px; padding: 12px 14px;
+  font-size: 13px; color: #4b5563;
+  background: #f8fafc; border: 1px dashed #d8dae3; border-radius: 12px;
+}
+
+/* Dark mode */
+:root[data-theme="dark"] .tel-provider-chip { background: #14171f; border-color: #2a2f3e; color: #cbd5e1; }
+:root[data-theme="dark"] .tel-provider-chip:hover { border-color: #6366f1; background: #1c2030; }
+:root[data-theme="dark"] .tel-provider-chip-on { background: #1e2233; border-color: #6366f1; color: #c7d2fe; }
+:root[data-theme="dark"] .tel-chip-tag { color: #6ee7b7; background: #11281f; }
+:root[data-theme="dark"] .tel-auto { background: linear-gradient(180deg, #1a1730 0%, #15171f 100%); border-color: #2e2842; }
+:root[data-theme="dark"] .tel-auto-title { color: #f1f3f8; }
+:root[data-theme="dark"] .tel-auto-sub { color: #9aa0ad; }
+:root[data-theme="dark"] .tel-test-ok { color: #6ee7b7; }
+:root[data-theme="dark"] .tel-err { background: #2a1a1f; border-color: #6b2a36; color: #fca5a5; }
+:root[data-theme="dark"] .tel-numbers-head { color: #f1f3f8; }
+:root[data-theme="dark"] .tel-numbers-empty { background: #14171f; border-color: #2a2f3e; color: #aab0c0; }
+:root[data-theme="dark"] .tel-number-row { background: #14171f; border-color: #2a2f3e; color: #e7e9ee; }
+:root[data-theme="dark"] .tel-number-row:hover { border-color: #6366f1; }
+:root[data-theme="dark"] .tel-number-row-on { background: #1e2233; border-color: #6366f1; }
+:root[data-theme="dark"] .tel-number-num { color: #f1f3f8; }
+:root[data-theme="dark"] .tel-number-meta { color: #9aa0ad; }
+:root[data-theme="dark"] .tel-number-warn { color: #fbbf24; background: #3b2a14; }
+:root[data-theme="dark"] .tel-provision { background: #14171f; border-color: #2e2842; }
+:root[data-theme="dark"] .tel-provision-note { color: #cbd5e1; }
+:root[data-theme="dark"] .tel-manual-toggle { color: #a5b4fc; }
+:root[data-theme="dark"] .tel-manual-toggle:hover { background: rgba(165, 180, 252, 0.1); }
+:root[data-theme="dark"] .tel-manual-body { background: #14171f; border-color: #2a2f3e; }
+:root[data-theme="dark"] .tel-copyrow-key { color: #a5b4fc; }
+:root[data-theme="dark"] .tel-warn { background: #2a1a0f; border-color: #6b3a14; color: #fbbf24; }
+:root[data-theme="dark"] .tel-current { background: linear-gradient(180deg, #14241c 0%, #131a16 100%); border-color: #2a4a3a; }
+:root[data-theme="dark"] .tel-current-key { color: #9aa0ad; }
+:root[data-theme="dark"] .tel-current-val { color: #f1f3f8; }
+:root[data-theme="dark"] .tel-verify-ok { background: #11281f; border-color: #1c3d2d; color: #6ee7b7; }
+:root[data-theme="dark"] .tel-verify-drift { background: #2a1a1f; border-color: #6b2a36; color: #fca5a5; }
+:root[data-theme="dark"] .tel-manual-only { background: #14171f; border-color: #2a2f3e; color: #aab0c0; }

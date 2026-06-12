@@ -2831,6 +2831,14 @@ function UserMenu({ user, onSignOut, onNav }) {
             <div class="db-user-email">${user?.email || ""}</div>
           </div>
           <div class="db-user-sep"></div>
+          <!-- Build 249 — added a Dashboard item so the menu works as the
+               primary profile affordance from the HOMEPAGE topbar too,
+               where there's no other path back to /agents. Inside the
+               dashboard surfaces it's a one-click shortcut back to the
+               agent list from any per-agent page. -->
+          <button class="db-user-item" type="button" onClick=${() => { setOpen(false); onNav && onNav("/agents"); }}>
+            Dashboard →
+          </button>
           <button class="db-user-item" type="button" onClick=${() => { setOpen(false); onNav && onNav("/account/billing"); }}>
             Billing & plan
           </button>
@@ -16855,10 +16863,15 @@ function App() {
             Pricing
           </a>
           ${user ? html`
-            <button class="lp-topbar-cta" type="button"
-                    onClick=${() => goRoute("/agents")}>
-              Dashboard
-            </button>
+            <!-- Build 249 — swapped the "Dashboard" pill for the existing
+                 UserMenu profile chip. Avatar bubble (initials) opens a
+                 dropdown with Dashboard → / Billing / Sign out + admin
+                 link for super-admins. Single affordance for "who am I
+                 and where do I go" instead of a one-button pill that
+                 ignored every other account action. -->
+            <${UserMenu} user=${user}
+                         onSignOut=${handleSignOut}
+                         onNav=${(p) => goRoute(p)} />
           ` : html`
             <button class="lp-topbar-cta" type="button"
                     onClick=${() => goRoute("/login")}>
