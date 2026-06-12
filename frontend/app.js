@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 256;
+const SXAI_BUILD = 257;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -10105,22 +10105,57 @@ function TelephonyPanel({ agent, refreshAgent }) {
   const load = useCallback(async (provQuery) => {
     if (!agent?.id) return;
     setLoading(true);
+    // Build 257 — synthesised fallback used both when the fetch
+    // errors AND when it returns a state with no providers. Keeps
+    // the panel useful (carrier picker + manual flow with real
+    // agent_id in the webhook URLs) instead of showing nothing.
+    const origin = (typeof window !== "undefined" ? window.location.origin : "").replace(/\/$/, "");
+    const fallbackProvider = provQuery || "twilio";
+    const synth = {
+      providers: [
+        { id: "twilio", name: "Twilio", auto_provision: true, sip_trunk: false },
+        { id: "plivo",  name: "Plivo",  auto_provision: true, sip_trunk: false },
+      ],
+      selected_provider: fallbackProvider,
+      configured_provider: null,
+      config: {},
+      creds: { auth_id: "", auth_token_mask: "", has_token: false },
+      webhooks: {
+        answer_url:   `${origin}/api/sip/${fallbackProvider}/answer/${agent.id}`,
+        hangup_url:   `${origin}/api/sip/${fallbackProvider}/hangup/${agent.id}`,
+        fallback_url: `${origin}/api/sip/${fallbackProvider}/fallback/${agent.id}`,
+        stream_url:   "",
+      },
+    };
     try {
       const q = provQuery ? "?provider=" + encodeURIComponent(provQuery) : "";
       const r = await fetch(`/api/agents/${agent.id}/telephony${q}`);
-      if (!r.ok) throw new Error("Couldn't load telephony state");
+      if (!r.ok) throw new Error("status " + r.status);
       const data = await r.json();
-      setState(data);
-      const next = provQuery || data.selected_provider
-        || data.configured_provider
-        || (data.providers && data.providers[0] && data.providers[0].id)
-        || "plivo";
+      // If the server returned something usable, merge so we still have
+      // webhooks/providers even if a field is missing.
+      const merged = {
+        ...synth,
+        ...data,
+        providers: (Array.isArray(data?.providers) && data.providers.length) ? data.providers : synth.providers,
+        webhooks: { ...synth.webhooks, ...(data?.webhooks || {}) },
+        creds: { ...synth.creds, ...(data?.creds || {}) },
+        config: { ...synth.config, ...(data?.config || {}) },
+      };
+      setState(merged);
+      const next = provQuery || merged.selected_provider
+        || merged.configured_provider
+        || (merged.providers && merged.providers[0] && merged.providers[0].id)
+        || "twilio";
       setProviderName(next);
-      // Seed the auth id from any stored creds — token stays masked.
-      setAuthId(data.creds?.auth_id || "");
-      setManualNumber(data.config?.number || "");
+      setAuthId(merged.creds?.auth_id || "");
+      setManualNumber(merged.config?.number || "");
     } catch (e) {
-      // non-fatal — operator just sees the loading state cleared
+      // Fetch failed (500, network, etc.). Use the synth so the panel
+      // still renders the carrier picker + manual flow with the
+      // operator's real agent_id baked into the webhook URLs.
+      setState(synth);
+      setProviderName(fallbackProvider);
     } finally {
       setLoading(false);
     }
