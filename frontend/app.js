@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 257;
+const SXAI_BUILD = 258;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -10196,6 +10196,10 @@ function TelephonyPanel({ agent, refreshAgent }) {
   // values as if they're authoritative.
   const hasNumber = !!(state?.configured_provider && cfg.number);
   const isLive = hasNumber && (cfg.setup_mode === "auto" || !!cfg.last_verified_at);
+  // Build 258 — a number saved via the manual flow IS configured even
+  // though we haven't verified it against the carrier API. Show it as
+  // such so the operator doesn't think their save evaporated.
+  const isManualSaved = hasNumber && !isLive && cfg.setup_mode === "manual";
 
   const testCreds = useCallback(async () => {
     setTesting(true); setTestErr(""); setTestInfo(null);
@@ -10204,8 +10208,12 @@ function TelephonyPanel({ agent, refreshAgent }) {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider: providerName, auth_id: authId.trim(), auth_token: authToken.trim() }),
       });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data?.detail || "Couldn't verify credentials");
+      const text = await r.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch {}
+      if (!r.ok) {
+        throw new Error((data && data.detail) || `Couldn't verify credentials (HTTP ${r.status}).`);
+      }
       setTestInfo(data);
       // After a successful test, list numbers too.
       setNumbersLoading(true);
@@ -10214,8 +10222,10 @@ function TelephonyPanel({ agent, refreshAgent }) {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ provider: providerName, auth_id: authId.trim(), auth_token: authToken.trim() }),
         });
-        const d2 = await r2.json();
-        if (r2.ok) setNumbers(d2.numbers || []);
+        const t2 = await r2.text();
+        let d2 = null;
+        try { d2 = t2 ? JSON.parse(t2) : null; } catch {}
+        if (r2.ok && d2) setNumbers(d2.numbers || []);
       } catch {}
       finally { setNumbersLoading(false); }
     } catch (e) {
@@ -10237,10 +10247,13 @@ function TelephonyPanel({ agent, refreshAgent }) {
           alias: `SpiderX-${(agent.name || "Eva").replace(/\s+/g, "-")}-Inbound`,
         }),
       });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data?.detail || "Provisioning failed");
-      setState(data);
-      // Token is now stored; clear the local input so it can't be re-sent.
+      const text = await r.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch {}
+      if (!r.ok) {
+        throw new Error((data && data.detail) || `Provisioning failed (HTTP ${r.status}).`);
+      }
+      if (data) setState(data);
       setAuthToken("");
       refreshAgent && refreshAgent();
     } catch (e) {
@@ -10252,21 +10265,44 @@ function TelephonyPanel({ agent, refreshAgent }) {
 
   const saveManual = useCallback(async () => {
     setManualSaving(true); setProvisionErr("");
+    const num = (manualNumber || "").trim();
+    // Client-side guard so the operator gets an instant, specific message
+    // instead of waiting on a 400 round-trip. E.164: + then 7-15 digits.
+    if (!/^\+[1-9]\d{6,14}$/.test(num)) {
+      setProvisionErr("Enter the number in international format — e.g. +918031321199.");
+      setManualSaving(false);
+      return;
+    }
+    let httpStatus = 0;
+    let detail = "";
     try {
       const r = await fetch(`/api/agents/${agent.id}/telephony/manual-config`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: providerName, number: manualNumber.trim() }),
+        body: JSON.stringify({ provider: providerName, number: num }),
       });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data?.detail || "Couldn't save");
-      setState(data);
+      httpStatus = r.status;
+      // Tolerate non-JSON responses (a proxy 502, an HTML error page from
+      // an upstream 500 — anything that's not the FastAPI JSON body). The
+      // operator should see "Server error (HTTP 500). Try again." not
+      // "Unexpected token 'I', 'Internal S'... is not valid JSON".
+      const text = await r.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch { /* not JSON */ }
+      if (!r.ok) {
+        detail = (data && data.detail) || `Server error (HTTP ${r.status}). Try again in a moment.`;
+        throw new Error(detail);
+      }
+      if (data) setState(data);
       refreshAgent && refreshAgent();
     } catch (e) {
       setProvisionErr(String(e.message || e));
+      // Save MAY have committed even if the view-render step on the server
+      // failed — re-fetch state so the UI catches up to truth either way.
+      load(providerName);
     } finally {
       setManualSaving(false);
     }
-  }, [agent?.id, providerName, manualNumber, refreshAgent]);
+  }, [agent?.id, providerName, manualNumber, refreshAgent, load]);
 
   const verifyLive = useCallback(async () => {
     setVerifying(true); setVerifyResult(null);
@@ -10343,11 +10379,14 @@ function TelephonyPanel({ agent, refreshAgent }) {
         <h3 class="db-panel-title">
           Phone number
           ${isLive ? html`<span class="sip-status-pill db-tag-blue">Live on ${cfg.number}</span>` : ""}
+          ${isManualSaved ? html`<span class="sip-status-pill db-tag-amber">Saved · manual setup</span>` : ""}
         </h3>
         <p class="db-panel-sub">
           ${isLive
             ? html`Connected via ${providerMeta?.name || state.configured_provider}. Verify or disconnect below.`
-            : html`Pick your carrier and paste your account credentials — we'll create the Application + bind a number. If your account isn't reachable via API, do it manually.`}
+            : isManualSaved
+              ? html`Saved <strong>${cfg.number}</strong> via ${providerMeta?.name || state.configured_provider} (manual). Calls will route here once your carrier's Application points at the Answer URL below.`
+              : html`Pick your carrier and paste your account credentials — we'll create the Application + bind a number. If your account isn't reachable via API, do it manually.`}
         </p>
       </div>
 
@@ -10388,6 +10427,24 @@ function TelephonyPanel({ agent, refreshAgent }) {
           `)}
         </div>
       </label>
+
+      ${isManualSaved ? html`
+        <div class="tel-current">
+          <div class="tel-current-row">
+            <span class="tel-current-key">Saved number</span>
+            <span class="tel-current-val">${cfg.number}</span>
+          </div>
+          <div class="tel-current-row">
+            <span class="tel-current-key">Mode</span>
+            <span class="tel-current-val">Manual (set in carrier console)</span>
+          </div>
+          <div class="tel-current-actions">
+            <button class="db-btn-ghost db-btn-sm tel-btn-danger" type="button" onClick=${disconnect}>
+              Disconnect
+            </button>
+          </div>
+        </div>
+      ` : ""}
 
       ${isLive ? html`
         <div class="tel-current">
@@ -11499,7 +11556,16 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
   // panel showing nothing actionable. Start at the picker; the user
   // can pick the path they actually want.
   const _phoneInitial = (() => {
-    const sipLive = sipConfig && (sipConfig.last_verified_at || (sipConfig.setup_mode === "auto"));
+    // Live = anything the operator already committed to. Build 258
+    // adds the manual-saved case: they pasted creds + bound a number
+    // in the carrier console and told us about it — that's just as
+    // "live" as auto-provision, and they shouldn't bounce back to
+    // the picker on reload.
+    const sipLive = sipConfig && (
+      sipConfig.last_verified_at
+      || sipConfig.setup_mode === "auto"
+      || (sipConfig.setup_mode === "manual" && sipConfig.number)
+    );
     if (sipLive) return "carrier";
     if (managedHasActive) return "managed";
     return "pick";
@@ -11510,7 +11576,16 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
   // operator's explicit choice always wins.
   useEffect(() => {
     if (phoneMode === "pick") {
-      const sipLive = sipConfig && (sipConfig.last_verified_at || (sipConfig.setup_mode === "auto"));
+      // Live = anything the operator already committed to. Build 258
+    // adds the manual-saved case: they pasted creds + bound a number
+    // in the carrier console and told us about it — that's just as
+    // "live" as auto-provision, and they shouldn't bounce back to
+    // the picker on reload.
+    const sipLive = sipConfig && (
+      sipConfig.last_verified_at
+      || sipConfig.setup_mode === "auto"
+      || (sipConfig.setup_mode === "manual" && sipConfig.number)
+    );
       if (sipLive) setPhoneMode("carrier");
       else if (managedHasActive) setPhoneMode("managed");
     }

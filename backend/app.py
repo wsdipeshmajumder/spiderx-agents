@@ -117,7 +117,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 257
+APP_BUILD = 258
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -2664,31 +2664,56 @@ def _webhook_urls(provider_name: str, agent_id: int) -> dict[str, str]:
 
 def _telephony_view(agent: dict[str, Any], provider_name: Optional[str] = None) -> dict[str, Any]:
     """Project the agent's stored telephony state into the shape the UI
-    consumes. Never returns the raw Auth Token — only the last-4 tail."""
+    consumes. Never returns the raw Auth Token — only the last-4 tail.
+
+    Defensive against partial DB state: a missing `sip_config` JSON field,
+    a stored sip_config that's a string (legacy rows), or unparseable
+    `telephony_secret_enc` bytes all flow through without raising. The
+    UI tolerates any field being null."""
     from .telephony import available_providers
     from .telephony.secrets import decrypt_creds, mask_token
-    cfg = agent.get("sip_config") or {}
-    stored_provider = (cfg.get("provider") or "").lower() if isinstance(cfg, dict) else ""
+    raw_cfg = agent.get("sip_config")
+    if isinstance(raw_cfg, str):
+        # Legacy rows: sip_config came back as a JSON string instead of a
+        # dict. Try to parse; on failure treat as empty.
+        try:
+            import json as _json
+            raw_cfg = _json.loads(raw_cfg)
+        except Exception:  # noqa: BLE001
+            raw_cfg = {}
+    cfg = raw_cfg if isinstance(raw_cfg, dict) else {}
+    stored_provider = (cfg.get("provider") or "").lower()
     selected = (provider_name or stored_provider or "").lower()
-    creds = decrypt_creds(agent.get("telephony_secret_enc"))
+    try:
+        creds = decrypt_creds(agent.get("telephony_secret_enc")) or {}
+    except Exception:  # noqa: BLE001
+        creds = {}
     auth_token = (creds.get("auth_token") or "")
+    try:
+        providers = available_providers()
+    except Exception:  # noqa: BLE001
+        providers = []
+    try:
+        webhooks = _webhook_urls(selected or "plivo", int(agent["id"]))
+    except Exception:  # noqa: BLE001
+        webhooks = {"answer_url": "", "hangup_url": "", "fallback_url": "", "stream_url": ""}
     return {
-        "providers": available_providers(),
+        "providers": providers,
         "selected_provider": selected or None,
         "configured_provider": stored_provider or None,
         "config": {
-            "alias": (cfg.get("alias") if isinstance(cfg, dict) else None) or "",
-            "number": (cfg.get("number") if isinstance(cfg, dict) else None) or "",
-            "app_id": (cfg.get("app_id") if isinstance(cfg, dict) else None) or "",
-            "setup_mode": (cfg.get("setup_mode") if isinstance(cfg, dict) else None) or "",
-            "last_verified_at": (cfg.get("last_verified_at") if isinstance(cfg, dict) else None),
+            "alias": cfg.get("alias") or "",
+            "number": cfg.get("number") or "",
+            "app_id": cfg.get("app_id") or "",
+            "setup_mode": cfg.get("setup_mode") or "",
+            "last_verified_at": cfg.get("last_verified_at"),
         },
         "creds": {
             "auth_id": (creds.get("auth_id") or "") if creds else "",
             "auth_token_mask": mask_token(auth_token) if auth_token else "",
             "has_token": bool(auth_token),
         },
-        "webhooks": _webhook_urls(selected or "plivo", int(agent["id"])),
+        "webhooks": webhooks,
     }
 
 

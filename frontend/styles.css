@@ -6588,6 +6588,7 @@ button.db-stat:disabled { cursor: default; opacity: 0.7; }
 .db-tag-grey   { background: #f1f3f6; color: #5a5a5a; }
 .db-tag-red    { background: #fee2e2; color: #991b1b; }
 .db-tag-yellow { background: #fef3c7; color: #92400e; }
+.db-tag-amber  { background: #fef3c7; color: #92400e; }
 
 .db-btn-sm {
   height: 28px;
