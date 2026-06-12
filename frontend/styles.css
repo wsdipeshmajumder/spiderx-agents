@@ -13236,11 +13236,23 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
   font: inherit; font-size: 13.5px; font-weight: 600;
   background: #fff; color: #1f2937;
   border: 1.5px solid #d8dae3; border-radius: 999px;
-  padding: 7px 14px; cursor: pointer;
+  padding: 6px 14px 6px 6px; cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
 }
 .tel-provider-chip:hover { border-color: #818cf8; background: #f8f7ff; }
 .tel-provider-chip-on { border-color: #4f46e5; background: #eef0ff; color: #312e81; }
+/* Build 256 — brand-mark badge inside the chip. Round 24×24 holder so
+   the inline SVG (a brand-coloured rounded square) sits neatly against
+   the chip's pill outline. Logo intrinsics handle their own colour. */
+.tel-provider-logo {
+  width: 24px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.tel-provider-logo svg { display: block; }
+.tel-provider-chip-name { line-height: 1; }
 .tel-chip-tag {
   font-size: 10.5px; font-weight: 700;
   color: #047857; background: #ecfdf5; border-radius: 999px;

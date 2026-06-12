@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 255;
+const SXAI_BUILD = 256;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -10323,7 +10323,31 @@ function TelephonyPanel({ agent, refreshAgent }) {
             <button type="button" key=${p.id}
                     class=${"tel-provider-chip" + (p.id === providerName ? " tel-provider-chip-on" : "")}
                     onClick=${() => switchProvider(p.id)}>
-              ${p.name}
+              <span class=${"tel-provider-logo tel-provider-logo-" + p.id} aria-hidden="true">
+                ${p.id === "twilio" ? html`
+                  <!-- Twilio mark: 4-dot pattern on a brand-red rounded square. -->
+                  <svg viewBox="0 0 32 32" width="18" height="18" aria-hidden="true">
+                    <rect width="32" height="32" rx="8" fill="#F22F46"/>
+                    <circle cx="11.5" cy="11.5" r="3.2" fill="#fff"/>
+                    <circle cx="20.5" cy="11.5" r="3.2" fill="#fff"/>
+                    <circle cx="11.5" cy="20.5" r="3.2" fill="#fff"/>
+                    <circle cx="20.5" cy="20.5" r="3.2" fill="#fff"/>
+                  </svg>
+                ` : p.id === "plivo" ? html`
+                  <!-- Plivo mark: bold rounded P on Plivo brand green. -->
+                  <svg viewBox="0 0 32 32" width="18" height="18" aria-hidden="true">
+                    <rect width="32" height="32" rx="8" fill="#1FB8A4"/>
+                    <path d="M11 8h6.5a5.5 5.5 0 0 1 0 11H14v5h-3V8zm3 3v5h3.5a2.5 2.5 0 0 0 0-5H14z" fill="#fff"/>
+                  </svg>
+                ` : html`
+                  <!-- Fallback for any other provider we add later. -->
+                  <svg viewBox="0 0 32 32" width="18" height="18" aria-hidden="true">
+                    <rect width="32" height="32" rx="8" fill="#6366f1"/>
+                    <text x="16" y="22" text-anchor="middle" font-size="16" font-weight="700" fill="#fff" font-family="sans-serif">${(p.name || "?")[0]}</text>
+                  </svg>
+                `}
+              </span>
+              <span class="tel-provider-chip-name">${p.name}</span>
               ${p.auto_provision ? html`<span class="tel-chip-tag">auto-setup</span>` : ""}
             </button>
           `)}
