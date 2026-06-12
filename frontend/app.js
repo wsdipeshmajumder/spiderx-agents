@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 252;
+const SXAI_BUILD = 253;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -11372,31 +11372,115 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
     </section>
   `;
 
+  // Build 253 — singularity principle. Two channels at the top (Web /
+  // Phone). Phone is a state machine: pick provider → configure that
+  // one → done. No more parallel panels (manual-SIP card, auto-setup
+  // card, managed-number teaser, providers cards) all competing for
+  // the eye-line. Operator makes one choice at a time, sees only
+  // what's relevant to that choice.
+  //
+  // State derivation rules:
+  //   • A SIP self-service config already saved → "carrier" provider
+  //     pre-selected (SIP-forwarding sub-tab).
+  //   • A managed-number request already filed → "managed" pre-selected
+  //     so the operator sees their ticket on return.
+  //   • Otherwise → start at the picker, no provider chosen.
+  const _phoneInitial = (() => {
+    if (sipConfig) return "carrier";
+    if (managedHasActive) return "managed";
+    return "pick";
+  })();
+  const [phoneMode, setPhoneMode] = useState(_phoneInitial);
+  // Re-sync when underlying state changes (e.g. config saved on
+  // current page) — only forward, never back to "pick" so the
+  // operator's explicit choice always wins.
+  useEffect(() => {
+    if (phoneMode === "pick") {
+      if (sipConfig) setPhoneMode("carrier");
+      else if (managedHasActive) setPhoneMode("managed");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sipConfig, managedHasActive]);
+
+  const phoneCard = html`
+    <section class="db-panel db-panel-tall golive-channel-card golive-phone-card">
+      <div class="db-channel-head">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.89.33 1.77.62 2.61a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.47-1.18a2 2 0 0 1 2.11-.45c.84.29 1.72.5 2.61.62A2 2 0 0 1 22 16.92z"/>
+        </svg>
+        <div style=${{ flex: 1 }}>
+          <h3 class="db-panel-title">Phone number</h3>
+          <p class="db-panel-sub">
+            ${phoneMode === "pick"
+              ? html`Pick how ${agent.name} should take phone calls.`
+              : phoneMode === "carrier"
+                ? html`Connecting via your own carrier account.`
+                : html`SpiderX provisions a managed number for you.`}
+          </p>
+        </div>
+        ${phoneMode !== "pick" ? html`
+          <button class="golive-mode-back" type="button"
+                  onClick=${() => setPhoneMode("pick")}
+                  title="Pick a different option">← Change</button>
+        ` : ""}
+      </div>
+
+      ${phoneMode === "pick" ? html`
+        <div class="golive-mode-picker">
+          <button class="golive-mode-option" type="button"
+                  onClick=${() => setPhoneMode("carrier")}>
+            <div class="golive-mode-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="12" cy="17" r="1.2"/></svg>
+            </div>
+            <div class="golive-mode-body">
+              <div class="golive-mode-title">I have a carrier account</div>
+              <div class="golive-mode-sub">Twilio or Plivo. Paste your credentials and we'll wire it up — or do SIP forwarding by hand.</div>
+            </div>
+            <div class="golive-mode-go" aria-hidden="true">→</div>
+          </button>
+          <button class="golive-mode-option" type="button"
+                  onClick=${() => setPhoneMode("managed")}>
+            <div class="golive-mode-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-17.74-17.74A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.89.33 1.77.62 2.61a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.47-1.18a2 2 0 0 1 2.11-.45c.84.29 1.72.5 2.61.62A2 2 0 0 1 22 16.92z"/></svg>
+            </div>
+            <div class="golive-mode-body">
+              <div class="golive-mode-title">Let SpiderX provision a number</div>
+              <div class="golive-mode-sub">No carrier account, no SIP. We pick a local number for you and WhatsApp it. ~1 working hour.</div>
+            </div>
+            <div class="golive-mode-go" aria-hidden="true">→</div>
+          </button>
+        </div>
+      ` : phoneMode === "carrier" ? html`
+        <!-- Carrier path: auto-setup with credentials (preferred) +
+             the SIP-forwarding manual flow lives inside TelephonyPanel
+             under "Or, do it manually". TelephonyPanel handles every
+             carrier-side affordance — the standalone sipPanel is
+             intentionally NOT rendered here; its features are folded
+             into TelephonyPanel's manual disclosure. -->
+        <div class="golive-mode-content">
+          <${TelephonyPanel} agent=${agent} refreshAgent=${refreshAgent} />
+        </div>
+      ` : html`
+        <!-- Managed-number path: ops-fulfilled. Show the request form
+             and, if there's history, the past requests list. -->
+        <div class="golive-mode-content">
+          ${numberPanel}
+          ${requestHistoryPanel}
+        </div>
+      `}
+    </section>
+  `;
+
   const body = html`
     <div class="db-overview">
       ${publishBanner}
-      <!-- Two channels to go live, side-by-side equal weight:
-           LEFT  — Web embed widget. The fast-path default. No phone
-                   provider needed; paste a script tag on any site and
-                   ${agent.name} is taking calls. This is what unlocks
-                   plan commercialization from zero — operators can
-                   ship to real users today.
-           RIGHT — SIP (Voniz). For operators who want a real phone
-                   number routed in. Same go-live status; phone
-                   channel instead of web. -->
+      <!-- Two channels, side-by-side. Web on the left (instant,
+           always available). Phone on the right (state machine:
+           pick provider → configure → connected). -->
       <div class="db-channels golive-channels">
         ${embedPanel}
-        ${sipPanel}
+        ${phoneCard}
       </div>
-      <!-- Build 251 — HTTP-webhook telephony (Plivo Application, Twilio
-           Programmable Voice) with auto-setup via the carrier's REST API +
-           copy-paste fallback. Distinct from the SIP-trunk card above. -->
-      <${TelephonyPanel} agent=${agent} refreshAgent=${refreshAgent} />
-      <!-- Secondary fallback for operators who don't have a SIP
-           provider yet — we provision a managed number for them. -->
-      ${managedFallback}
-      ${providersPanel}
-      ${requestHistoryPanel}
     </div>
   `;
   return html`

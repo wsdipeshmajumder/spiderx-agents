@@ -1202,6 +1202,94 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 .db-channel-head .db-panel-title { margin: 0; }
 .db-channel-head .db-panel-sub { margin: 4px 0 0; }
 
+/* ─── Singular Phone-number flow (build 253) ──────────────────────────────
+ * Two-mode picker → selected-mode content. No parallel panels. The picker
+ * tiles are stacked vertically (one decision per row); the back-link in
+ * the header is the only way to return to the picker once a mode is
+ * chosen — operator's explicit click is needed to switch, page state
+ * doesn't reset on auto-refetch. */
+.golive-mode-back {
+  font: inherit; font-size: 12.5px; font-weight: 600;
+  color: #6366f1; background: transparent;
+  border: 1px solid transparent; border-radius: 8px;
+  padding: 4px 10px; cursor: pointer;
+  align-self: center;
+  white-space: nowrap;
+}
+.golive-mode-back:hover { background: #eef2ff; border-color: #c7d2fe; }
+
+.golive-mode-picker {
+  display: flex; flex-direction: column; gap: 10px;
+  margin-top: 14px;
+}
+.golive-mode-option {
+  display: flex; align-items: center; gap: 14px;
+  width: 100%;
+  padding: 14px 16px;
+  background: #ffffff;
+  border: 1px solid #e6e7ec;
+  border-radius: 12px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.06s ease;
+}
+.golive-mode-option:hover {
+  border-color: #a5b4fc;
+  background: #f8faff;
+}
+.golive-mode-option:active { transform: translateY(1px); }
+.golive-mode-icon {
+  flex: 0 0 44px;
+  width: 44px; height: 44px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #eef2ff 0%, #faf5ff 100%);
+  color: #6366f1;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.golive-mode-body { flex: 1; min-width: 0; }
+.golive-mode-title {
+  font-size: 14.5px; font-weight: 650; color: #1f2230;
+  margin-bottom: 2px;
+}
+.golive-mode-sub {
+  font-size: 12.5px; line-height: 1.45; color: #6a6f7d;
+}
+.golive-mode-go {
+  flex: 0 0 24px; color: #9ca3af;
+  font-size: 18px; font-weight: 400;
+}
+.golive-mode-option:hover .golive-mode-go { color: #6366f1; }
+
+/* Selected-mode body — drops the inner card chrome since the outer
+ * phoneCard already owns the box. Just give it some breathing room
+ * from the header. */
+.golive-mode-content { margin-top: 18px; display: flex; flex-direction: column; gap: 18px; }
+.golive-mode-content > .db-panel,
+.golive-mode-content > .tel-card,
+.golive-mode-content > .sip-card,
+.golive-mode-content > .managed-fallback {
+  border: 1px solid #eef0f4;
+  box-shadow: none;
+}
+
+/* Dark mode */
+:root[data-theme="dark"] .golive-mode-option {
+  background: rgba(255,255,255,0.04);
+  border-color: rgba(255,255,255,0.10);
+}
+:root[data-theme="dark"] .golive-mode-option:hover {
+  background: rgba(99,102,241,0.10);
+  border-color: rgba(165,180,252,0.40);
+}
+:root[data-theme="dark"] .golive-mode-icon {
+  background: linear-gradient(135deg, rgba(99,102,241,0.15) 0%, rgba(168,85,247,0.10) 100%);
+  color: #a5b4fc;
+}
+:root[data-theme="dark"] .golive-mode-title { color: #e8e9ef; }
+:root[data-theme="dark"] .golive-mode-sub { color: #a4a8b8; }
+:root[data-theme="dark"] .golive-mode-back:hover { background: rgba(99,102,241,0.15); border-color: rgba(165,180,252,0.40); }
+
 .db-embed-preview-wrap {
   display: flex; flex-direction: column; align-items: center; gap: 8px;
 }
