@@ -21,3 +21,11 @@ PyYAML>=6.0
 # maintained drop-in backport — same module name, same API. Gated on
 # Python ≥ 3.13 so 3.9-3.12 dev boxes don't pull in an unneeded dep.
 audioop-lts>=0.2; python_version >= "3.13"
+# Build 251 — telephony adapter calls Plivo / Twilio REST APIs from the
+# Phone Number tab. httpx was already a transitive dep via google-genai
+# but pin explicitly so the import in backend/telephony/*.py can never
+# break. `cryptography` provides Fernet for encrypting carrier Auth
+# Tokens at rest (TELEPHONY_CRED_KEY env var); also already transitive
+# but pin so the secrets module never silently falls back to plaintext.
+httpx>=0.27
+cryptography>=43.0

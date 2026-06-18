@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 258;
+const SXAI_BUILD = 259;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -10096,6 +10096,11 @@ function TelephonyPanel({ agent, refreshAgent }) {
   // manual number that hasn't been verified live (operator already
   // chose this path; surface the webhook URLs they need to copy).
   const [manualOpen, setManualOpen] = useState(false);
+  // Build 259 — auto-setup (paste credentials + Test connection) is an
+  // OPTIONAL convenience, collapsed by default. Saving a number must
+  // never require validating a carrier key first; the manual flow is the
+  // primary, always-reachable path.
+  const [autoOpen, setAutoOpen] = useState(false);
   const [manualNumber, setManualNumber] = useState("");
   const [manualSaving, setManualSaving] = useState(false);
   const [verifying, setVerifying] = useState(false);
@@ -10386,7 +10391,7 @@ function TelephonyPanel({ agent, refreshAgent }) {
             ? html`Connected via ${providerMeta?.name || state.configured_provider}. Verify or disconnect below.`
             : isManualSaved
               ? html`Saved <strong>${cfg.number}</strong> via ${providerMeta?.name || state.configured_provider} (manual). Calls will route here once your carrier's Application points at the Answer URL below.`
-              : html`Pick your carrier and paste your account credentials — we'll create the Application + bind a number. If your account isn't reachable via API, do it manually.`}
+              : html`Pick your carrier, point its Application at the URLs below, and tell us the number you bound. Prefer we set it up for you? Connect your carrier API (optional).`}
         </p>
       </div>
 
@@ -10477,7 +10482,19 @@ function TelephonyPanel({ agent, refreshAgent }) {
           ` : ""}
         </div>
       ` : supportsAuto ? html`
-        <!-- Auto-setup card -->
+        <!-- Auto-setup card — OPTIONAL, collapsed by default (Build 259).
+             Validating a carrier key is a convenience, never a prerequisite
+             for saving a number. The manual flow below is the primary path. -->
+        <div class="tel-auto-disclose">
+          <button type="button" class="tel-manual-toggle"
+                  aria-expanded=${autoOpen ? "true" : "false"}
+                  onClick=${() => setAutoOpen((v) => !v)}>
+            Connect ${providerMeta?.name || "carrier"} API for auto-setup
+            <span class="tel-chip-tag">optional</span>
+            <span class=${"tel-manual-caret" + (autoOpen ? " open" : "")} aria-hidden="true">▾</span>
+          </button>
+        </div>
+        ${autoOpen ? html`
         <div class="tel-auto">
           <div class="tel-auto-head">
             <span class="tel-recom">recommended</span>
@@ -10558,6 +10575,7 @@ function TelephonyPanel({ agent, refreshAgent }) {
           ` : ""}
           ${provisionErr ? html`<div class="tel-err">${provisionErr}</div>` : ""}
         </div>
+        ` : ""}
       ` : html`
         <div class="tel-manual-only">
           ${providerMeta?.name || "This provider"} doesn't support auto-setup —

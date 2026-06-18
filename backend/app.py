@@ -117,7 +117,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 258
+APP_BUILD = 259
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -2745,10 +2745,15 @@ async def telephony_test_creds(agent_id: int, request: Request) -> dict:
         "auth_id":    (body.get("auth_id") or body.get("account_sid") or "").strip(),
         "auth_token": (body.get("auth_token") or "").strip(),
     }
+    if not creds["auth_id"] or not creds["auth_token"]:
+        raise HTTPException(status_code=400, detail="auth_id and auth_token are required")
     try:
         info = await prov.verify_creds(creds)
     except TelephonyAuthError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:  # noqa: BLE001 — never surface a raw 500 to the panel
+        log.exception("telephony_test_creds: %s verify_creds failed", prov.name)
+        raise HTTPException(status_code=502, detail=f"Couldn't reach {prov.display_name}: {e}")
     return info
 
 

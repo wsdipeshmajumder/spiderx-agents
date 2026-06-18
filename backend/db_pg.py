@@ -360,7 +360,11 @@ async def set_user_plan(user_id: int, plan_id: int, reset_usage: bool = True) ->
 # Columns we map straight through (scalar). JSONB columns are listed separately
 # because asyncpg + our jsonb codec want them as native Python values.
 _AGENT_SCALARS = ("name", "sector", "locale", "persona", "greeting",
-                  "system_prompt", "voice", "webhook_url")
+                  "system_prompt", "voice", "webhook_url",
+                  # Build 251 — Fernet-encrypted carrier credentials (Plivo /
+                  # Twilio Auth Token). BYTEA on the agent row; see
+                  # backend/telephony/secrets.py.
+                  "telephony_secret_enc")
 _AGENT_JSON = ("guardrails", "connectors", "sip_config", "voice_tweaks",
                "outcomes", "policy", "webhook_headers", "variables", "purpose",
                "small_talk", "extra_info", "info_groups", "outcome_weights",
