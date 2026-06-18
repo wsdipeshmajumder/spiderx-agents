@@ -2500,13 +2500,34 @@ async def ws_twilio(ws: WebSocket, agent_id: int) -> None:
 #   Fallback URL:  https://<host>/api/sip/plivo/fallback
 
 
-def _public_wss_host() -> str:
+def _host_hint_from_request(request: Optional["Request"]) -> str:
+    """Bare public host (e.g. "agents.spiderx.ai") inferred from the
+    incoming request when PUBLIC_HOST isn't configured. Behind Railway's
+    proxy the X-Forwarded-Host / Host header carries the real public
+    domain, so the webhook URLs we show the operator resolve correctly
+    even if the admin never set PUBLIC_HOST. Returns "" when there's no
+    usable request (e.g. internal callers)."""
+    if request is None:
+        return ""
+    try:
+        host = (request.headers.get("x-forwarded-host")
+                or request.headers.get("host") or "").split(",")[0].strip()
+    except Exception:  # noqa: BLE001
+        host = ""
+    # Never echo an internal/loopback host into a carrier-facing URL.
+    if not host or host.startswith(("localhost", "127.0.0.1", "0.0.0.0")):
+        return ""
+    return host.rstrip("/")
+
+
+def _public_wss_host(request: Optional["Request"] = None) -> str:
     """Public hostname for the carrier's WebSocket. Mirrors the Twilio
     helper above — supports PUBLIC_HOST as either bare host, http(s) URL,
-    or ws(s) URL."""
+    or ws(s) URL. Falls back to the request host when PUBLIC_HOST is unset."""
     public_host = os.environ.get("PUBLIC_HOST", "").rstrip("/")
     if not public_host:
-        return "wss://YOUR-NGROK-HOST"
+        hint = _host_hint_from_request(request)
+        return ("wss://" + hint) if hint else "wss://YOUR-NGROK-HOST"
     if public_host.startswith("http://"):
         return "ws://" + public_host[len("http://"):]
     if public_host.startswith("https://"):
@@ -2636,12 +2657,14 @@ async def ws_telephony(ws: WebSocket, provider: str, agent_id: int) -> None:
 # the operator exactly what's misconfigured if anything is.
 
 
-def _public_https_host() -> str:
+def _public_https_host(request: Optional["Request"] = None) -> str:
     """Public HTTPS hostname for the carrier's Answer / Hangup / Fallback URLs.
-    Mirrors `_public_wss_host` but emits https:// instead of wss://."""
+    Mirrors `_public_wss_host` but emits https:// instead of wss://. Falls
+    back to the request host when PUBLIC_HOST is unset."""
     public_host = os.environ.get("PUBLIC_HOST", "").rstrip("/")
     if not public_host:
-        return "https://YOUR-NGROK-HOST"
+        hint = _host_hint_from_request(request)
+        return ("https://" + hint) if hint else "https://YOUR-NGROK-HOST"
     if public_host.startswith(("ws://",)):
         return "http://" + public_host[len("ws://"):]
     if public_host.startswith(("wss://",)):
@@ -2651,18 +2674,20 @@ def _public_https_host() -> str:
     return public_host
 
 
-def _webhook_urls(provider_name: str, agent_id: int) -> dict[str, str]:
+def _webhook_urls(provider_name: str, agent_id: int,
+                  request: Optional["Request"] = None) -> dict[str, str]:
     """The URLs that go into the carrier's Application dialog."""
-    base = _public_https_host()
+    base = _public_https_host(request)
     return {
         "answer_url":   f"{base}/api/sip/{provider_name}/answer/{agent_id}",
         "hangup_url":   f"{base}/api/sip/{provider_name}/hangup/{agent_id}",
         "fallback_url": f"{base}/api/sip/{provider_name}/fallback/{agent_id}",
-        "stream_url":   f"{_public_wss_host()}/ws/{provider_name}/{agent_id}",
+        "stream_url":   f"{_public_wss_host(request)}/ws/{provider_name}/{agent_id}",
     }
 
 
-def _telephony_view(agent: dict[str, Any], provider_name: Optional[str] = None) -> dict[str, Any]:
+def _telephony_view(agent: dict[str, Any], provider_name: Optional[str] = None,
+                    request: Optional["Request"] = None) -> dict[str, Any]:
     """Project the agent's stored telephony state into the shape the UI
     consumes. Never returns the raw Auth Token — only the last-4 tail.
 
@@ -2694,7 +2719,7 @@ def _telephony_view(agent: dict[str, Any], provider_name: Optional[str] = None) 
     except Exception:  # noqa: BLE001
         providers = []
     try:
-        webhooks = _webhook_urls(selected or "plivo", int(agent["id"]))
+        webhooks = _webhook_urls(selected or "plivo", int(agent["id"]), request)
     except Exception:  # noqa: BLE001
         webhooks = {"answer_url": "", "hangup_url": "", "fallback_url": "", "stream_url": ""}
     return {
@@ -2723,7 +2748,7 @@ async def telephony_get(agent_id: int, request: Request, provider: Optional[str]
     switches the previewed webhook URLs without persisting anything."""
     user = await current_user(request)
     agent = await _require_agent_owned(agent_id, user)
-    return _telephony_view(agent, provider_name=provider)
+    return _telephony_view(agent, provider_name=provider, request=request)
 
 
 @app.post("/api/agents/{agent_id}/telephony/test-creds")
@@ -2811,7 +2836,7 @@ async def telephony_provision(agent_id: int, request: Request) -> dict:
     if not creds["auth_id"] or not creds["auth_token"]:
         raise HTTPException(status_code=400, detail="auth_id and auth_token are required")
     alias = (body.get("alias") or f"SpiderX-{agent.get('name') or 'Eva'}-Inbound").strip()[:120]
-    urls = _webhook_urls(prov.name, agent_id)
+    urls = _webhook_urls(prov.name, agent_id, request)
     try:
         app_info = await prov.create_application(
             creds=creds, name=alias,
@@ -2853,7 +2878,7 @@ async def telephony_provision(agent_id: int, request: Request) -> dict:
         )
     except Exception:  # noqa: BLE001
         pass
-    return _telephony_view(updated, provider_name=prov.name)
+    return _telephony_view(updated, provider_name=prov.name, request=request)
 
 
 @app.post("/api/agents/{agent_id}/telephony/manual-config")
@@ -2885,7 +2910,7 @@ async def telephony_manual_config(agent_id: int, request: Request) -> dict:
     updated = await db.update_agent(agent_id, {"sip_config": cfg})
     if not updated:
         raise HTTPException(status_code=404, detail="agent not found")
-    return _telephony_view(updated, provider_name=prov.name)
+    return _telephony_view(updated, provider_name=prov.name, request=request)
 
 
 @app.post("/api/agents/{agent_id}/telephony/verify-live")
@@ -2945,7 +2970,7 @@ async def telephony_disconnect(agent_id: int, request: Request) -> dict:
     user = await current_user(request)
     agent = await _require_agent_admin(agent_id, user)
     await db.update_agent(agent_id, {"sip_config": None, "telephony_secret_enc": None})
-    return _telephony_view({**agent, "sip_config": None, "telephony_secret_enc": None})
+    return _telephony_view({**agent, "sip_config": None, "telephony_secret_enc": None}, request=request)
 
 
 # ─────────────────────── static frontend ──────────────────
