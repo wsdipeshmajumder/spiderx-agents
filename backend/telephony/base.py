@@ -244,6 +244,7 @@ async def run_call(ws: WebSocket, provider: TelephonyProvider, agent_id: int) ->
     a `_ConversationMemory` across reconnects and written to `calls` via
     `db.insert_call` when the call ends — so phone calls land in Call
     Logs + Outcomes like browser calls do."""
+    import time
     from datetime import datetime, timezone
 
     agent = await db.get_agent(agent_id)
@@ -252,17 +253,27 @@ async def run_call(ws: WebSocket, provider: TelephonyProvider, agent_id: int) ->
         return
 
     connector_ids: list[str] = agent.get("connectors") or []
-    tools = build_connector_tools(connector_ids)
+    # ALWAYS offer end_call — the universal system prompt instructs the model
+    # to call it at wrap-up with {outcome, reason, summary, extracted,
+    # sentiment, lead_quality}. Its handler (connectors.py) persists the call
+    # AND fires the agent's webhook/notifications. Mirrors gemini_bridge.
+    tool_ids = list(connector_ids) + (["end_call"] if "end_call" not in connector_ids else [])
+    tools = build_connector_tools(tool_ids)
     memory = _ConversationMemory()
     started_at = datetime.now(timezone.utc)
+    # Context the end_call connector reads off the agent dict at insert time
+    # (started_at for duration, transcript, model). Kept fresh in _bridge.
+    agent["_call_started_iso"] = started_at.isoformat()
+    agent["_call_started_at"] = time.monotonic()
+    agent["_transcript"] = []
     caller_done = asyncio.Event()          # set ONLY when the caller hangs up
     used_model = DEFAULT_MODEL
     resume_handle: Optional[str] = None
     first_session = True
-    # The carrier sends WsStart (with the stream_id we must echo on every
-    # outbound frame) ONCE at call start — not again after a reconnect. Hold
-    # it here so reconnected sessions can still address outbound audio.
-    call_state: dict[str, Any] = {"stream_id": None}
+    # stream_id: WsStart arrives ONCE; hold it so reconnects can still address
+    # outbound audio. persisted: set once end_call has written the call row, so
+    # the hangup fallback in _persist_call doesn't insert a duplicate.
+    call_state: dict[str, Any] = {"stream_id": None, "persisted": False}
     # Guard against a tight reconnect loop if Gemini keeps closing instantly
     # (e.g. a config/quota problem rather than normal session turnover).
     short_sessions = 0
@@ -287,6 +298,7 @@ async def run_call(ws: WebSocket, provider: TelephonyProvider, agent_id: int) ->
                     async with client.aio.live.connect(model=model_name, config=config) as session:
                         opened = True
                         used_model = model_name
+                        agent["_model_id"] = model_name  # end_call reads this at insert time
                         log.info("telephony[%s] session: agent=%s model=%s resume=%s",
                                  provider.name, agent_id, model_name, "yes" if resume_handle else "no")
                         new_handle = await _bridge(
@@ -321,8 +333,14 @@ async def run_call(ws: WebSocket, provider: TelephonyProvider, agent_id: int) ->
             log.info("telephony[%s] session ended after %.1fs; reconnecting (caller still connected)",
                      provider.name, session_secs)
     finally:
-        ended_at = datetime.now(timezone.utc)
-        await _persist_call(agent, provider, memory, started_at, ended_at, used_model)
+        # The model's end_call (if it fired) already wrote a rich call row
+        # with outcome + extracted via the connector handler. Only fall back
+        # to our transcript-derived row when it didn't (caller hung up, silence).
+        if not call_state.get("persisted"):
+            ended_at = datetime.now(timezone.utc)
+            await _persist_call(agent, provider, memory, started_at, ended_at, used_model)
+        else:
+            log.info("telephony[%s]: call already persisted via end_call", provider.name)
 
 
 async def _persist_call(
@@ -461,6 +479,7 @@ async def _bridge(
 
     async def gemini_to_carrier() -> None:
         nonlocal state_out, new_handle
+        wrapping_up = False   # set once end_call fired; end on next turn_complete
         try:
             async for response in session.receive():
                 if stop.is_set():
@@ -484,6 +503,10 @@ async def _bridge(
                         memory.feed_output_transcription(ot.text)
                     if getattr(sc, "turn_complete", False):
                         memory.on_turn_complete()
+                        if wrapping_up:
+                            # The closing line after end_call has finished —
+                            # end the call now (caller_done already set).
+                            return
                     if sc.model_turn and sc.model_turn.parts:
                         for part in sc.model_turn.parts:
                             if part.inline_data and part.inline_data.data:
@@ -506,7 +529,15 @@ async def _bridge(
                         name, args = fc.name, fc.args or {}
                         log.info("telephony[%s] tool_call %s", provider.name, name)
                         try:
-                            if name in CONNECTOR_DECLS and name in connector_ids:
+                            # end_call is always available (not gated on the
+                            # agent's connector list); it persists the call +
+                            # fires webhooks. Refresh the transcript so the
+                            # connector captures the full conversation.
+                            if name == "end_call":
+                                memory.on_turn_complete()
+                                agent["_transcript"] = list(memory.turns)
+                                result = await handle_connector(name, args, agent)
+                            elif name in CONNECTOR_DECLS and name in connector_ids:
                                 result = await handle_connector(name, args, agent)
                             else:
                                 result = {"ok": False, "error": f"connector {name} not enabled"}
@@ -516,6 +547,16 @@ async def _bridge(
                         await session.send_tool_response(
                             function_responses=types.FunctionResponse(id=fc.id, name=name, response=result)
                         )
+                        # A successful end_call means the call is wrapped: it
+                        # persisted the row. Flag it (skip the fallback) and set
+                        # caller_done so we never reconnect — but DON'T cut off
+                        # the model's closing line; end on its turn_complete (or
+                        # session end as a backstop).
+                        if (name == "end_call" and isinstance(result, dict)
+                                and result.get("ok") and not result.get("rejected")):
+                            call_state["persisted"] = True
+                            caller_done.set()
+                            wrapping_up = True
         except Exception as e:  # noqa: BLE001
             log.warning("telephony[%s] gemini→carrier error: %s", provider.name, e)
         finally:
