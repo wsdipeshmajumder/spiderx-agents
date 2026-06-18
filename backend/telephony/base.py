@@ -33,6 +33,7 @@ from ..connectors import (
 from ..gemini_bridge import (
     DEFAULT_MODEL,
     FALLBACK_MODELS,
+    _ConversationMemory,
     _agent_system_prompt,
     _live_config,
 )
@@ -228,7 +229,23 @@ async def run_call(ws: WebSocket, provider: TelephonyProvider, agent_id: int) ->
     """Bridge a carrier's WebSocket call leg into Gemini Live for the
     given saved agent. Identical end-to-end behaviour as the in-browser
     voice tester — same connector tools, same model fallback chain, same
-    interrupt semantics."""
+    interrupt semantics.
+
+    Resilience (Build 261): Gemini periodically ends a Live session
+    (`go_away` or a clean stream end ~every few minutes, sometimes much
+    sooner). A single `session.receive()` loop therefore can't carry a
+    real phone call — when the session ends the call would drop. We wrap
+    the session in a reconnect loop keyed off the server-issued
+    `session_resumption` handle (the same mechanism the browser tester
+    uses), so the call survives session turnover. We only stop when the
+    CALLER hangs up (carrier WsStop / WS disconnect).
+
+    Persistence (Build 261): the conversation transcript is captured into
+    a `_ConversationMemory` across reconnects and written to `calls` via
+    `db.insert_call` when the call ends — so phone calls land in Call
+    Logs + Outcomes like browser calls do."""
+    from datetime import datetime, timezone
+
     agent = await db.get_agent(agent_id)
     if not agent:
         log.warning("telephony[%s]: agent %s not found", provider.name, agent_id)
@@ -236,30 +253,135 @@ async def run_call(ws: WebSocket, provider: TelephonyProvider, agent_id: int) ->
 
     connector_ids: list[str] = agent.get("connectors") or []
     tools = build_connector_tools(connector_ids)
-    config = _live_config(
-        voice=agent.get("voice") or "Aoede",
-        locale=agent.get("locale") or "en-US",
-        system_prompt=_agent_system_prompt(agent),
-        tools=tools,
-    )
+    memory = _ConversationMemory()
+    started_at = datetime.now(timezone.utc)
+    caller_done = asyncio.Event()          # set ONLY when the caller hangs up
+    used_model = DEFAULT_MODEL
+    resume_handle: Optional[str] = None
+    first_session = True
+    # The carrier sends WsStart (with the stream_id we must echo on every
+    # outbound frame) ONCE at call start — not again after a reconnect. Hold
+    # it here so reconnected sessions can still address outbound audio.
+    call_state: dict[str, Any] = {"stream_id": None}
+    # Guard against a tight reconnect loop if Gemini keeps closing instantly
+    # (e.g. a config/quota problem rather than normal session turnover).
+    short_sessions = 0
+    MAX_SHORT_SESSIONS = 3
 
     client = _client()
-    last_err: Exception | None = None
-    for model_name in [DEFAULT_MODEL] + [m for m in FALLBACK_MODELS if m != DEFAULT_MODEL]:
-        try:
-            async with client.aio.live.connect(model=model_name, config=config) as session:
-                log.info("telephony[%s] call: agent=%s model=%s", provider.name, agent_id, model_name)
-                await _bridge(ws, provider, session, agent, connector_ids)
-                return
-        except Exception as e:  # noqa: BLE001
-            last_err = e
-            msg = str(e).lower()
-            if "not found" in msg or "404" in msg or "unsupported" in msg:
-                log.warning("telephony[%s]: model %s unusable; trying next", provider.name, model_name)
-                continue
-            log.exception("telephony[%s] session failed", provider.name)
-            return
-    log.error("telephony[%s]: no usable model. last err=%s", provider.name, last_err)
+    try:
+        while not caller_done.is_set():
+            config = _live_config(
+                voice=agent.get("voice") or "Aoede",
+                locale=agent.get("locale") or "en-US",
+                system_prompt=_agent_system_prompt(agent),
+                tools=tools,
+                resume_handle=resume_handle,
+            )
+            sess_started = datetime.now(timezone.utc)
+            opened = False
+            new_handle: Optional[str] = None
+            last_err: Exception | None = None
+            for model_name in [DEFAULT_MODEL] + [m for m in FALLBACK_MODELS if m != DEFAULT_MODEL]:
+                try:
+                    async with client.aio.live.connect(model=model_name, config=config) as session:
+                        opened = True
+                        used_model = model_name
+                        log.info("telephony[%s] session: agent=%s model=%s resume=%s",
+                                 provider.name, agent_id, model_name, "yes" if resume_handle else "no")
+                        new_handle = await _bridge(
+                            ws, provider, session, agent, connector_ids,
+                            memory=memory, caller_done=caller_done,
+                            send_kickoff=first_session, call_state=call_state,
+                        )
+                        first_session = False
+                        break
+                except Exception as e:  # noqa: BLE001
+                    last_err = e
+                    msg = str(e).lower()
+                    if "not found" in msg or "404" in msg or "unsupported" in msg:
+                        log.warning("telephony[%s]: model %s unusable; trying next", provider.name, model_name)
+                        continue
+                    log.exception("telephony[%s] session failed", provider.name)
+                    break
+            if not opened:
+                log.error("telephony[%s]: no usable model. last err=%s", provider.name, last_err)
+                break
+            if new_handle:
+                resume_handle = new_handle
+            if caller_done.is_set():
+                break
+            # Session ended but the caller is still on the line → reconnect.
+            session_secs = (datetime.now(timezone.utc) - sess_started).total_seconds()
+            short_sessions = short_sessions + 1 if session_secs < 2.0 else 0
+            if short_sessions >= MAX_SHORT_SESSIONS:
+                log.error("telephony[%s]: %d consecutive short sessions — giving up to avoid a tight loop",
+                          provider.name, short_sessions)
+                break
+            log.info("telephony[%s] session ended after %.1fs; reconnecting (caller still connected)",
+                     provider.name, session_secs)
+    finally:
+        ended_at = datetime.now(timezone.utc)
+        await _persist_call(agent, provider, memory, started_at, ended_at, used_model)
+
+
+async def _persist_call(
+    agent: dict[str, Any],
+    provider: TelephonyProvider,
+    memory: "_ConversationMemory",
+    started_at,
+    ended_at,
+    model_id: str,
+) -> None:
+    """Write the finished phone call to `calls` so it shows in Call Logs +
+    Outcomes. Best-effort: a persistence failure must never bubble out of
+    the call teardown.
+
+    Outcome is rule-based for now (transcript-derived): no real two-way
+    exchange → `abandoned`; otherwise `completed`. A richer, agent-
+    catalogue-aware classification (matching the browser end_call tool)
+    is a follow-up."""
+    import json as _json
+
+    try:
+        memory.on_turn_complete()  # flush any unterminated fragments
+        turns = list(memory.turns)
+        duration_s = max(0.0, (ended_at - started_at).total_seconds())
+        had_user = any(t.get("role") == "user" and t.get("text") for t in turns)
+        had_model = any(t.get("role") == "model" and t.get("text") for t in turns)
+        if not turns:
+            outcome, reason, summary = (
+                "abandoned", "ABANDONED",
+                "Caller disconnected before any conversation.",
+            )
+        elif not (had_user and had_model):
+            outcome, reason, summary = (
+                "abandoned", "ABANDONED",
+                "Caller disconnected during the greeting.",
+            )
+        else:
+            outcome, reason, summary = (
+                "completed", "COMPLETED",
+                f"Phone call via {provider.display_name} — {len(turns)} turns.",
+            )
+        record = {
+            "agent_id": agent.get("id"),
+            "started_at": started_at.isoformat(),
+            "ended_at": ended_at.isoformat(),
+            "duration_s": duration_s,
+            "outcome": outcome,
+            "reason": reason,
+            "summary": summary,
+            "final_message": None,
+            "extracted": {},
+            "transcript": _json.dumps(turns, ensure_ascii=False) if turns else None,
+            "model_id": model_id,
+        }
+        cid = await db.insert_call(record)
+        log.info("telephony[%s]: persisted call id=%s turns=%d dur=%.1fs outcome=%s",
+                 provider.name, cid, len(turns), duration_s, outcome)
+    except Exception:  # noqa: BLE001
+        log.exception("telephony[%s]: insert_call failed — call not logged", provider.name)
 
 
 async def _bridge(
@@ -268,16 +390,30 @@ async def _bridge(
     session,
     agent: dict[str, Any],
     connector_ids: list[str],
-) -> None:
-    """The actual pump-pair. Inbound audio gets µ-law-decoded + upsampled
-    to 16 kHz PCM and fed to Gemini. Outbound 24 kHz PCM from Gemini gets
-    downsampled to 8 kHz + µ-law-encoded + chopped into 20 ms frames + sent
-    back through the provider's envelope."""
+    *,
+    memory: "_ConversationMemory",
+    caller_done: asyncio.Event,
+    send_kickoff: bool,
+    call_state: dict[str, Any],
+) -> Optional[str]:
+    """Run ONE Gemini Live session against the carrier leg. Inbound audio
+    gets µ-law-decoded + upsampled to 16 kHz PCM and fed to Gemini;
+    outbound 24 kHz PCM from Gemini gets downsampled to 8 kHz + µ-law-
+    encoded + framed back through the provider's envelope.
+
+    Returns the latest `session_resumption` handle so the caller's
+    `run_call` loop can reopen the session if Gemini ended it (vs the
+    caller hanging up, which sets `caller_done`).
+
+    Transcript is accumulated into `memory` (input/output transcription)
+    so it survives reconnects and can be persisted at call end."""
     state_in: Optional[object] = None
     state_out: Optional[object] = None
-    stream_id: Optional[str] = None
-    stop = asyncio.Event()
-    kickoff_sent = asyncio.Event()
+    # Seed from prior session(s) so reconnects can address outbound audio
+    # even though WsStart only arrives once.
+    stream_id: Optional[str] = call_state.get("stream_id")
+    stop = asyncio.Event()              # this session is done (either side)
+    new_handle: Optional[str] = None
 
     async def carrier_to_gemini() -> None:
         nonlocal state_in, stream_id
@@ -289,13 +425,13 @@ async def _bridge(
                     continue
                 if isinstance(ev, WsStart):
                     stream_id = ev.stream_id
+                    call_state["stream_id"] = stream_id
                     log.info("telephony[%s] stream started sid=%s", provider.name, stream_id)
-                    if not kickoff_sent.is_set():
+                    if send_kickoff:
                         await session.send_client_content(
                             turns=types.Content(role="user", parts=[types.Part(text="<call_start>")]),
                             turn_complete=True,
                         )
-                        kickoff_sent.set()
                 elif isinstance(ev, WsMedia):
                     if not ev.ulaw:
                         continue
@@ -312,26 +448,42 @@ async def _bridge(
                         turn_complete=True,
                     )
                 elif isinstance(ev, WsStop):
+                    # Caller hung up — authoritative end of the WHOLE call.
+                    caller_done.set()
                     stop.set()
                     return
         except WebSocketDisconnect:
+            caller_done.set()   # carrier dropped the WS → caller is gone
             stop.set()
         except Exception as e:  # noqa: BLE001
             log.warning("telephony[%s] carrier→gemini error: %s", provider.name, e)
             stop.set()
 
     async def gemini_to_carrier() -> None:
-        nonlocal state_out
+        nonlocal state_out, new_handle
         try:
             async for response in session.receive():
                 if stop.is_set():
                     return
+                # Capture the resumption handle so a reconnect is seamless.
+                sru = getattr(response, "session_resumption_update", None)
+                if sru and getattr(sru, "new_handle", None):
+                    new_handle = sru.new_handle
                 sc = response.server_content
                 if sc:
                     if sc.interrupted and stream_id:
                         clear = provider.clear_outbound(stream_id=stream_id)
                         if clear is not None:
                             await _send(ws, clear)
+                    # Transcripts → conversation memory (persisted at call end).
+                    it = getattr(sc, "input_transcription", None)
+                    if it and getattr(it, "text", None):
+                        memory.feed_input_transcription(it.text)
+                    ot = getattr(sc, "output_transcription", None)
+                    if ot and getattr(ot, "text", None):
+                        memory.feed_output_transcription(ot.text)
+                    if getattr(sc, "turn_complete", False):
+                        memory.on_turn_complete()
                     if sc.model_turn and sc.model_turn.parts:
                         for part in sc.model_turn.parts:
                             if part.inline_data and part.inline_data.data:
@@ -344,6 +496,11 @@ async def _bridge(
                                         ulaw_frame=chunk,
                                     )
                                     await _send(ws, env)
+                # Gemini signalled it's about to drop the session — stop reading
+                # so run_call can reconnect with the resumption handle.
+                if getattr(response, "go_away", None):
+                    log.info("telephony[%s] gemini go_away — will reconnect", provider.name)
+                    return
                 if response.tool_call and response.tool_call.function_calls:
                     for fc in response.tool_call.function_calls:
                         name, args = fc.name, fc.args or {}
@@ -364,4 +521,17 @@ async def _bridge(
         finally:
             stop.set()
 
-    await asyncio.gather(carrier_to_gemini(), gemini_to_carrier())
+    # Run both pumps; return as soon as EITHER finishes, cancelling the other.
+    # (gather would wait for the carrier reader to also exit, but it's blocked
+    # on receive_text() — so we race + cancel instead.)
+    t_in = asyncio.create_task(carrier_to_gemini())
+    t_out = asyncio.create_task(gemini_to_carrier())
+    _done, pending = await asyncio.wait({t_in, t_out}, return_when=asyncio.FIRST_COMPLETED)
+    stop.set()
+    for t in pending:
+        t.cancel()
+        try:
+            await t
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+    return new_handle
