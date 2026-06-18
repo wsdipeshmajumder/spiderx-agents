@@ -460,6 +460,13 @@ async def handle(connector_id: str, args: dict[str, Any], agent: dict[str, Any])
             summary = (args.get("summary") or "").strip() or None
             final = (args.get("final_message") or "").strip() or None
             extracted = args.get("extracted") if isinstance(args.get("extracted"), dict) else None
+            # Merge structured fields harvested from earlier connector calls
+            # (e.g. the telephony bridge stashes send_email/booking args on
+            # `agent["_extracted_extra"]`). The model's own end_call extracted
+            # wins on key conflicts. No-op when nothing was stashed (browser).
+            _extra = agent.get("_extracted_extra") if isinstance(agent.get("_extracted_extra"), dict) else None
+            if _extra:
+                extracted = {**_extra, **(extracted or {})}
 
             # Disconnect-safety: if this call is very young AND the outcome is
             # "imprecise" (e.g. not_interested fired in the first 5s), reject

@@ -225,6 +225,42 @@ async def _send(ws: WebSocket, payload: dict[str, Any]) -> None:
         pass
 
 
+# Connector-arg keys that are transport/content, not structured lead data —
+# excluded when harvesting `extracted` from a connector call. Industry-
+# agnostic: works for send_email, book_appointment, create_lead, etc.
+_HARVEST_SKIP_KEYS = {
+    "to", "cc", "bcc", "from", "subject", "body", "body_html", "html",
+    "message", "text", "content", "summary", "priority", "attachments",
+    "template", "template_id", "url", "webhook", "method", "headers",
+}
+
+
+def _harvest_extracted(args: dict[str, Any]) -> dict[str, Any]:
+    """Pull structured, scalar lead fields out of an arbitrary connector's
+    args so they can be merged into the call's `extracted`. Generic across
+    industries: scalar top-level fields are taken as-is, and any nested
+    `metadata`/`data`/`fields` dict is flattened one level. Transport and
+    free-text content keys (subject, body_html, …) are skipped so the
+    structured record stays clean."""
+    out: dict[str, Any] = {}
+
+    def _take(d: dict[str, Any]) -> None:
+        for k, v in (d or {}).items():
+            if not isinstance(k, str) or k.lower() in _HARVEST_SKIP_KEYS or k.startswith("_"):
+                continue
+            if isinstance(v, (str, int, float, bool)) and not (isinstance(v, str) and len(v) > 200):
+                out[k] = v
+
+    if not isinstance(args, dict):
+        return out
+    _take(args)
+    for nested_key in ("metadata", "data", "fields", "extracted"):
+        nested = args.get(nested_key)
+        if isinstance(nested, dict):
+            _take(nested)
+    return out
+
+
 async def run_call(ws: WebSocket, provider: TelephonyProvider, agent_id: int) -> None:
     """Bridge a carrier's WebSocket call leg into Gemini Live for the
     given saved agent. Identical end-to-end behaviour as the in-browser
@@ -266,6 +302,27 @@ async def run_call(ws: WebSocket, provider: TelephonyProvider, agent_id: int) ->
     agent["_call_started_iso"] = started_at.isoformat()
     agent["_call_started_at"] = time.monotonic()
     agent["_transcript"] = []
+    # Structured fields harvested from connector calls (send_email metadata,
+    # book_appointment args, …) — merged into `extracted` at persist time so
+    # any-industry agents log their captured variables even when end_call's
+    # own extracted is sparse. See _harvest_extracted.
+    agent["_extracted_extra"] = {}
+    # Call recording (Build 262) — stereo WAV pair, same writer the browser
+    # tester uses. Gated on the agent's recording_enabled toggle (default on).
+    # The end_call connector finalizes it; the hangup fallback finalizes it
+    # in _persist_call. A recording failure must NEVER break the call.
+    if agent.get("recording_enabled", True):
+        try:
+            from .. import recordings as _rec
+            token = "tel-" + started_at.isoformat().replace(":", "").replace("-", "").replace("+", "")
+            writer = _rec.RecordingWriter(token, int(agent["id"]))
+            if writer.open():
+                agent["_recording_writer"] = writer
+                agent["_recording_started_iso"] = agent["_call_started_iso"]
+                log.info("telephony[%s] recording opened agent=%s token=%s",
+                         provider.name, agent_id, token)
+        except Exception as e:  # noqa: BLE001
+            log.warning("telephony[%s] recording open failed: %s", provider.name, e)
     caller_done = asyncio.Event()          # set ONLY when the caller hangs up
     used_model = DEFAULT_MODEL
     resume_handle: Optional[str] = None
@@ -382,6 +439,8 @@ async def _persist_call(
                 "completed", "COMPLETED",
                 f"Phone call via {provider.display_name} — {len(turns)} turns.",
             )
+        # Structured fields harvested from connector calls (industry-agnostic).
+        extra = agent.get("_extracted_extra") if isinstance(agent.get("_extracted_extra"), dict) else {}
         record = {
             "agent_id": agent.get("id"),
             "started_at": started_at.isoformat(),
@@ -391,13 +450,41 @@ async def _persist_call(
             "reason": reason,
             "summary": summary,
             "final_message": None,
-            "extracted": {},
+            "extracted": dict(extra) if extra else {},
             "transcript": _json.dumps(turns, ensure_ascii=False) if turns else None,
             "model_id": model_id,
+            "recording_started_at": agent.get("_recording_started_iso"),
         }
+        # Finalize the recording (if any) BEFORE insert so its path/size land
+        # in the same row; rename the temp dir to the real call_id after.
+        writer = agent.get("_recording_writer")
+        if writer is not None:
+            try:
+                meta = writer.finalize(call_id=None)
+                record["recording_path"] = meta.get("recording_path")
+                record["recording_format"] = meta.get("recording_format")
+                record["recording_size_bytes"] = meta.get("recording_size_bytes")
+                if meta.get("recording_started_at"):
+                    record["recording_started_at"] = meta["recording_started_at"].isoformat()
+            except Exception as e:  # noqa: BLE001
+                log.warning("telephony[%s] recording finalize failed: %s", provider.name, e)
         cid = await db.insert_call(record)
-        log.info("telephony[%s]: persisted call id=%s turns=%d dur=%.1fs outcome=%s",
-                 provider.name, cid, len(turns), duration_s, outcome)
+        if writer is not None and cid and record.get("recording_path"):
+            try:
+                from .. import recordings as _rec
+                old_rel = record["recording_path"]
+                new_rel = _rec.relative_path_for(int(agent["id"]), int(cid))
+                old_abs = _rec.RECORDING_ROOT / old_rel
+                new_abs = _rec.RECORDING_ROOT / new_rel
+                if old_abs.exists() and not new_abs.exists():
+                    new_abs.parent.mkdir(parents=True, exist_ok=True)
+                    old_abs.rename(new_abs)
+                    await db.update_call_recording_path(int(cid), new_rel)
+            except Exception as e:  # noqa: BLE001
+                log.warning("telephony[%s] recording rename failed: %s", provider.name, e)
+        log.info("telephony[%s]: persisted call id=%s turns=%d dur=%.1fs outcome=%s rec=%s",
+                 provider.name, cid, len(turns), duration_s, outcome,
+                 "yes" if record.get("recording_path") else "no")
     except Exception:  # noqa: BLE001
         log.exception("telephony[%s]: insert_call failed — call not logged", provider.name)
 
@@ -432,6 +519,7 @@ async def _bridge(
     stream_id: Optional[str] = call_state.get("stream_id")
     stop = asyncio.Event()              # this session is done (either side)
     new_handle: Optional[str] = None
+    rec = agent.get("_recording_writer")   # may be None (recording off / failed)
 
     async def carrier_to_gemini() -> None:
         nonlocal state_in, stream_id
@@ -454,6 +542,8 @@ async def _bridge(
                     if not ev.ulaw:
                         continue
                     pcm16k, state_in = ulaw_to_pcm16k(ev.ulaw, state_in)
+                    if rec is not None:
+                        rec.write_caller(pcm16k)   # 16 kHz PCM caller channel
                     await session.send_realtime_input(
                         audio=types.Blob(data=pcm16k, mime_type="audio/pcm;rate=16000")
                     )
@@ -510,6 +600,8 @@ async def _bridge(
                     if sc.model_turn and sc.model_turn.parts:
                         for part in sc.model_turn.parts:
                             if part.inline_data and part.inline_data.data:
+                                if rec is not None:
+                                    rec.write_agent(part.inline_data.data)  # 24 kHz PCM agent channel
                                 ulaw, state_out = pcm24k_to_ulaw(part.inline_data.data, state_out)
                                 if not stream_id:
                                     continue
@@ -538,6 +630,15 @@ async def _bridge(
                                 agent["_transcript"] = list(memory.turns)
                                 result = await handle_connector(name, args, agent)
                             elif name in CONNECTOR_DECLS and name in connector_ids:
+                                # Harvest structured fields from the connector
+                                # args (industry-agnostic) so the captured lead
+                                # data lands in the call's `extracted`.
+                                try:
+                                    harvested = _harvest_extracted(args)
+                                    if harvested and isinstance(agent.get("_extracted_extra"), dict):
+                                        agent["_extracted_extra"].update(harvested)
+                                except Exception:  # noqa: BLE001
+                                    pass
                                 result = await handle_connector(name, args, agent)
                             else:
                                 result = {"ok": False, "error": f"connector {name} not enabled"}
