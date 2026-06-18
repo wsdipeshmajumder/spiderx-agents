@@ -254,6 +254,39 @@ class PlivoProvider(TelephonyProvider):
             "answer_url": None,  # Plivo binds via app_id, not URL on the Number row
         }
 
+    async def place_outbound_call(
+        self, *,
+        creds: dict[str, str],
+        from_number: str,
+        to_number: str,
+        answer_url: str,
+    ) -> dict[str, Any]:
+        import httpx
+        auth_id, auth_token = _plivo_creds(creds)
+        url = f"https://api.plivo.com/v1/Account/{auth_id}/Call/"
+        # Plivo wants bare digits (no +) in from/to for some accounts; it also
+        # accepts E.164. Send E.164 — Plivo normalises. answer_method GET/POST
+        # both supported by our endpoint; POST matches the Application config.
+        data = {
+            "from": from_number.lstrip("+"),
+            "to": to_number.lstrip("+"),
+            "answer_url": answer_url,
+            "answer_method": "POST",
+        }
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            r = await c.post(url, auth=(auth_id, auth_token), json=data)
+        if r.status_code >= 400:
+            try:
+                msg = (r.json() or {}).get("error") or f"HTTP {r.status_code}"
+            except Exception:  # noqa: BLE001
+                msg = f"HTTP {r.status_code}"
+            raise TelephonyAuthError(f"Plivo refused to place the call: {msg}.")
+        body = r.json() if r.content else {}
+        rid = body.get("request_uuid")
+        if isinstance(body.get("api_id"), str) and not rid:
+            rid = body.get("api_id")
+        return {"ok": True, "call_id": rid}
+
 
 def _plivo_creds(creds: dict[str, str]) -> tuple[str, str]:
     auth_id = (creds.get("auth_id") or "").strip()

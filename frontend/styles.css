@@ -9662,6 +9662,23 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
   line-height: 1.5;
 }
 
+/* Outbound availability badge on the Phone-callback card (Build 263). */
+.db-testcall-avail {
+  margin-left: auto; font-size: 10.5px; font-weight: 700;
+  border-radius: 999px; padding: 2px 9px; letter-spacing: 0.02em;
+}
+.db-testcall-avail-on  { color: #047857; background: #ecfdf5; }
+.db-testcall-avail-off { color: #92600a; background: #fef6e7; }
+.db-testcall-locked {
+  border: 1px dashed #d7dae6; border-radius: 12px;
+  padding: 14px; background: #fafbff;
+}
+.db-testcall-locked p { margin: 0 0 10px; font-size: 12.5px; color: #5a6072; line-height: 1.55; }
+:root[data-theme="dark"] .db-testcall-avail-on  { color: #6ee7b7; background: #11281f; }
+:root[data-theme="dark"] .db-testcall-avail-off { color: #f0c674; background: #2a2410; }
+:root[data-theme="dark"] .db-testcall-locked { background: #14172a; border-color: #2a2e44; }
+:root[data-theme="dark"] .db-testcall-locked p { color: #99a0b3; }
+
 .db-testcall-divider {
   display: flex; align-items: center; justify-content: center;
   position: relative;

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -117,7 +118,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 262
+APP_BUILD = 263
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1401,9 +1402,26 @@ async def list_agents(request: Request) -> list[dict]:
     return await db.list_agents(user["id"])
 
 
+def _public_agent(agent: dict) -> dict:
+    """Strip carrier secrets before an agent row leaves the API. The raw row
+    carries encrypted carrier creds (`telephony_carriers[*].secret_enc` and the
+    legacy `telephony_secret_enc` bytea) — never send those to the browser."""
+    if not isinstance(agent, dict):
+        return agent
+    out = dict(agent)
+    out.pop("telephony_secret_enc", None)
+    tc = out.get("telephony_carriers")
+    if isinstance(tc, dict):
+        out["telephony_carriers"] = {
+            p: ({k: v for k, v in c.items() if k != "secret_enc"} if isinstance(c, dict) else c)
+            for p, c in tc.items()
+        }
+    return out
+
+
 @app.get("/api/agents/{agent_id}")
 async def get_agent(agent_id: int, request: Request) -> dict:
-    return await _require_agent_owned(agent_id, await current_user(request))
+    return _public_agent(await _require_agent_owned(agent_id, await current_user(request)))
 
 
 @app.get("/api/agents/by-slug/{slug}")
@@ -1419,7 +1437,7 @@ async def get_agent_by_slug(slug: str, request: Request) -> dict:
     if not a:
         raise HTTPException(status_code=404, detail="agent not found")
     await _require_agent_owned(a["id"], user)
-    return a
+    return _public_agent(a)
 
 
 @app.delete("/api/agents/{agent_id}")
@@ -2706,6 +2724,16 @@ def _carriers_map(agent: dict[str, Any]) -> dict[str, dict]:
     return {str(k).lower(): v for k, v in raw.items() if isinstance(v, dict)}
 
 
+def _outbound_carrier(carriers: dict[str, dict]) -> Optional[tuple[str, dict]]:
+    """Return (provider, cfg) for a carrier that can place OUTBOUND calls —
+    i.e. has both a saved number and stored API credentials (secret_enc).
+    Manual-only numbers (no creds) are inbound-only. None if none qualify."""
+    for prov, cfg in (carriers or {}).items():
+        if isinstance(cfg, dict) and cfg.get("number") and cfg.get("secret_enc"):
+            return (prov, cfg)
+    return None
+
+
 def _telephony_view(agent: dict[str, Any], provider_name: Optional[str] = None,
                     request: Optional["Request"] = None) -> dict[str, Any]:
     """Project the agent's stored telephony state into the shape the UI
@@ -2745,11 +2773,18 @@ def _telephony_view(agent: dict[str, Any], provider_name: Optional[str] = None,
     # `configured_provider` mirrors the legacy field but is now scoped to the
     # SELECTED carrier: non-null only when THIS carrier has a saved number.
     this_configured = selected if cfg.get("number") else None
+    # Outbound readiness: we can place an outbound (test/callback) call only
+    # for a carrier with BOTH a number AND stored API credentials (auto-setup).
+    # A manual-only number can receive calls but can't originate them.
+    outbound = _outbound_carrier(carriers)
     return {
         "providers": providers,
         "selected_provider": selected or None,
         "configured_provider": this_configured,
         "configured_providers": configured_providers,
+        "outbound_ready": bool(outbound),
+        "outbound_provider": outbound[0] if outbound else None,
+        "outbound_from": (outbound[1].get("number") if outbound else None),
         "config": {
             "alias": cfg.get("alias") or "",
             "number": cfg.get("number") or "",
@@ -2995,6 +3030,63 @@ async def telephony_verify_live(agent_id: int, request: Request) -> dict:
             else "Number isn't bound to any Application in your carrier account."
         ),
     }
+
+
+@app.post("/api/agents/{agent_id}/telephony/outbound-call")
+async def telephony_outbound_call(agent_id: int, request: Request) -> dict:
+    """Place an OUTBOUND call: the agent's connected carrier dials the given
+    number and, on answer, streams to Gemini via our Answer URL (the same
+    inbound path). Requires a carrier connected via auto-setup (stored API
+    credentials) — a manual-only number can't originate calls.
+
+    Used by the "Call me back" phone-test and any future outbound flow."""
+    from .telephony import get_provider
+    from .telephony.base import TelephonyAuthError
+    from .telephony.secrets import decrypt_creds_str
+    user = await current_user(request)
+    agent = await _require_agent_admin(agent_id, user)
+    body = await request.json()
+    to_number = (body.get("to") or body.get("number") or "").strip()
+    if not re.match(r"^\+?[1-9]\d{6,14}$", to_number):
+        raise HTTPException(status_code=400, detail="Enter the number in international format — e.g. +918031321199.")
+    if not to_number.startswith("+"):
+        to_number = "+" + to_number
+    carriers = _carriers_map(agent)
+    outbound = _outbound_carrier(carriers)
+    if not outbound:
+        raise HTTPException(
+            status_code=409,
+            detail="No carrier with API credentials is connected. Connect your carrier via auto-setup (paste credentials) to place outbound calls.",
+        )
+    provider_name, cfg = outbound
+    prov = get_provider(provider_name)
+    if prov is None:
+        raise HTTPException(status_code=400, detail=f"unknown provider {provider_name!r}")
+    creds = decrypt_creds_str(cfg.get("secret_enc"))
+    if not creds.get("auth_id") or not creds.get("auth_token"):
+        raise HTTPException(status_code=409, detail="Saved carrier credentials are missing — re-connect the carrier API.")
+    urls = _webhook_urls(prov.name, agent_id, request)
+    try:
+        res = await prov.place_outbound_call(
+            creds=creds, from_number=cfg["number"],
+            to_number=to_number, answer_url=urls["answer_url"],
+        )
+    except TelephonyAuthError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"{prov.display_name} API error: {e}")
+    try:
+        from . import events
+        await events.emit(
+            kind="telephony.outbound",
+            title=f"{prov.display_name} outbound call to {to_number} from agent {agent.get('name') or agent_id}",
+            severity="info", source="user", agent_id=agent_id,
+            payload={"provider": prov.name, "to": to_number, "from": cfg["number"], "call_id": res.get("call_id")},
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "provider": prov.name, "from": cfg["number"],
+            "to": to_number, "call_id": res.get("call_id")}
 
 
 @app.delete("/api/agents/{agent_id}/telephony")

@@ -200,6 +200,20 @@ class TelephonyProvider(ABC):
         what's misconfigured. Return `{ app_id?, alias?, answer_url?, … }`."""
         raise NotImplementedError
 
+    async def place_outbound_call(
+        self, *,
+        creds: dict[str, str],
+        from_number: str,
+        to_number: str,
+        answer_url: str,
+    ) -> dict[str, Any]:
+        """Originate an OUTBOUND call: tell the carrier to dial `to_number`
+        from `from_number`, and when the callee answers fetch `answer_url`
+        (the same Answer URL inbound uses → streams to our WS → Gemini).
+        Requires API credentials, so it's only available for carriers
+        connected via auto-setup. Return `{ ok: True, call_id }`."""
+        raise NotImplementedError
+
 
 class TelephonyAuthError(Exception):
     """Operator-facing creds-validation failure. The `args[0]` message is

@@ -229,6 +229,33 @@ class TwilioProvider(TelephonyProvider):
             "answer_url": match.get("current_voice_url"),
         }
 
+    async def place_outbound_call(
+        self, *,
+        creds: dict[str, str],
+        from_number: str,
+        to_number: str,
+        answer_url: str,
+    ) -> dict[str, Any]:
+        import httpx
+        sid, token = _twilio_creds(creds)
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Calls.json"
+        data = {
+            "From": from_number,
+            "To": to_number,
+            "Url": answer_url,      # TwiML fetched when the callee answers
+            "Method": "POST",
+        }
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            r = await c.post(url, auth=(sid, token), data=data)
+        if r.status_code >= 400:
+            try:
+                msg = (r.json() or {}).get("message") or f"HTTP {r.status_code}"
+            except Exception:  # noqa: BLE001
+                msg = f"HTTP {r.status_code}"
+            raise TelephonyAuthError(f"Twilio refused to place the call: {msg}.")
+        body = r.json() if r.content else {}
+        return {"ok": True, "call_id": body.get("sid")}
+
 
 def _twilio_creds(creds: dict[str, str]) -> tuple[str, str]:
     sid = (creds.get("auth_id") or creds.get("account_sid") or "").strip()

@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 262;
+const SXAI_BUILD = 263;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -9965,14 +9965,44 @@ function AgentTestCallPage({ agent, agents, presets, plan, onNav, onTest, onTest
   const [num, setNum] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
+  const [phoneErr, setPhoneErr] = useState("");
+  // Outbound readiness — a carrier with stored API credentials is required to
+  // place an outbound test call. Manual-only numbers are inbound-only.
+  const [outbound, setOutbound] = useState(null);  // {ready, from, provider} | null
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = await fetch(`/api/agents/${agent.id}/telephony`);
+        if (!r.ok) return;
+        const d = await r.json();
+        if (alive) setOutbound({
+          ready: !!d.outbound_ready,
+          from: d.outbound_from || null,
+          provider: d.outbound_provider || null,
+        });
+      } catch { /* leave null → treated as not-ready */ }
+    })();
+    return () => { alive = false; };
+  }, [agent?.id]);
+  const outboundReady = !!(outbound && outbound.ready);
   const submitPhone = async (e) => {
     e?.preventDefault();
-    if (!num.trim()) return;
-    setSubmitting(true);
+    if (!num.trim() || !outboundReady) return;
+    setSubmitting(true); setPhoneErr("");
     try {
-      await Promise.resolve(onTestPhone?.(num.trim()));
+      const r = await fetch(`/api/agents/${agent.id}/telephony/outbound-call`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: num.trim() }),
+      });
+      const text = await r.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch {}
+      if (!r.ok) throw new Error((data && data.detail) || `Couldn't place the call (HTTP ${r.status}).`);
       setDone(true);
-      setTimeout(() => setDone(false), 4000);
+      setTimeout(() => setDone(false), 5000);
+    } catch (err) {
+      setPhoneErr(String(err.message || err));
     } finally {
       setSubmitting(false);
     }
@@ -10019,6 +10049,11 @@ function AgentTestCallPage({ agent, agents, presets, plan, onNav, onTest, onTest
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.89.33 1.77.62 2.61a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.47-1.18a2 2 0 0 1 2.11-.45c.84.29 1.72.5 2.61.62A2 2 0 0 1 22 16.92z"/></svg>
           </div>
           <span class="db-testcall-tag">Phone callback</span>
+          ${outboundReady
+            ? html`<span class="db-testcall-avail db-testcall-avail-on">Available</span>`
+            : outbound !== null
+              ? html`<span class="db-testcall-avail db-testcall-avail-off">Needs carrier API</span>`
+              : ""}
         </div>
         <h3 class="db-testcall-title">Get a real call on your phone</h3>
         <p class="db-testcall-sub">${pronouns(agent).subjCap} rings you in seconds. Honest test of the carrier route, DTMF, and IVR.</p>
@@ -10027,20 +10062,34 @@ function AgentTestCallPage({ agent, agents, presets, plan, onNav, onTest, onTest
           <li><span class="db-testcall-bullet-tick" aria-hidden="true">✓</span> Works on the move</li>
           <li><span class="db-testcall-bullet-tick" aria-hidden="true">✓</span> Counts against your monthly minutes</li>
         </ul>
-        <form class="db-testcall-form" onSubmit=${submitPhone}>
-          <label class="db-form-field">
-            <span class="db-form-label">Your phone number</span>
-            <input class="db-input" type="tel" inputmode="tel"
-                   placeholder="+91 98XXXXXXXX"
-                   value=${num} onInput=${(e) => setNum(e.target.value)} />
-          </label>
-          <button class="db-btn-primary" type="submit" disabled=${!num.trim() || submitting}>
-            ${done
-              ? html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12l5 5L20 7"/></svg><span>Calling you now</span>`
-              : html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.89.33 1.77.62 2.61a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.47-1.18a2 2 0 0 1 2.11-.45c.84.29 1.72.5 2.61.62A2 2 0 0 1 22 16.92z"/></svg><span>${submitting ? "Connecting…" : "Call me back"}</span>`}
-          </button>
-        </form>
-        <span class="db-testcall-hint">We use your number once for this test — never stored, never SMS'd.</span>
+        ${outboundReady ? html`
+          <form class="db-testcall-form" onSubmit=${submitPhone}>
+            <label class="db-form-field">
+              <span class="db-form-label">Your phone number</span>
+              <input class="db-input" type="tel" inputmode="tel"
+                     placeholder="+91 98XXXXXXXX"
+                     value=${num} onInput=${(e) => setNum(e.target.value)} />
+            </label>
+            <button class="db-btn-primary" type="submit" disabled=${!num.trim() || submitting}>
+              ${done
+                ? html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12l5 5L20 7"/></svg><span>Calling you now</span>`
+                : html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.89.33 1.77.62 2.61a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.47-1.18a2 2 0 0 1 2.11-.45c.84.29 1.72.5 2.61.62A2 2 0 0 1 22 16.92z"/></svg><span>${submitting ? "Connecting…" : "Call me back"}</span>`}
+            </button>
+          </form>
+          ${phoneErr ? html`<div class="tel-err">${phoneErr}</div>` : ""}
+          <span class="db-testcall-hint">
+            ${outbound?.from ? html`${pronouns(agent).subjCap} calls from <strong>${outbound.from}</strong>. ` : ""}
+            We use your number once for this test — never stored, never SMS'd.
+          </span>
+        ` : html`
+          <div class="db-testcall-locked">
+            <p>Outbound test calls need a carrier connected via <strong>auto-setup</strong> (API credentials) — a manually-set number can receive calls but can't place them.</p>
+            <button class="db-btn-ghost db-btn-sm" type="button"
+                    onClick=${() => onNav && onNav(`/agent/${agent.slug || agent.id}/go-live`)}>
+              Connect a carrier →
+            </button>
+          </div>
+        `}
       </section>
     </div>
   `;
