@@ -2539,7 +2539,7 @@ def _public_wss_host(request: Optional["Request"] = None) -> str:
 
 @app.api_route("/api/sip/{provider}/answer/{agent_id}", methods=["GET", "POST"],
                response_class=PlainTextResponse)
-async def telephony_answer(provider: str, agent_id: int):
+async def telephony_answer(provider: str, agent_id: int, request: Request):
     """Generic carrier Answer URL — returns the XML/JSON the carrier expects
     to start streaming audio to our WebSocket."""
     from .telephony import get_provider
@@ -2549,7 +2549,10 @@ async def telephony_answer(provider: str, agent_id: int):
     a = await db.get_agent(agent_id)
     if not a:
         raise HTTPException(status_code=404, detail="agent not found")
-    stream_url = f"{_public_wss_host()}/ws/{prov.name}/{agent_id}"
+    # Pass `request` so the stream URL falls back to the carrier-facing host
+    # (e.g. agents.spiderx.ai) when PUBLIC_HOST isn't set — otherwise the
+    # media WebSocket points at wss://YOUR-NGROK-HOST and the call has no audio.
+    stream_url = f"{_public_wss_host(request)}/ws/{prov.name}/{agent_id}"
     body, content_type = prov.answer_xml(stream_url=stream_url, agent=a)
     return PlainTextResponse(content=body, media_type=content_type)
 

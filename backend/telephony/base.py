@@ -229,7 +229,7 @@ async def run_call(ws: WebSocket, provider: TelephonyProvider, agent_id: int) ->
     given saved agent. Identical end-to-end behaviour as the in-browser
     voice tester — same connector tools, same model fallback chain, same
     interrupt semantics."""
-    agent = db.get_agent(agent_id)
+    agent = await db.get_agent(agent_id)
     if not agent:
         log.warning("telephony[%s]: agent %s not found", provider.name, agent_id)
         return
