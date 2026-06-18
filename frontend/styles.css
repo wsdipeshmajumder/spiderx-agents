@@ -13259,6 +13259,10 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
   color: #047857; background: #ecfdf5; border-radius: 999px;
   padding: 2px 7px; letter-spacing: 0.02em;
 }
+/* Per-carrier "saved" badge on the carrier chip — distinguishes a carrier
+   that already has a number bound from one that's merely auto-setup-capable. */
+.tel-chip-tag-saved { color: #3730a3; background: #e0e7ff; }
+:root[data-theme="dark"] .tel-chip-tag-saved { color: #c7d2fe; background: #1e2233; }
 
 /* Auto-setup card */
 .tel-auto {

@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 259;
+const SXAI_BUILD = 260;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -10314,6 +10314,7 @@ function TelephonyPanel({ agent, refreshAgent }) {
     try {
       const r = await fetch(`/api/agents/${agent.id}/telephony/verify-live`, {
         method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: providerName }),
       });
       const data = await r.json();
       setVerifyResult({ ...data, http: r.status });
@@ -10322,19 +10323,19 @@ function TelephonyPanel({ agent, refreshAgent }) {
     } finally {
       setVerifying(false);
     }
-  }, [agent?.id]);
+  }, [agent?.id, providerName]);
 
   const disconnect = useCallback(async () => {
-    if (!confirm("Disconnect this number from SpiderX? This won't touch your carrier account — your Plivo/Twilio Application and number stay where they are.")) return;
+    if (!confirm(`Disconnect this ${providerMeta?.name || "carrier"} number from SpiderX? This won't touch your carrier account — your Application and number stay where they are. Your other carrier (if any) is unaffected.`)) return;
     try {
-      const r = await fetch(`/api/agents/${agent.id}/telephony`, { method: "DELETE" });
+      const r = await fetch(`/api/agents/${agent.id}/telephony?provider=${encodeURIComponent(providerName)}`, { method: "DELETE" });
       const data = await r.json();
       setState(data);
-      setAuthId(""); setAuthToken(""); setNumbers([]); setPickedNumber("");
+      setAuthId(""); setAuthToken(""); setNumbers([]); setPickedNumber(""); setManualNumber("");
       setTestInfo(null); setTestErr(""); setVerifyResult(null);
       refreshAgent && refreshAgent();
     } catch {}
-  }, [agent?.id, refreshAgent]);
+  }, [agent?.id, providerName, providerMeta?.name, refreshAgent]);
 
   const copy = useCallback((field, value) => {
     try { navigator.clipboard.writeText(value); } catch {}
@@ -10427,7 +10428,9 @@ function TelephonyPanel({ agent, refreshAgent }) {
                 `}
               </span>
               <span class="tel-provider-chip-name">${p.name}</span>
-              ${p.auto_provision ? html`<span class="tel-chip-tag">auto-setup</span>` : ""}
+              ${(state.configured_providers || []).includes(p.id)
+                ? html`<span class="tel-chip-tag tel-chip-tag-saved">✓ saved</span>`
+                : p.auto_provision ? html`<span class="tel-chip-tag">auto-setup</span>` : ""}
             </button>
           `)}
         </div>

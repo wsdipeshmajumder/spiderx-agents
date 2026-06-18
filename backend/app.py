@@ -117,7 +117,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 259
+APP_BUILD = 260
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -2686,31 +2686,48 @@ def _webhook_urls(provider_name: str, agent_id: int,
     }
 
 
+def _carriers_map(agent: dict[str, Any]) -> dict[str, dict]:
+    """The agent's per-carrier telephony map ({provider: cfg}). Tolerant of
+    a missing column, a JSON string (legacy/asyncpg edge), or junk — always
+    returns a dict so callers can read/copy safely."""
+    raw = agent.get("telephony_carriers")
+    if isinstance(raw, str):
+        try:
+            import json as _json
+            raw = _json.loads(raw)
+        except Exception:  # noqa: BLE001
+            raw = {}
+    if not isinstance(raw, dict):
+        return {}
+    # Only keep dict-valued entries keyed by lowercase provider id.
+    return {str(k).lower(): v for k, v in raw.items() if isinstance(v, dict)}
+
+
 def _telephony_view(agent: dict[str, Any], provider_name: Optional[str] = None,
                     request: Optional["Request"] = None) -> dict[str, Any]:
     """Project the agent's stored telephony state into the shape the UI
-    consumes. Never returns the raw Auth Token — only the last-4 tail.
+    consumes, scoped to a SINGLE carrier (the selected/requested one).
 
-    Defensive against partial DB state: a missing `sip_config` JSON field,
-    a stored sip_config that's a string (legacy rows), or unparseable
-    `telephony_secret_enc` bytes all flow through without raising. The
-    UI tolerates any field being null."""
+    Each carrier persists independently under `agents.telephony_carriers`
+    (see migration 0029), so the Twilio tab never shows a Plivo number and
+    vice-versa. `configured_providers` lists every carrier that has a saved
+    number so the UI can badge the carrier chips.
+
+    Never returns the raw Auth Token — only the last-4 tail. Defensive
+    against partial/garbage DB state: every field can be null."""
     from .telephony import available_providers
-    from .telephony.secrets import decrypt_creds, mask_token
-    raw_cfg = agent.get("sip_config")
-    if isinstance(raw_cfg, str):
-        # Legacy rows: sip_config came back as a JSON string instead of a
-        # dict. Try to parse; on failure treat as empty.
-        try:
-            import json as _json
-            raw_cfg = _json.loads(raw_cfg)
-        except Exception:  # noqa: BLE001
-            raw_cfg = {}
-    cfg = raw_cfg if isinstance(raw_cfg, dict) else {}
-    stored_provider = (cfg.get("provider") or "").lower()
-    selected = (provider_name or stored_provider or "").lower()
+    from .telephony.secrets import decrypt_creds_str, mask_token
+    carriers = _carriers_map(agent)
+    configured_providers = sorted(
+        p for p, c in carriers.items() if (c.get("number"))
+    )
+    # Which carrier this view is about: the explicit request wins; else the
+    # first configured carrier; else none (the UI defaults to a tab).
+    selected = (provider_name or (configured_providers[0] if configured_providers else "")).lower()
+    cfg = carriers.get(selected) if isinstance(carriers.get(selected), dict) else {}
+    cfg = cfg or {}
     try:
-        creds = decrypt_creds(agent.get("telephony_secret_enc")) or {}
+        creds = decrypt_creds_str(cfg.get("secret_enc")) or {}
     except Exception:  # noqa: BLE001
         creds = {}
     auth_token = (creds.get("auth_token") or "")
@@ -2722,10 +2739,14 @@ def _telephony_view(agent: dict[str, Any], provider_name: Optional[str] = None,
         webhooks = _webhook_urls(selected or "plivo", int(agent["id"]), request)
     except Exception:  # noqa: BLE001
         webhooks = {"answer_url": "", "hangup_url": "", "fallback_url": "", "stream_url": ""}
+    # `configured_provider` mirrors the legacy field but is now scoped to the
+    # SELECTED carrier: non-null only when THIS carrier has a saved number.
+    this_configured = selected if cfg.get("number") else None
     return {
         "providers": providers,
         "selected_provider": selected or None,
-        "configured_provider": stored_provider or None,
+        "configured_provider": this_configured,
+        "configured_providers": configured_providers,
         "config": {
             "alias": cfg.get("alias") or "",
             "number": cfg.get("number") or "",
@@ -2816,7 +2837,7 @@ async def telephony_provision(agent_id: int, request: Request) -> dict:
     from datetime import datetime, timezone
     from .telephony import get_provider
     from .telephony.base import TelephonyAuthError
-    from .telephony.secrets import encrypt_creds
+    from .telephony.secrets import encrypt_creds_str
     user = await current_user(request)
     agent = await _require_agent_admin(agent_id, user)
     body = await request.json()
@@ -2852,20 +2873,18 @@ async def telephony_provision(agent_id: int, request: Request) -> dict:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"{prov.display_name} API error: {e}")
-    cfg = {
-        "provider": prov.name,
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    carriers = _carriers_map(agent)
+    carriers[prov.name] = {
         "alias": alias,
         "number": number,
         "app_id": app_info.get("app_id"),
         "setup_mode": "auto",
-        "configured_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "last_verified_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "configured_at": now,
+        "last_verified_at": now,
+        "secret_enc": encrypt_creds_str(creds),
     }
-    secret = encrypt_creds(creds)
-    updated = await db.update_agent(agent_id, {
-        "sip_config": cfg,
-        "telephony_secret_enc": secret,
-    })
+    updated = await db.update_agent(agent_id, {"telephony_carriers": carriers})
     if not updated:
         raise HTTPException(status_code=404, detail="agent not found")
     try:
@@ -2898,16 +2917,18 @@ async def telephony_manual_config(agent_id: int, request: Request) -> dict:
     if not number:
         raise HTTPException(status_code=400, detail="number is required")
     alias = (body.get("alias") or "").strip()[:120]
-    existing_cfg = agent.get("sip_config") or {}
-    cfg = {
-        **(existing_cfg if isinstance(existing_cfg, dict) else {}),
-        "provider": prov.name,
+    # Per-carrier: update only THIS provider's slot, preserving any other
+    # carrier already configured (and any creds already saved for this one).
+    carriers = _carriers_map(agent)
+    existing = carriers.get(prov.name) if isinstance(carriers.get(prov.name), dict) else {}
+    carriers[prov.name] = {
+        **(existing or {}),
         "number": number,
         "alias": alias,
         "setup_mode": "manual",
         "configured_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
-    updated = await db.update_agent(agent_id, {"sip_config": cfg})
+    updated = await db.update_agent(agent_id, {"telephony_carriers": carriers})
     if not updated:
         raise HTTPException(status_code=404, detail="agent not found")
     return _telephony_view(updated, provider_name=prov.name, request=request)
@@ -2922,18 +2943,28 @@ async def telephony_verify_live(agent_id: int, request: Request) -> dict:
     from datetime import datetime, timezone
     from .telephony import get_provider
     from .telephony.base import TelephonyAuthError
-    from .telephony.secrets import decrypt_creds
+    from .telephony.secrets import decrypt_creds_str
     user = await current_user(request)
     agent = await _require_agent_admin(agent_id, user)
-    cfg = agent.get("sip_config") or {}
-    if not isinstance(cfg, dict) or not cfg.get("provider") or not cfg.get("number"):
+    # Which carrier to verify: explicit body/query provider, else the only
+    # configured one. Each carrier is independent now.
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    req_provider = (body.get("provider") or request.query_params.get("provider") or "").strip().lower()
+    carriers = _carriers_map(agent)
+    provider_name = req_provider or next((p for p, c in carriers.items() if c.get("number")), "")
+    cfg = carriers.get(provider_name) if isinstance(carriers.get(provider_name), dict) else {}
+    cfg = cfg or {}
+    if not provider_name or not cfg.get("number"):
         raise HTTPException(status_code=400, detail="No telephony provider configured yet.")
-    prov = get_provider(cfg["provider"])
+    prov = get_provider(provider_name)
     if prov is None or not prov.auto_provision_supported:
         # Manual-only providers can't be verified via API.
         return {"ok": True, "verifiable": False,
-                "reason": f"{cfg['provider']} doesn't expose a read-back API; verification is by inbound test call."}
-    creds = decrypt_creds(agent.get("telephony_secret_enc"))
+                "reason": f"{provider_name} doesn't expose a read-back API; verification is by inbound test call."}
+    creds = decrypt_creds_str(cfg.get("secret_enc"))
     if not creds.get("auth_id") or not creds.get("auth_token"):
         raise HTTPException(status_code=400,
                             detail="Saved carrier credentials are missing — re-enter them under Auto-setup.")
@@ -2948,7 +2979,8 @@ async def telephony_verify_live(agent_id: int, request: Request) -> dict:
     ok = bool(remote_app_id) and (not expected_app_id or remote_app_id == expected_app_id)
     if ok:
         cfg["last_verified_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        await db.update_agent(agent_id, {"sip_config": cfg})
+        carriers[provider_name] = cfg
+        await db.update_agent(agent_id, {"telephony_carriers": carriers})
     return {
         "ok": ok,
         "verifiable": True,
@@ -2964,13 +2996,23 @@ async def telephony_verify_live(agent_id: int, request: Request) -> dict:
 
 @app.delete("/api/agents/{agent_id}/telephony")
 async def telephony_disconnect(agent_id: int, request: Request) -> dict:
-    """Wipe our copy of the carrier credentials + binding metadata. Does
-    NOT touch the carrier's account — the operator may want to keep the
-    Application/number for another purpose."""
+    """Disconnect ONE carrier (or all). Wipes our copy of that carrier's
+    credentials + binding metadata. Does NOT touch the carrier's account —
+    the operator may want to keep the Application/number for another purpose.
+
+    `?provider=twilio` removes only that carrier's slot; omit it to wipe
+    every carrier (legacy behaviour)."""
     user = await current_user(request)
     agent = await _require_agent_admin(agent_id, user)
-    await db.update_agent(agent_id, {"sip_config": None, "telephony_secret_enc": None})
-    return _telephony_view({**agent, "sip_config": None, "telephony_secret_enc": None}, request=request)
+    provider_name = (request.query_params.get("provider") or "").strip().lower()
+    carriers = _carriers_map(agent)
+    if provider_name:
+        carriers.pop(provider_name, None)
+    else:
+        carriers = {}
+    updated = await db.update_agent(agent_id, {"telephony_carriers": carriers})
+    return _telephony_view(updated or {**agent, "telephony_carriers": carriers},
+                           provider_name=provider_name or None, request=request)
 
 
 # ─────────────────────── static frontend ──────────────────

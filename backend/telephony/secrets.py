@@ -109,6 +109,21 @@ def decrypt_creds(stored: Optional[bytes]) -> dict[str, Any]:
         return {}
 
 
+def encrypt_creds_str(creds: dict[str, Any]) -> str:
+    """Same as `encrypt_creds` but returns a UTF-8 string, suitable for
+    storing inside a JSONB document (the per-carrier telephony map) rather
+    than a dedicated bytea column. Fernet tokens are url-safe-base64 ASCII
+    and the PLAIN: sentinel wraps ASCII JSON, so decoding is lossless."""
+    return encrypt_creds(creds).decode("utf-8")
+
+
+def decrypt_creds_str(stored: Optional[str]) -> dict[str, Any]:
+    """Inverse of `encrypt_creds_str`. Tolerates None / empty."""
+    if not stored:
+        return {}
+    return decrypt_creds(stored.encode("utf-8") if isinstance(stored, str) else stored)
+
+
 def mask_token(token: str, *, keep_tail: int = 4) -> str:
     """Render a token for the UI — '••••…last4'. Empty input → ''."""
     s = (token or "").strip()
