@@ -43,6 +43,9 @@ _PRICING_USD_PER_1M = {
     # Non-Live TTS tier stays on the cheaper text-token pricing — it
     # only runs in build/helper sessions, never the live phone call.
     "gemini-2.5-flash-preview-tts":         {"in": 0.075, "out": 0.30},
+    # Build 273 — text chat (the paid chat-embed add-on) runs on the cheap
+    # text-token tier, not the Live audio tier. Used by chat_bridge.CHAT_MODEL.
+    "gemini-2.5-flash":                     {"in": 0.30,  "out": 2.50},
 }
 
 # Static FX. Roughly the Mar-2026 USD-INR mid-market rate; refresh

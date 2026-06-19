@@ -1369,6 +1369,7 @@ async def _run_model_turn(
     handlers: dict[str, Any],
     send_json,
     build_monitor,
+    usage: Optional[dict[str, int]] = None,
 ) -> str:
     """Send one user message, stream the model's response, handle any
     function calls inline (loop until none remain), then emit
@@ -1387,7 +1388,11 @@ async def _run_model_turn(
             log.exception("chat.send_message_stream failed (iter %s): %s", iteration, e)
             raise
         function_calls: list[Any] = []
+        iter_usage: Any = None
         async for chunk in stream:
+            um = getattr(chunk, "usage_metadata", None)
+            if um is not None:
+                iter_usage = um   # cumulative within this stream; last wins
             if not getattr(chunk, "candidates", None):
                 continue
             for cand in chunk.candidates:
@@ -1405,6 +1410,11 @@ async def _run_model_turn(
                     fc = getattr(part, "function_call", None)
                     if fc and getattr(fc, "name", None):
                         function_calls.append(fc)
+        # Accumulate this iteration's token usage (one model call) into the
+        # caller's running total, so a chat conversation logs a real cost.
+        if usage is not None and iter_usage is not None:
+            usage["in"] = usage.get("in", 0) + (getattr(iter_usage, "prompt_token_count", 0) or 0)
+            usage["out"] = usage.get("out", 0) + (getattr(iter_usage, "candidates_token_count", 0) or 0)
         if not function_calls:
             # Model finished without calling any more tools — turn done.
             await send_json({"type": "turn_complete"})
@@ -1486,13 +1496,15 @@ async def run_agent_chat_session(
     tools = _conn.build_tools(tool_ids)
 
     memory: list[dict[str, str]] = []          # {role, text}
+    usage = {"in": 0, "out": 0}                 # token totals for cost
     persisted = {"done": False}
 
     def _make_handler(name: str):
         async def _h(args: dict[str, Any]) -> dict[str, Any]:
             if name == "end_call":
-                _conn  # keep ref
                 agent["_transcript"] = list(memory)   # freshest transcript before persist
+                agent["_tokens_in"] = usage["in"]     # so end_call's insert computes cost
+                agent["_tokens_out"] = usage["out"]
                 res = await _conn.handle("end_call", args, agent)
                 if isinstance(res, dict) and res.get("ok") and not res.get("rejected"):
                     persisted["done"] = True
@@ -1532,7 +1544,8 @@ async def run_agent_chat_session(
     if send_kickoff:
         try:
             greeting = await _run_model_turn(chat=chat, user_text="<call_start>",
-                                             handlers=handlers, send_json=_send_json, build_monitor=None)
+                                             handlers=handlers, send_json=_send_json,
+                                             build_monitor=None, usage=usage)
             if greeting and greeting.strip():
                 memory.append({"role": "model", "text": greeting.strip()})
         except Exception as e:  # noqa: BLE001
@@ -1579,7 +1592,8 @@ async def run_agent_chat_session(
             memory.append({"role": "user", "text": user_text})
             try:
                 reply = await _run_model_turn(chat=chat, user_text=user_text,
-                                              handlers=handlers, send_json=_send_json, build_monitor=None)
+                                              handlers=handlers, send_json=_send_json,
+                                              build_monitor=None, usage=usage)
             except Exception as e:  # noqa: BLE001
                 log.exception("agent-chat[%s] turn failed: %s", agent_id, e)
                 await _send_json({"type": "error", "message": str(e)[:200]})
@@ -1597,10 +1611,11 @@ async def run_agent_chat_session(
         # Fallback: visitor closed the tab without the model wrapping up via
         # end_call. Persist a transcript-derived row so the chat still logs.
         if not persisted["done"]:
-            await _persist_agent_chat(agent, memory, started_at)
+            await _persist_agent_chat(agent, memory, started_at, usage)
 
 
-async def _persist_agent_chat(agent: dict[str, Any], memory: list[dict[str, str]], started_at) -> None:
+async def _persist_agent_chat(agent: dict[str, Any], memory: list[dict[str, str]],
+                              started_at, usage: Optional[dict[str, int]] = None) -> None:
     """Fallback persistence for an agent chat that ended without end_call.
     Mirrors telephony._persist_call: transcript + rule-based outcome +
     harvested extracted, channel='web_chat'. Best-effort."""
@@ -1628,6 +1643,8 @@ async def _persist_agent_chat(agent: dict[str, Any], memory: list[dict[str, str]
             "transcript": json.dumps(turns, ensure_ascii=False) if turns else None,
             "model_id": CHAT_MODEL,
             "channel": "web_chat",
+            "input_tokens": (usage or {}).get("in") or None,
+            "output_tokens": (usage or {}).get("out") or None,
         }
         cid = await db.insert_call(record)
         log.info("agent-chat: persisted call id=%s turns=%d dur=%.1fs outcome=%s",
