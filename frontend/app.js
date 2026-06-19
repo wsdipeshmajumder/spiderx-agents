@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 270;
+const SXAI_BUILD = 271;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -11115,7 +11115,18 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
 
   // Chat channel (Build 269) — paid add-on, gated on the org's chat_channel
   // entitlement (surfaced on plan state). Same embed.js, data-channel="chat".
-  const hasChat = !!(plan && plan.entitlements && plan.entitlements.chat_channel);
+  // Entitlements can change after this page first loaded (e.g. the operator
+  // just bought the add-on on the billing page), so fetch fresh on mount
+  // rather than trusting the possibly-stale boot-time `plan` prop.
+  const [chatEntitled, setChatEntitled] = useState(null);
+  useEffect(() => {
+    fetch("/api/me/plan").then((r) => r.json())
+      .then((d) => setChatEntitled(!!(d && d.entitlements && d.entitlements.chat_channel)))
+      .catch(() => {});
+  }, []);
+  const hasChat = chatEntitled != null
+    ? chatEntitled
+    : !!(plan && plan.entitlements && plan.entitlements.chat_channel);
   const chatAttrs = [`data-agent="${agent.slug || agent.id}"`, `data-channel="chat"`];
   if (embedPosition !== "bottom-right") chatAttrs.push(`data-position="${embedPosition}"`);
   const chatSnippet = `<script src="${embedOrigin}/static/embed.js" ${chatAttrs.join(" ")}></script>`;
@@ -11900,8 +11911,7 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
       ` : html`
         <div class="golive-paywall">
           <p class="golive-paywall-copy">
-            The Chat channel captures visitors who won't use a mic — they type to ${agent.name}
-            and you get the same outcomes + lead data as a voice call. Sold as a flat monthly add-on.
+            The Chat channel captures visitors who won't use a mic — they type to ${agent.name} by text, and you get the same outcomes and lead data as a voice call. Sold as a flat monthly add-on.
           </p>
           <button class="db-btn-primary" type="button"
                   onClick=${() => onNav && onNav("/account/billing?addon=chat_channel")}>
