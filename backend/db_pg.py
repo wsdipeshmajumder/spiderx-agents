@@ -362,12 +362,20 @@ async def get_org_entitlements_for_user(user_id: int) -> dict[str, Any]:
 
 async def update_org_entitlements(org_id: int, updates: dict[str, Any]) -> dict[str, Any]:
     """Merge `updates` into the org's entitlements blob (shallow). Returns the
-    new entitlements. Used by the billing upgrade flow + ops tooling."""
+    new entitlements. Used by the billing upgrade flow + ops tooling.
+
+    NOTE: the pool registers a jsonb codec, so jsonb params must be passed as
+    native Python objects (the codec json.dumps them) — NOT pre-serialised, or
+    they get double-encoded into a string. We read-merge-write in Python so a
+    previously double-encoded (string) value also self-heals to a clean dict."""
     pool = await get_pool()
     async with pool.acquire() as conn:
+        cur = await conn.fetchval("SELECT entitlements FROM orgs WHERE id = $1", int(org_id))
+        base = cur if isinstance(cur, dict) else {}
+        merged = {**base, **(updates or {})}
         await conn.execute(
-            "UPDATE orgs SET entitlements = COALESCE(entitlements, '{}'::jsonb) || $1::jsonb WHERE id = $2",
-            json.dumps(updates or {}), int(org_id),
+            "UPDATE orgs SET entitlements = $1 WHERE id = $2",
+            merged, int(org_id),
         )
     return await get_org_entitlements(org_id)
 
