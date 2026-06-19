@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 280;
+const SXAI_BUILD = 281;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -4286,6 +4286,7 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
         // Pre-launch ACTIONS only — try her, publish her.
         { key: "test-call", label: "Get a test call", icon: "headset_mic", route: `/agent/${agentSlug}/test-call` },
         { key: "live",      label: "Go live",         icon: "bolt",        route: `/agent/${agentSlug}/go-live`, statusBadge: agent.published ? "live" : "draft" },
+        { key: "chat",      label: "Chat widget",     icon: "chat",        route: `/agent/${agentSlug}/chat` },
       ],
     } : null,
     agent ? {
@@ -10907,6 +10908,205 @@ function TelephonyPanel({ agent, refreshAgent }) {
 
 
 // Go live — the friendly number-request flow as its own page.
+// AgentChatPage — dedicated page for the chat widget (its own menu item),
+// split out of Go-live. Snippet + appearance/behaviour/trust settings on the
+// left, a live preview on the right; paywall when the add-on isn't active.
+function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
+  const embedOrigin = (typeof window !== "undefined") ? window.location.origin : "https://app.spiderx.ai";
+  const embedPosition = "bottom-right";
+
+  // Fetch fresh entitlements (may have just been purchased on billing).
+  const [chatEntitled, setChatEntitled] = useState(null);
+  useEffect(() => {
+    fetch("/api/me/plan").then((r) => r.json())
+      .then((d) => setChatEntitled(!!(d && d.entitlements && d.entitlements.chat_channel)))
+      .catch(() => {});
+  }, []);
+  const hasChat = chatEntitled != null
+    ? chatEntitled
+    : !!(plan && plan.entitlements && plan.entitlements.chat_channel);
+
+  const _cs0 = agent.chat_settings || {};
+  const [chatCfg, setChatCfg] = useState({
+    accent_color: _cs0.accent_color || "",
+    avatar_url: _cs0.avatar_url || "",
+    launcher_text: _cs0.launcher_text || "",
+    welcome_message: _cs0.welcome_message || "",
+    instructions: _cs0.instructions || "",
+    allowed_domains: Array.isArray(_cs0.allowed_domains) ? _cs0.allowed_domains.join(", ") : "",
+    privacy_note: _cs0.privacy_note || "",
+  });
+  const [chatCfgSaving, setChatCfgSaving] = useState(false);
+  const [chatCfgSaved, setChatCfgSaved] = useState(false);
+  const setChatField = (k, v) => { setChatCfg((c) => ({ ...c, [k]: v })); setChatCfgSaved(false); };
+  const saveChatCfg = async () => {
+    setChatCfgSaving(true);
+    try {
+      const payload = { ...chatCfg, allowed_domains: chatCfg.allowed_domains.split(",").map((s) => s.trim()).filter(Boolean) };
+      const r = await fetch(`/api/agents/${agent.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_settings: payload }),
+      });
+      if (r.ok) { setChatCfgSaved(true); setTimeout(() => setChatCfgSaved(false), 2200); refreshAgent && refreshAgent(); }
+    } finally { setChatCfgSaving(false); }
+  };
+
+  const chatAttrs = [`data-agent="${agent.slug || agent.id}"`, `data-channel="chat"`];
+  if (embedPosition !== "bottom-right") chatAttrs.push(`data-position="${embedPosition}"`);
+  if (chatCfg.accent_color) chatAttrs.push(`data-color="${chatCfg.accent_color}"`);
+  if (chatCfg.launcher_text.trim()) chatAttrs.push(`data-label="${chatCfg.launcher_text.replace(/"/g, "'")}"`);
+  const chatSnippet = `<script src="${embedOrigin}/static/embed.js" ${chatAttrs.join(" ")}></script>`;
+  const [chatCopied, setChatCopied] = useState(false);
+  const copyChatSnippet = async () => {
+    try { await navigator.clipboard.writeText(chatSnippet); setChatCopied(true); setTimeout(() => setChatCopied(false), 1800); }
+    catch {}
+  };
+  const prevAccent = /^#[0-9a-fA-F]{3,8}$/.test(chatCfg.accent_color || "") ? chatCfg.accent_color : "#4f46e5";
+  const prevAvatar = (chatCfg.avatar_url || "").trim();
+  const prevWelcome = (chatCfg.welcome_message || "").trim() || `Hi! I'm ${agent.name}. How can I help?`;
+
+  const chatPanel = html`
+    <section class="db-panel db-panel-tall golive-channel-card">
+      <div class="db-channel-head">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+        <div style=${{ flex: 1 }}>
+          <h3 class="db-panel-title">Chat widget</h3>
+          <p class="db-panel-sub">
+            A text version of ${agent.name} — same brain, knowledge and lead capture, no mic.
+            ${hasChat ? " Add-on active." : " Optional paid add-on."}
+          </p>
+        </div>
+        ${hasChat
+          ? html`<span class="golive-channel-pill golive-channel-pill-ok">✓ Active</span>`
+          : html`<span class="golive-channel-pill golive-channel-pill-addon">Add-on</span>`}
+      </div>
+      ${hasChat ? html`
+        <div class="chatcfg-layout">
+        <div class="chatcfg-main">
+        <p class="golive-embed-hint">Paste one line on any site — visitors chat with ${agent.name} by text.</p>
+        <div class="db-embed-snippet"><code>${chatSnippet}</code></div>
+        <div class="db-actions-row">
+          <button type="button" class=${"db-btn-primary " + (chatCopied ? "is-copied" : "")} onClick=${copyChatSnippet}>
+            ${chatCopied
+              ? html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg><span>Copied!</span>`
+              : html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy snippet</span>`}
+          </button>
+          <a class="db-btn-ghost" href=${`/embed/${agent.slug || agent.id}?channel=chat`} target="_blank" rel="noopener">Open chat preview →</a>
+        </div>
+        <div class="chatcfg">
+          <div class="chatcfg-head">Appearance</div>
+          <div class="chatcfg-grid">
+            <label class="db-form-field">
+              <span class="db-form-label">Accent colour</span>
+              <div class="chatcfg-color">
+                <input type="color" value=${chatCfg.accent_color || "#4f46e5"} onInput=${(e) => setChatField("accent_color", e.target.value)} />
+                <input class="db-input" type="text" placeholder="#4f46e5" value=${chatCfg.accent_color}
+                       onInput=${(e) => setChatField("accent_color", e.target.value)} />
+              </div>
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Logo / avatar URL</span>
+              <input class="db-input" type="url" placeholder="https://…/logo.png" value=${chatCfg.avatar_url}
+                     onInput=${(e) => setChatField("avatar_url", e.target.value)} />
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Launcher text</span>
+              <input class="db-input" type="text" placeholder=${`Chat with ${agent.name}`} value=${chatCfg.launcher_text}
+                     onInput=${(e) => setChatField("launcher_text", e.target.value)} />
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Welcome message <span class="db-form-opt">(optional)</span></span>
+              <input class="db-input" type="text" placeholder="Hi! How can I help today?" value=${chatCfg.welcome_message}
+                     onInput=${(e) => setChatField("welcome_message", e.target.value)} />
+            </label>
+          </div>
+          <div class="chatcfg-head" style=${{ marginTop: "16px" }}>Chat behaviour <span class="db-form-opt" style=${{ fontWeight: 400 }}>(optional)</span></div>
+          <label class="db-form-field">
+            <span class="db-form-label">Chat-only instructions — tone/rules layered on the shared brief</span>
+            <textarea class="db-input" rows="3"
+                      placeholder=${`e.g. Be a touch more playful than the phone line. Always mention free home delivery. Offer a brochure link before booking.`}
+                      value=${chatCfg.instructions}
+                      onInput=${(e) => setChatField("instructions", e.target.value)}></textarea>
+          </label>
+          <div class="chatcfg-head" style=${{ marginTop: "16px" }}>Trust &amp; privacy</div>
+          <div class="chatcfg-grid">
+            <label class="db-form-field">
+              <span class="db-form-label">Allowed domains <span class="db-form-opt">(comma-separated)</span></span>
+              <input class="db-input" type="text" placeholder="example.com, shop.example.com" value=${chatCfg.allowed_domains}
+                     onInput=${(e) => setChatField("allowed_domains", e.target.value)} />
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Privacy note <span class="db-form-opt">(optional)</span></span>
+              <input class="db-input" type="text" placeholder="We may use this chat to follow up." value=${chatCfg.privacy_note}
+                     onInput=${(e) => setChatField("privacy_note", e.target.value)} />
+            </label>
+          </div>
+          <div class="db-actions-row">
+            <button type="button" class=${"db-btn-primary db-btn-sm " + (chatCfgSaved ? "is-copied" : "")}
+                    onClick=${saveChatCfg} disabled=${chatCfgSaving}>
+              ${chatCfgSaving ? "Saving…" : chatCfgSaved ? "✓ Saved" : "Save settings"}
+            </button>
+            <span class="db-form-help">Card numbers are auto-masked in stored transcripts. Leave domains blank to allow any site. Behaviour is shared across channels — only the look is chat-specific.</span>
+          </div>
+        </div>
+        </div>
+        <aside class="chatcfg-preview-col">
+          <div class="chatcfg-preview-label">Live preview</div>
+          <div class="chatprev" style=${{ "--chat-accent": prevAccent }}>
+            <div class="chatprev-head">
+              ${prevAvatar
+                ? html`<img class="chatprev-avatar chatprev-avatar-img" src=${prevAvatar} alt=${agent.name} />`
+                : html`<div class="chatprev-avatar">${(agent.name || "?").trim()[0]}</div>`}
+              <div class="chatprev-headmeta">
+                <div class="chatprev-name">${agent.name}</div>
+                <div class="chatprev-status">online</div>
+              </div>
+            </div>
+            <div class="chatprev-log">
+              <div class="chatprev-msg chatprev-msg-model"><div class="chatprev-bubble">${prevWelcome}</div></div>
+              <div class="chatprev-msg chatprev-msg-user"><div class="chatprev-bubble">What are your hours?</div></div>
+              <div class="chatprev-msg chatprev-msg-model"><div class="chatprev-bubble">We're open 9 AM–7 PM, Mon–Sat. Anything I can help you with?</div></div>
+            </div>
+            <div class="chatprev-chips">
+              <span class="chatprev-chip">Book a visit</span>
+              <span class="chatprev-chip">See pricing</span>
+            </div>
+            <div class="chatprev-input">
+              <div class="chatprev-field">Message ${agent.name}…</div>
+              <div class="chatprev-send"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></div>
+            </div>
+          </div>
+          <div class="chatcfg-preview-note">Live preview — changes here apply once you Save.</div>
+        </aside>
+        </div>
+      ` : html`
+        <div class="golive-paywall">
+          <p class="golive-paywall-copy">
+            The Chat channel captures visitors who won't use a mic — they type to ${agent.name} by text, and you get the same outcomes and lead data as a voice call. Sold as a flat monthly add-on.
+          </p>
+          <button class="db-btn-primary" type="button"
+                  onClick=${() => onNav && onNav("/account/billing?addon=chat_channel")}>
+            Add Chat channel — upgrade →
+          </button>
+        </div>
+      `}
+    </section>
+  `;
+
+  return html`
+    <${DashboardShell}
+      activeKey="chat"
+      agent=${agent}
+      agents=${agents}
+      plan=${plan}
+      title="Chat widget"
+      subtitle=${`A text version of ${agent.name} for your website — same brain, knowledge and lead capture, no mic.`}
+      onNav=${onNav}
+      body=${html`<div class="db-overview chatpage"><div class="golive-focus golive-focus-wide">${chatPanel}</div></div>`}
+    />
+  `;
+}
+
 function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, org }) {
   // History of past number-request submissions for this agent — folded in
   // here (used to be its own /numbers page) so the whole phone-number
@@ -11206,63 +11406,6 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
     try { await navigator.clipboard.writeText(embedSnippet); setCopied(true); setTimeout(() => setCopied(false), 1800); }
     catch {}
   };
-
-  // Chat channel (Build 269) — paid add-on, gated on the org's chat_channel
-  // entitlement (surfaced on plan state). Same embed.js, data-channel="chat".
-  // Entitlements can change after this page first loaded (e.g. the operator
-  // just bought the add-on on the billing page), so fetch fresh on mount
-  // rather than trusting the possibly-stale boot-time `plan` prop.
-  const [chatEntitled, setChatEntitled] = useState(null);
-  useEffect(() => {
-    fetch("/api/me/plan").then((r) => r.json())
-      .then((d) => setChatEntitled(!!(d && d.entitlements && d.entitlements.chat_channel)))
-      .catch(() => {});
-  }, []);
-  const hasChat = chatEntitled != null
-    ? chatEntitled
-    : !!(plan && plan.entitlements && plan.entitlements.chat_channel);
-  // Chat appearance (Build 272) — channel-specific presentation saved to the
-  // agent's chat_settings. Behaviour stays shared across channels.
-  const _cs0 = agent.chat_settings || {};
-  const [chatCfg, setChatCfg] = useState({
-    accent_color: _cs0.accent_color || "",
-    avatar_url: _cs0.avatar_url || "",
-    launcher_text: _cs0.launcher_text || "",
-    welcome_message: _cs0.welcome_message || "",
-    instructions: _cs0.instructions || "",
-    allowed_domains: Array.isArray(_cs0.allowed_domains) ? _cs0.allowed_domains.join(", ") : "",
-    privacy_note: _cs0.privacy_note || "",
-  });
-  const [chatCfgSaving, setChatCfgSaving] = useState(false);
-  const [chatCfgSaved, setChatCfgSaved] = useState(false);
-  const setChatField = (k, v) => { setChatCfg((c) => ({ ...c, [k]: v })); setChatCfgSaved(false); };
-  const saveChatCfg = async () => {
-    setChatCfgSaving(true);
-    try {
-      // allowed_domains is a comma string in the form → array for storage.
-      const payload = { ...chatCfg, allowed_domains: chatCfg.allowed_domains.split(",").map((s) => s.trim()).filter(Boolean) };
-      const r = await fetch(`/api/agents/${agent.id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_settings: payload }),
-      });
-      if (r.ok) { setChatCfgSaved(true); setTimeout(() => setChatCfgSaved(false), 2200); refreshAgent && refreshAgent(); }
-    } finally { setChatCfgSaving(false); }
-  };
-
-  const chatAttrs = [`data-agent="${agent.slug || agent.id}"`, `data-channel="chat"`];
-  if (embedPosition !== "bottom-right") chatAttrs.push(`data-position="${embedPosition}"`);
-  if (chatCfg.accent_color) chatAttrs.push(`data-color="${chatCfg.accent_color}"`);
-  if (chatCfg.launcher_text.trim()) chatAttrs.push(`data-label="${chatCfg.launcher_text.replace(/"/g, "'")}"`);
-  const chatSnippet = `<script src="${embedOrigin}/static/embed.js" ${chatAttrs.join(" ")}></script>`;
-  const [chatCopied, setChatCopied] = useState(false);
-  const copyChatSnippet = async () => {
-    try { await navigator.clipboard.writeText(chatSnippet); setChatCopied(true); setTimeout(() => setChatCopied(false), 1800); }
-    catch {}
-  };
-  // Live-preview values (update as the operator edits — no save needed to see).
-  const prevAccent = /^#[0-9a-fA-F]{3,8}$/.test(chatCfg.accent_color || "") ? chatCfg.accent_color : "#4f46e5";
-  const prevAvatar = (chatCfg.avatar_url || "").trim();
-  const prevWelcome = (chatCfg.welcome_message || "").trim() || `Hi! I'm ${agent.name}. How can I help?`;
 
   // Publish state — flips agent.published via PATCH. Status banner up top
   // reflects whatever the server returned last. We pessimistically toggle so
@@ -12010,134 +12153,6 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
     </section>
   `;
 
-  const chatPanel = html`
-    <section class="db-panel db-panel-tall golive-channel-card">
-      <div class="db-channel-head">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-        <div style=${{ flex: 1 }}>
-          <h3 class="db-panel-title">Chat widget</h3>
-          <p class="db-panel-sub">
-            A text version of ${agent.name} — same brain, knowledge and lead capture, no mic.
-            ${hasChat ? " Add-on active." : " Optional paid add-on."}
-          </p>
-        </div>
-        ${hasChat
-          ? html`<span class="golive-channel-pill golive-channel-pill-ok">✓ Active</span>`
-          : html`<span class="golive-channel-pill golive-channel-pill-addon">Add-on</span>`}
-      </div>
-      ${hasChat ? html`
-        <div class="chatcfg-layout">
-        <div class="chatcfg-main">
-        <p class="golive-embed-hint">Paste one line on any site — visitors chat with ${agent.name} by text.</p>
-        <div class="db-embed-snippet"><code>${chatSnippet}</code></div>
-        <div class="db-actions-row">
-          <button type="button" class=${"db-btn-primary " + (chatCopied ? "is-copied" : "")} onClick=${copyChatSnippet}>
-            ${chatCopied
-              ? html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg><span>Copied!</span>`
-              : html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy snippet</span>`}
-          </button>
-          <a class="db-btn-ghost" href=${`/embed/${agent.slug || agent.id}?channel=chat`} target="_blank" rel="noopener">Open chat preview →</a>
-        </div>
-        <div class="chatcfg">
-          <div class="chatcfg-head">Appearance</div>
-          <div class="chatcfg-grid">
-            <label class="db-form-field">
-              <span class="db-form-label">Accent colour</span>
-              <div class="chatcfg-color">
-                <input type="color" value=${chatCfg.accent_color || "#4f46e5"} onInput=${(e) => setChatField("accent_color", e.target.value)} />
-                <input class="db-input" type="text" placeholder="#4f46e5" value=${chatCfg.accent_color}
-                       onInput=${(e) => setChatField("accent_color", e.target.value)} />
-              </div>
-            </label>
-            <label class="db-form-field">
-              <span class="db-form-label">Logo / avatar URL</span>
-              <input class="db-input" type="url" placeholder="https://…/logo.png" value=${chatCfg.avatar_url}
-                     onInput=${(e) => setChatField("avatar_url", e.target.value)} />
-            </label>
-            <label class="db-form-field">
-              <span class="db-form-label">Launcher text</span>
-              <input class="db-input" type="text" placeholder=${`Chat with ${agent.name}`} value=${chatCfg.launcher_text}
-                     onInput=${(e) => setChatField("launcher_text", e.target.value)} />
-            </label>
-            <label class="db-form-field">
-              <span class="db-form-label">Welcome message <span class="db-form-opt">(optional)</span></span>
-              <input class="db-input" type="text" placeholder="Hi! How can I help today?" value=${chatCfg.welcome_message}
-                     onInput=${(e) => setChatField("welcome_message", e.target.value)} />
-            </label>
-          </div>
-          <div class="chatcfg-head" style=${{ marginTop: "16px" }}>Chat behaviour <span class="db-form-opt" style=${{ fontWeight: 400 }}>(optional)</span></div>
-          <label class="db-form-field">
-            <span class="db-form-label">Chat-only instructions — tone/rules layered on the shared brief</span>
-            <textarea class="db-input" rows="3"
-                      placeholder=${`e.g. Be a touch more playful than the phone line. Always mention free home delivery. Offer a brochure link before booking.`}
-                      value=${chatCfg.instructions}
-                      onInput=${(e) => setChatField("instructions", e.target.value)}></textarea>
-          </label>
-          <div class="chatcfg-head" style=${{ marginTop: "16px" }}>Trust &amp; privacy</div>
-          <div class="chatcfg-grid">
-            <label class="db-form-field">
-              <span class="db-form-label">Allowed domains <span class="db-form-opt">(comma-separated)</span></span>
-              <input class="db-input" type="text" placeholder="example.com, shop.example.com" value=${chatCfg.allowed_domains}
-                     onInput=${(e) => setChatField("allowed_domains", e.target.value)} />
-            </label>
-            <label class="db-form-field">
-              <span class="db-form-label">Privacy note <span class="db-form-opt">(optional)</span></span>
-              <input class="db-input" type="text" placeholder="We may use this chat to follow up." value=${chatCfg.privacy_note}
-                     onInput=${(e) => setChatField("privacy_note", e.target.value)} />
-            </label>
-          </div>
-          <div class="db-actions-row">
-            <button type="button" class=${"db-btn-primary db-btn-sm " + (chatCfgSaved ? "is-copied" : "")}
-                    onClick=${saveChatCfg} disabled=${chatCfgSaving}>
-              ${chatCfgSaving ? "Saving…" : chatCfgSaved ? "✓ Saved" : "Save settings"}
-            </button>
-            <span class="db-form-help">Card numbers are auto-masked in stored transcripts. Leave domains blank to allow any site. Behaviour is shared across channels — only the look is chat-specific.</span>
-          </div>
-        </div>
-        </div>
-        <aside class="chatcfg-preview-col">
-          <div class="chatcfg-preview-label">Live preview</div>
-          <div class="chatprev" style=${{ "--chat-accent": prevAccent }}>
-            <div class="chatprev-head">
-              ${prevAvatar
-                ? html`<img class="chatprev-avatar chatprev-avatar-img" src=${prevAvatar} alt=${agent.name} />`
-                : html`<div class="chatprev-avatar">${(agent.name || "?").trim()[0]}</div>`}
-              <div class="chatprev-headmeta">
-                <div class="chatprev-name">${agent.name}</div>
-                <div class="chatprev-status">online</div>
-              </div>
-            </div>
-            <div class="chatprev-log">
-              <div class="chatprev-msg chatprev-msg-model"><div class="chatprev-bubble">${prevWelcome}</div></div>
-              <div class="chatprev-msg chatprev-msg-user"><div class="chatprev-bubble">What are your hours?</div></div>
-              <div class="chatprev-msg chatprev-msg-model"><div class="chatprev-bubble">We're open 9 AM–7 PM, Mon–Sat. Anything I can help you with?</div></div>
-            </div>
-            <div class="chatprev-chips">
-              <span class="chatprev-chip">Book a visit</span>
-              <span class="chatprev-chip">See pricing</span>
-            </div>
-            <div class="chatprev-input">
-              <div class="chatprev-field">Message ${agent.name}…</div>
-              <div class="chatprev-send"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></div>
-            </div>
-          </div>
-          <div class="chatcfg-preview-note">Live preview — changes here apply once you Save.</div>
-        </aside>
-        </div>
-      ` : html`
-        <div class="golive-paywall">
-          <p class="golive-paywall-copy">
-            The Chat channel captures visitors who won't use a mic — they type to ${agent.name} by text, and you get the same outcomes and lead data as a voice call. Sold as a flat monthly add-on.
-          </p>
-          <button class="db-btn-primary" type="button"
-                  onClick=${() => onNav && onNav("/account/billing?addon=chat_channel")}>
-            Add Chat channel — upgrade →
-          </button>
-        </div>
-      `}
-    </section>
-  `;
-
   // Build 265 — singularity principle: one channel in focus at a time.
   // Tabs replace the side-by-side columns so the operator configures Web
   // OR Phone, never split attention across both. Default to Web (fastest
@@ -12145,7 +12160,7 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
   const body = html`
     <div class="db-overview">
       ${publishBanner}
-      <div class=${"golive-focus" + (channelTab === "chat" ? " golive-focus-wide" : "")}>
+      <div class="golive-focus">
       <div class="golive-tabs" role="tablist" aria-label="Go-live channel">
         <button role="tab" type="button"
                 class=${"golive-tab" + (channelTab === "web" ? " golive-tab-on" : "")}
@@ -12163,17 +12178,9 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
           <span>Phone number</span>
           ${telephonyConfigured ? html`<span class="golive-tab-tag golive-tab-tag-ok">✓ Connected</span>` : ""}
         </button>
-        <button role="tab" type="button"
-                class=${"golive-tab" + (channelTab === "chat" ? " golive-tab-on" : "")}
-                aria-selected=${channelTab === "chat" ? "true" : "false"}
-                onClick=${() => setChannelTab("chat")}>
-          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-          <span>Chat widget</span>
-          ${hasChat ? html`<span class="golive-tab-tag golive-tab-tag-ok">✓ Active</span>` : html`<span class="golive-tab-tag">Add-on</span>`}
-        </button>
       </div>
       <div class="golive-tabpanel" role="tabpanel">
-        ${channelTab === "web" ? embedPanel : channelTab === "phone" ? phoneCard : chatPanel}
+        ${channelTab === "phone" ? phoneCard : embedPanel}
       </div>
       </div>
     </div>
@@ -16729,7 +16736,7 @@ function App() {
       // /agent/<slug>/numbers   → folded into /go-live; redirect transparently.
       setEmbedSlug(null);
       setEmbedChannel(null);
-      const m = path.match(/^\/agent\/([\w-]+)(?:\/(calls|outcomes|persona|small-talk|knowledge|guardrails|voice|test-call|go-live|numbers|settings|developer|profile|purpose|extra-info))?/);
+      const m = path.match(/^\/agent\/([\w-]+)(?:\/(calls|outcomes|persona|small-talk|knowledge|guardrails|voice|test-call|go-live|chat|numbers|settings|developer|profile|purpose|extra-info))?/);
       if (m) {
         setAgentsListOpen(false);
         // Legacy /numbers links + bookmarks land on Go live now. Soft replace
@@ -18173,6 +18180,22 @@ function App() {
           presets=${presets}
           plan=${plan}
           org=${user?.org || null}
+          refreshAgent=${() => {
+            fetch(`/api/agents/${revealAgent.id}`).then((r) => r.json()).then((a) => a?.id && setRevealAgent(a)).catch(() => {});
+            refreshAgents && refreshAgents();
+          }}
+          onNav=${(r) => {
+            const sameAgent = r.startsWith(`/agent/${revealAgent.slug || revealAgent.id}`);
+            if (!sameAgent) setRevealAgent(null);
+            goRoute(r);
+          }}
+        />` : ""}
+
+      ${revealAgent && view === "landing" && revealStage === "cockpit" && revealSection === "chat" ? html`
+        <${AgentChatPage}
+          agent=${revealAgent}
+          agents=${agents}
+          plan=${plan}
           refreshAgent=${() => {
             fetch(`/api/agents/${revealAgent.id}`).then((r) => r.json()).then((a) => a?.id && setRevealAgent(a)).catch(() => {});
             refreshAgents && refreshAgents();
