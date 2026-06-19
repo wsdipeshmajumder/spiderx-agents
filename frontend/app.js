@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 276;
+const SXAI_BUILD = 277;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1629,6 +1629,7 @@ function AgentChatEmbed({ slug }) {
   const [quickReplies, setQuickReplies] = useState([]); // generative-UI tappable buttons
   const [activeForm, setActiveForm] = useState(null);   // inline form spec {title, fields, submit_label}
   const [formValues, setFormValues] = useState({});
+  const [activeCards, setActiveCards] = useState([]);   // rich media cards
   const wsRef = useRef(null);
   const streamingRef = useRef(false);                  // mid model-turn → append tokens
   const logRef = useRef(null);
@@ -1673,7 +1674,9 @@ function AgentChatEmbed({ slug }) {
       } else if (m.type === "quick_replies" && Array.isArray(m.options)) {
         setQuickReplies(m.options.filter((o) => typeof o === "string" && o.trim()).slice(0, 4));
       } else if (m.type === "form" && m.form && Array.isArray(m.form.fields)) {
-        setQuickReplies([]); setActiveForm(m.form); setFormValues({});
+        setQuickReplies([]); setActiveCards([]); setActiveForm(m.form); setFormValues({});
+      } else if (m.type === "cards" && Array.isArray(m.cards)) {
+        setQuickReplies([]); setActiveForm(null); setActiveCards(m.cards.slice(0, 6));
       } else if (m.type === "turn_complete") {
         streamingRef.current = false;
       } else if (m.type === "call_ended") {
@@ -1698,7 +1701,7 @@ function AgentChatEmbed({ slug }) {
     setMessages((prev) => [...prev, { role: "user", text: t }]);
     try { ws.send(JSON.stringify({ type: "text", text: t })); } catch {}
     setInput("");
-    setQuickReplies([]); setActiveForm(null);   // widgets are one decision point — clear on send
+    setQuickReplies([]); setActiveForm(null); setActiveCards([]);  // widgets are one decision point — clear on send
   };
 
   const submitForm = (e) => {
@@ -1756,6 +1759,26 @@ function AgentChatEmbed({ slug }) {
         <div class="chatembed-chips">
           ${quickReplies.map((q, i) => html`
             <button key=${i} type="button" class="chatembed-chip" onClick=${() => send(null, q)}>${q}</button>
+          `)}
+        </div>
+      ` : ""}
+      ${activeCards.length && status === "ready" ? html`
+        <div class="chatembed-cards">
+          ${activeCards.map((c, i) => html`
+            <div key=${i} class="chatembed-card">
+              ${c.image_url ? html`<img class="chatembed-card-img" src=${c.image_url} alt=${c.title || ""}
+                                        onError=${(e) => { e.target.style.display = "none"; }} />` : ""}
+              <div class="chatembed-card-body">
+                <div class="chatembed-card-title">${c.title}</div>
+                ${c.subtitle ? html`<div class="chatembed-card-sub">${c.subtitle}</div>` : ""}
+                ${(c.buttons || []).length ? html`
+                  <div class="chatembed-card-btns">
+                    ${c.buttons.map((b, j) => html`<button key=${j} type="button" class="chatembed-card-btn"
+                        onClick=${() => send(null, b.value || b.label)}>${b.label}</button>`)}
+                  </div>
+                ` : ""}
+              </div>
+            </div>
           `)}
         </div>
       ` : ""}

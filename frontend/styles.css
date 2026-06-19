@@ -1265,6 +1265,29 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   transition: background 0.12s ease, color 0.12s ease;
 }
 .chatembed-chip:hover { background: var(--chat-accent, #4f46e5); color: #fff; }
+/* Rich media cards (generative UI, Build 277) — horizontal carousel. */
+.chatembed-cards {
+  display: flex; gap: 10px; padding: 2px 14px 10px; overflow-x: auto;
+  scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+}
+.chatembed-cards::-webkit-scrollbar { height: 5px; }
+.chatembed-cards::-webkit-scrollbar-thumb { background: rgba(127,127,127,0.3); border-radius: 3px; }
+.chatembed-card {
+  flex: 0 0 175px; scroll-snap-align: start;
+  border: 1px solid var(--border, #e6e8ef); border-radius: 12px; overflow: hidden;
+  background: var(--bg-0, #fff); display: flex; flex-direction: column;
+}
+.chatembed-card-img { width: 100%; height: 110px; object-fit: cover; display: block; background: var(--bg-1, #f1f2f7); }
+.chatembed-card-body { padding: 10px; display: flex; flex-direction: column; gap: 4px; }
+.chatembed-card-title { font-size: 13px; font-weight: 700; color: var(--fg, #1a1c25); line-height: 1.25; }
+.chatembed-card-sub { font-size: 12px; color: var(--fg-mute, #6b7080); line-height: 1.3; }
+.chatembed-card-btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.chatembed-card-btn {
+  border: 1.5px solid var(--chat-accent, #4f46e5); color: var(--chat-accent, #4f46e5); background: transparent;
+  border-radius: 999px; padding: 5px 11px; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.chatembed-card-btn:hover { background: var(--chat-accent, #4f46e5); color: #fff; }
+:root[data-theme="dark"] .chatembed-card { background: #14172a; border-color: #2a2e44; }
 /* Inline form (generative UI, Build 276). */
 .chatembed-form {
   margin: 0 14px 10px; padding: 12px; border-radius: 12px;

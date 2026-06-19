@@ -1517,9 +1517,44 @@ def _show_form_decl():
     )
 
 
+def _show_cards_decl():
+    btn = types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "label": types.Schema(type=types.Type.STRING),
+            "value": types.Schema(type=types.Type.STRING, description="text sent when tapped; defaults to the label"),
+        },
+        required=["label"],
+    )
+    card = types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "title": types.Schema(type=types.Type.STRING),
+            "subtitle": types.Schema(type=types.Type.STRING, description="e.g. price, tagline, one line of detail"),
+            "image_url": types.Schema(type=types.Type.STRING, description="optional; only a REAL image URL from your knowledge"),
+            "buttons": types.Schema(type=types.Type.ARRAY, items=btn, description="1-3 tap buttons"),
+        },
+        required=["title"],
+    )
+    return types.FunctionDeclaration(
+        name="show_cards",
+        description=(
+            "Show 1-6 rich visual cards when presenting browsable options (e.g. product or "
+            "model cards with an image, a price/subtitle, and tap buttons). image_url is "
+            "OPTIONAL — only include a real image URL you actually know; otherwise omit it. "
+            "Each button sends its value when tapped. Write a one-line lead-in too. Text chat only."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={"cards": types.Schema(type=types.Type.ARRAY, items=card)},
+            required=["cards"],
+        ),
+    )
+
+
 _CHAT_UI_GUIDANCE = (
     "\n\n━━━ CHAT UI (text channel only) ━━━\n"
-    "This is a TEXT chat with on-screen widgets. Two tools are available IN ADDITION to "
+    "This is a TEXT chat with on-screen widgets. These tools are available IN ADDITION to "
     "your normal tools:\n"
     "• `quick_replies` — 2-4 tappable buttons for a small set of obvious next steps "
     "(e.g. ['Book a test drive','See pricing','Talk to a human']).\n"
@@ -1527,8 +1562,11 @@ _CHAT_UI_GUIDANCE = (
     "phone, date, party size, …) instead of asking one question at a time. When the "
     "visitor submits it you'll receive the values; acknowledge and take the next step "
     "(confirm + use your normal tools to record/send the lead).\n"
+    "• `show_cards` — 1-6 visual cards to present browsable options (models, plans, "
+    "packages) with a title, a price/subtitle, an optional image, and tap buttons. Only "
+    "put an image_url if you genuinely know a real one.\n"
     "Always write a short normal reply alongside a widget. Use widgets only when they "
-    "save the visitor typing — not every turn."
+    "help the visitor — not every turn."
 )
 
 
@@ -1570,7 +1608,7 @@ async def run_agent_chat_session(
     tool_ids = list(connector_ids) + (["end_call"] if "end_call" not in connector_ids else [])
     # Connector decls + the chat-only generative-UI tool, in one Tool.
     conn_decls = [_conn.CONNECTOR_DECLS[c] for c in tool_ids if c in _conn.CONNECTOR_DECLS]
-    tools = [types.Tool(function_declarations=conn_decls + [_quick_replies_decl(), _show_form_decl()])]
+    tools = [types.Tool(function_declarations=conn_decls + [_quick_replies_decl(), _show_form_decl(), _show_cards_decl()])]
 
     memory: list[dict[str, str]] = []          # {role, text}
     usage = {"in": 0, "out": 0}                 # token totals for cost
@@ -1630,6 +1668,38 @@ async def run_agent_chat_session(
         await _send_json({"type": "form", "form": {"title": title, "submit_label": submit_label, "fields": fields}})
         return {"ok": True, "shown": len(fields)}
     handlers["show_form"] = _show_form_handler
+
+    async def _show_cards_handler(args: dict[str, Any]) -> dict[str, Any]:
+        cards = []
+        for c in (args.get("cards") or [])[:6]:
+            if not isinstance(c, dict):
+                continue
+            title = (str(c.get("title") or "").strip())[:80]
+            if not title:
+                continue
+            card = {"title": title}
+            sub = (str(c.get("subtitle") or "").strip())[:140]
+            if sub:
+                card["subtitle"] = sub
+            img = str(c.get("image_url") or "").strip()
+            if img.startswith(("http://", "https://")):
+                card["image_url"] = img[:600]
+            btns = []
+            for b in (c.get("buttons") or [])[:3]:
+                if not isinstance(b, dict):
+                    continue
+                label = (str(b.get("label") or "").strip())[:30]
+                if not label:
+                    continue
+                btns.append({"label": label, "value": (str(b.get("value") or label).strip())[:160]})
+            if btns:
+                card["buttons"] = btns
+            cards.append(card)
+        if not cards:
+            return {"ok": False, "error": "no valid cards"}
+        await _send_json({"type": "cards", "cards": cards})
+        return {"ok": True, "shown": len(cards)}
+    handlers["show_cards"] = _show_cards_handler
 
     config = types.GenerateContentConfig(
         system_instruction=_gb._agent_system_prompt(agent) + _CHAT_UI_GUIDANCE,
