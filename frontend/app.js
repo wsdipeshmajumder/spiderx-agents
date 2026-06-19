@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 265;
+const SXAI_BUILD = 266;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -11750,6 +11750,7 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
   const body = html`
     <div class="db-overview">
       ${publishBanner}
+      <div class="golive-focus">
       <div class="golive-tabs" role="tablist" aria-label="Go-live channel">
         <button role="tab" type="button"
                 class=${"golive-tab" + (channelTab === "web" ? " golive-tab-on" : "")}
@@ -11770,6 +11771,7 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
       </div>
       <div class="golive-tabpanel" role="tabpanel">
         ${channelTab === "web" ? embedPanel : phoneCard}
+      </div>
       </div>
     </div>
   `;

@@ -11264,10 +11264,17 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
   .golive-channels { grid-template-columns: 1fr; }
 }
 
-/* Go-live channel tabs (Build 265) — singularity: one channel in focus. */
+/* Go-live channel tabs (Build 265) — singularity: one channel in focus.
+   The focus column is centered so a single panel isn't lopsided against
+   the empty half (Build 266 — visual balance). */
+.golive-focus {
+  max-width: 680px;
+  margin: 0 auto;
+  display: flex; flex-direction: column; align-items: center;
+}
 .golive-tabs {
   display: inline-flex; gap: 4px;
-  padding: 4px; margin-bottom: 18px;
+  padding: 4px; margin: 0 auto 18px;
   background: var(--bg-1, #f1f2f6); border-radius: 12px;
 }
 .golive-tab {
@@ -11288,7 +11295,7 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
   background: #eef0ff; color: #4f46e5;
 }
 .golive-tab-tag-ok { background: #ecfdf5; color: #047857; }
-.golive-tabpanel { max-width: 640px; }
+.golive-tabpanel { width: 100%; }
 :root[data-theme="dark"] .golive-tabs { background: #14172a; }
 :root[data-theme="dark"] .golive-tab-on { background: #1e2233; color: #e6e8f0; box-shadow: none; }
 :root[data-theme="dark"] .golive-tab-tag { background: #1e2233; color: #c7d2fe; }
