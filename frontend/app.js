@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 281;
+const SXAI_BUILD = 282;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -10951,6 +10951,26 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
     } finally { setChatCfgSaving(false); }
   };
 
+  // Chat instructions auto-draft from industry × context × the agent's
+  // knowledge schema. Auto-runs once when the field is empty; regenerate on
+  // demand. The operator edits/overrides freely.
+  const [suggesting, setSuggesting] = useState(false);
+  const autoTriedRef = useRef(false);
+  const suggestInstructions = async () => {
+    setSuggesting(true);
+    try {
+      const r = await fetch(`/api/agents/${agent.id}/chat-instructions/suggest`, { method: "POST" });
+      if (r.ok) { const d = await r.json(); if (d && d.instructions) setChatField("instructions", d.instructions); }
+    } catch { /* leave blank */ } finally { setSuggesting(false); }
+  };
+  useEffect(() => {
+    if (hasChat && !autoTriedRef.current && !(chatCfg.instructions || "").trim()) {
+      autoTriedRef.current = true;
+      suggestInstructions();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasChat]);
+
   const chatAttrs = [`data-agent="${agent.slug || agent.id}"`, `data-channel="chat"`];
   if (embedPosition !== "bottom-right") chatAttrs.push(`data-position="${embedPosition}"`);
   if (chatCfg.accent_color) chatAttrs.push(`data-color="${chatCfg.accent_color}"`);
@@ -11020,13 +11040,19 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
                      onInput=${(e) => setChatField("welcome_message", e.target.value)} />
             </label>
           </div>
-          <div class="chatcfg-head" style=${{ marginTop: "16px" }}>Chat behaviour <span class="db-form-opt" style=${{ fontWeight: 400 }}>(optional)</span></div>
+          <div class="chatcfg-head" style=${{ marginTop: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+            <span>Chat behaviour</span>
+            <button type="button" class="db-btn-ghost db-btn-sm" onClick=${suggestInstructions} disabled=${suggesting}>
+              ${suggesting ? "✨ Drafting…" : (chatCfg.instructions || "").trim() ? "✨ Regenerate" : "✨ Suggest"}
+            </button>
+          </div>
           <label class="db-form-field">
             <span class="db-form-label">Chat-only instructions — tone/rules layered on the shared brief</span>
-            <textarea class="db-input" rows="3"
-                      placeholder=${`e.g. Be a touch more playful than the phone line. Always mention free home delivery. Offer a brochure link before booking.`}
+            <textarea class="db-input" rows="4"
+                      placeholder=${suggesting ? "Drafting from your industry & knowledge…" : `e.g. Be a touch more playful than the phone line. Always mention free home delivery. Offer a brochure link before booking.`}
                       value=${chatCfg.instructions}
                       onInput=${(e) => setChatField("instructions", e.target.value)}></textarea>
+            <span class="db-form-help">✨ Auto-drafted from your industry, business context and what this agent captures — edit or clear it freely.</span>
           </label>
           <div class="chatcfg-head" style=${{ marginTop: "16px" }}>Trust &amp; privacy</div>
           <div class="chatcfg-grid">

@@ -1660,6 +1660,57 @@ def _agent_chat_system_prompt(agent: dict[str, Any]) -> str:
     return "\n".join(parts) + _CHAT_UI_GUIDANCE
 
 
+async def generate_chat_instructions(agent: dict[str, Any]) -> Optional[str]:
+    """Draft CHAT-specific operator instructions tailored to the agent's
+    industry × context × captured-knowledge schema (its 'memory'). Returned as
+    an editable suggestion — the operator can keep, edit or clear it. None on
+    failure (the UI just leaves the field blank)."""
+    name = agent.get("name") or "the agent"
+    sector = agent.get("sector") or "general"
+    variables = agent.get("variables") or {}
+    persona = _gb._substitute_variables(agent.get("persona") or "", variables)
+    brief = _gb._substitute_variables(agent.get("system_prompt") or "", variables)[:1500]
+    business = (_gb._format_business_facts_for_prompt(agent) or "").strip()
+    try:
+        purpose = (_gb._format_purpose_for_prompt(agent) or "").strip()
+    except Exception:  # noqa: BLE001
+        purpose = ""
+    try:
+        from . import chip_schema as _cs
+        captured = (_cs.extraction_hints_for_prompt(agent) or "").strip()
+    except Exception:  # noqa: BLE001
+        captured = ""
+    system = (
+        "You write CHAT-CHANNEL instructions for a business's AI agent. The agent "
+        "already shares ONE brain across phone + chat (persona, knowledge, guardrails) "
+        "— do NOT restate the persona or repeat the knowledge. Your job: 3-6 short, "
+        "specific instructions that make its TEXT chat excel for THIS industry and "
+        "business. Lean into chat affordances: brevity, quick-reply buttons, inline "
+        "forms to capture details, sharing links — and no phone/audio language. Tie each "
+        "line to a real chat moment for this industry (pre-qualify, show options, book, "
+        "follow up). Be concrete; avoid generic fluff. Output STRICT JSON: "
+        "{\"instructions\": \"<3-6 lines, each starting with a bullet '• ', newline-separated>\"}."
+    )
+    ctx = [
+        f"Agent: {name}", f"Industry / sector: {sector}",
+        (f"Persona: {persona}" if persona else ""),
+        (f"Operating brief: {brief}" if brief else ""),
+        business, purpose,
+        ("Structured details it captures (its memory schema):\n" + captured) if captured else "",
+    ]
+    prompt = "\n\n".join(c for c in ctx if c and c.strip())
+    txt, _model = await _best_generate(system, prompt, temperature=0.5)
+    if not txt:
+        return None
+    try:
+        m = _re.search(r"\{.*\}", txt, _re.S)
+        data = json.loads(m.group(0)) if m else {}
+        ins = str(data.get("instructions") or "").strip()
+        return ins[:1500] or None
+    except Exception:  # noqa: BLE001
+        return (txt.strip()[:1500]) or None
+
+
 async def run_agent_chat_session(
     ws: WebSocket,
     agent_id: int,

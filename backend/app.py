@@ -118,7 +118,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 281
+APP_BUILD = 282
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -2993,6 +2993,19 @@ def _telephony_view(agent: dict[str, Any], provider_name: Optional[str] = None,
         },
         "webhooks": webhooks,
     }
+
+
+@app.post("/api/agents/{agent_id}/chat-instructions/suggest")
+async def suggest_chat_instructions(agent_id: int, request: Request) -> dict:
+    """LLM-draft chat-channel instructions from the agent's industry × context ×
+    captured-knowledge schema. The operator edits/overrides before saving."""
+    user = await current_user(request)
+    agent = await _require_agent_owned(agent_id, user)
+    from . import chat_bridge
+    text = await chat_bridge.generate_chat_instructions(agent)
+    if not text:
+        raise HTTPException(status_code=502, detail="Couldn't generate suggestions right now — try again.")
+    return {"instructions": text}
 
 
 @app.get("/api/agents/{agent_id}/telephony")
