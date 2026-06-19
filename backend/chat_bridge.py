@@ -1424,3 +1424,180 @@ async def _run_model_turn(
     log.warning("chat turn hit 10-iteration cap without resolving — emitting turn_complete")
     await send_json({"type": "turn_complete"})
     return full_text
+
+
+# ─────────────────── Customer-facing AGENT chat (Build 265) ────────────────
+#
+# A saved agent answering a website visitor over TEXT — the paid chat-embed
+# channel. Reuses the streaming + tool loop above (`_run_model_turn`); the
+# only swaps vs the Eva builder are the system prompt (`_agent_system_prompt`),
+# the tools (`connectors.build_tools(connectors + end_call)`), and the handlers
+# (`connectors.handle`). Persistence mirrors the telephony path: the model's
+# `end_call` writes a rich `calls` row (outcome + extracted), and a fallback
+# captures the transcript if the visitor just closes the tab. channel="web_chat".
+
+
+async def run_agent_chat_session(
+    ws: WebSocket,
+    agent_id: int,
+    *,
+    client_locale: str = "en-US",
+    client_tz: str = "UTC",
+    user_id: Optional[int] = None,
+    sid: Optional[str] = None,
+) -> None:
+    from datetime import datetime, timezone
+    from . import connectors as _conn
+
+    async def _send_json(payload: dict[str, Any]) -> None:
+        try:
+            await ws.send_text(json.dumps(payload, default=str))
+        except Exception:  # noqa: BLE001
+            pass
+
+    client = _gb._client()
+    agent = await db.get_agent(agent_id)
+    if not agent:
+        await _send_json({"type": "error", "message": "Agent not found."})
+        return
+
+    # Context the end_call connector reads off the agent dict at insert time.
+    started_at = datetime.now(timezone.utc)
+    agent["_call_started_iso"] = started_at.isoformat()
+    agent["_call_started_at"] = _time_mod.monotonic()
+    agent["_model_id"] = CHAT_MODEL
+    agent["_transcript"] = []
+    agent["_extracted_extra"] = {}
+    agent["_channel"] = "web_chat"
+
+    connector_ids = agent.get("connectors") or []
+    tool_ids = list(connector_ids) + (["end_call"] if "end_call" not in connector_ids else [])
+    tools = _conn.build_tools(tool_ids)
+
+    memory: list[dict[str, str]] = []          # {role, text}
+    persisted = {"done": False}
+
+    def _make_handler(name: str):
+        async def _h(args: dict[str, Any]) -> dict[str, Any]:
+            if name == "end_call":
+                _conn  # keep ref
+                agent["_transcript"] = list(memory)   # freshest transcript before persist
+                res = await _conn.handle("end_call", args, agent)
+                if isinstance(res, dict) and res.get("ok") and not res.get("rejected"):
+                    persisted["done"] = True
+                return res
+            # Harvest structured connector args into extracted (industry-agnostic).
+            try:
+                from .telephony.base import _harvest_extracted  # reuse the same harvester
+                h = _harvest_extracted(args)
+                if h and isinstance(agent.get("_extracted_extra"), dict):
+                    agent["_extracted_extra"].update(h)
+            except Exception:  # noqa: BLE001
+                pass
+            return await _conn.handle(name, args, agent)
+        return _h
+
+    handlers = {name: _make_handler(name) for name in tool_ids}
+
+    config = types.GenerateContentConfig(
+        system_instruction=_gb._agent_system_prompt(agent),
+        tools=tools,
+        temperature=0.5,
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+    )
+    try:
+        chat = client.aio.chats.create(model=CHAT_MODEL, config=config)
+    except Exception as e:  # noqa: BLE001
+        log.exception("agent-chat[%s] chats.create failed: %s", agent_id, e)
+        await _send_json({"type": "error", "message": f"Couldn't open chat: {e}"})
+        return
+
+    await _send_json({"type": "ready", "model": CHAT_MODEL, "kind": "agent",
+                      "agent": {"id": agent.get("id"), "name": agent.get("name")}})
+
+    # Kickoff: the universal system prompt greets on <call_start>.
+    try:
+        greeting = await _run_model_turn(chat=chat, user_text="<call_start>",
+                                         handlers=handlers, send_json=_send_json, build_monitor=None)
+        if greeting and greeting.strip():
+            memory.append({"role": "model", "text": greeting.strip()})
+    except Exception as e:  # noqa: BLE001
+        log.warning("agent-chat[%s] kickoff failed: %s", agent_id, e)
+
+    try:
+        while not persisted["done"]:
+            msg = await ws.receive()
+            if msg.get("type") == "websocket.disconnect":
+                break
+            if "text" not in msg or msg["text"] is None:
+                continue
+            try:
+                data = json.loads(msg["text"])
+            except json.JSONDecodeError:
+                continue
+            kind = data.get("type")
+            if kind == "stop":
+                break
+            if kind != "text" or not data.get("text"):
+                continue
+            user_text = str(data["text"]).strip()
+            if not user_text:
+                continue
+            memory.append({"role": "user", "text": user_text})
+            try:
+                reply = await _run_model_turn(chat=chat, user_text=user_text,
+                                              handlers=handlers, send_json=_send_json, build_monitor=None)
+            except Exception as e:  # noqa: BLE001
+                log.exception("agent-chat[%s] turn failed: %s", agent_id, e)
+                await _send_json({"type": "error", "message": str(e)[:200]})
+                break
+            if reply and reply.strip():
+                memory.append({"role": "model", "text": reply.strip()})
+            if persisted["done"]:
+                await _send_json({"type": "call_ended"})
+                break
+    except WebSocketDisconnect:
+        log.info("agent-chat[%s]: client disconnect", agent_id)
+    except Exception as e:  # noqa: BLE001
+        log.exception("agent-chat[%s]: loop crashed: %s", agent_id, e)
+    finally:
+        # Fallback: visitor closed the tab without the model wrapping up via
+        # end_call. Persist a transcript-derived row so the chat still logs.
+        if not persisted["done"]:
+            await _persist_agent_chat(agent, memory, started_at)
+
+
+async def _persist_agent_chat(agent: dict[str, Any], memory: list[dict[str, str]], started_at) -> None:
+    """Fallback persistence for an agent chat that ended without end_call.
+    Mirrors telephony._persist_call: transcript + rule-based outcome +
+    harvested extracted, channel='web_chat'. Best-effort."""
+    from datetime import datetime, timezone
+    try:
+        turns = list(memory)
+        ended_at = datetime.now(timezone.utc)
+        duration_s = max(0.0, (ended_at - started_at).total_seconds())
+        had_user = any(t.get("role") == "user" and t.get("text") for t in turns)
+        had_model = any(t.get("role") == "model" and t.get("text") for t in turns)
+        if not had_user:
+            outcome, reason, summary = "abandoned", "ABANDONED", "Visitor opened the chat but didn't reply."
+        elif not had_model:
+            outcome, reason, summary = "abandoned", "ABANDONED", "Visitor left before the agent could respond."
+        else:
+            outcome, reason, summary = "completed", "COMPLETED", f"Web chat — {len(turns)} turns."
+        extra = agent.get("_extracted_extra") if isinstance(agent.get("_extracted_extra"), dict) else {}
+        record = {
+            "agent_id": agent.get("id"),
+            "started_at": started_at.isoformat(),
+            "ended_at": ended_at.isoformat(),
+            "duration_s": duration_s,
+            "outcome": outcome, "reason": reason, "summary": summary,
+            "extracted": dict(extra) if extra else {},
+            "transcript": json.dumps(turns, ensure_ascii=False) if turns else None,
+            "model_id": CHAT_MODEL,
+            "channel": "web_chat",
+        }
+        cid = await db.insert_call(record)
+        log.info("agent-chat: persisted call id=%s turns=%d dur=%.1fs outcome=%s",
+                 cid, len(turns), duration_s, outcome)
+    except Exception:  # noqa: BLE001
+        log.exception("agent-chat: insert_call failed — chat not logged")

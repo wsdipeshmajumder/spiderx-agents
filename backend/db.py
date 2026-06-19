@@ -62,6 +62,9 @@ get_plan              = db_pg.get_plan
 get_plan_by_slug      = db_pg.get_plan_by_slug
 get_user_plan_state   = db_pg.get_user_plan_state
 set_user_plan         = db_pg.set_user_plan
+get_org_entitlements          = db_pg.get_org_entitlements
+get_org_entitlements_for_user = db_pg.get_org_entitlements_for_user
+update_org_entitlements       = db_pg.update_org_entitlements
 
 
 # ─── agents ──────────────────────────────────────────────────────────────

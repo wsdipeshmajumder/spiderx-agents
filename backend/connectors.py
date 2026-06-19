@@ -543,6 +543,10 @@ async def handle(connector_id: str, args: dict[str, Any], agent: dict[str, Any])
                 # here so insert_call can stamp `recording_expires_at` (+180d)
                 # in the same INSERT, keeping retention math co-located.
                 "recording_started_at": agent.get("_recording_started_iso"),
+                # Build 265 — which surface this conversation came in on
+                # (web_voice / phone / web_chat). The bridge stamps it; NULL
+                # historical rows are treated as web_voice by the UI.
+                "channel": agent.get("_channel"),
             }
             # Build 206 — finalize the call recording writer (if one was
             # opened on session start). We do this BEFORE insert_call so

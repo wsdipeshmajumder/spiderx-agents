@@ -322,19 +322,54 @@ async def get_user_plan_state(user_id: int) -> dict[str, Any]:
         plan = await get_plan_by_slug("free") or _FALLBACK_FREE
         total = plan.get("minutes_total", 30)
         return {"plan": plan, "minutes_total": total, "minutes_used": 0.0,
-                "minutes_left": total, "plan_started_at": None}
+                "minutes_left": total, "plan_started_at": None, "entitlements": {}}
     plan = await get_plan(r["plan_id"]) if r["plan_id"] else await get_plan_by_slug("free")
     if not plan:
         plan = await get_plan_by_slug("free") or _FALLBACK_FREE
     used = float(r["minutes_used"] or 0)
     total = int(plan.get("minutes_total") or 0)
+    # Org-scoped add-on entitlements (e.g. {"chat_channel": true}). Surfaced
+    # on the plan state so the frontend can gate add-on UI alongside the plan.
+    entitlements = await get_org_entitlements_for_user(user_id)
     return {
         "plan": plan,
         "minutes_total": total,
         "minutes_used": round(used, 1),
         "minutes_left": max(0, round(total - used, 1)),
         "plan_started_at": r["plan_started_at"],
+        "entitlements": entitlements,
     }
+
+
+async def get_org_entitlements(org_id: int) -> dict[str, Any]:
+    """Per-org add-on flags ({"chat_channel": true, …}). Empty dict when the
+    org has none / doesn't exist."""
+    if not org_id:
+        return {}
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        r = await conn.fetchval("SELECT entitlements FROM orgs WHERE id = $1", int(org_id))
+    return dict(r) if isinstance(r, dict) else {}
+
+
+async def get_org_entitlements_for_user(user_id: int) -> dict[str, Any]:
+    """Entitlements for the user's primary org. Tolerant of missing org."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        org_id = await conn.fetchval("SELECT org_id FROM users WHERE id = $1", int(user_id))
+    return await get_org_entitlements(org_id) if org_id else {}
+
+
+async def update_org_entitlements(org_id: int, updates: dict[str, Any]) -> dict[str, Any]:
+    """Merge `updates` into the org's entitlements blob (shallow). Returns the
+    new entitlements. Used by the billing upgrade flow + ops tooling."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE orgs SET entitlements = COALESCE(entitlements, '{}'::jsonb) || $1::jsonb WHERE id = $2",
+            json.dumps(updates or {}), int(org_id),
+        )
+    return await get_org_entitlements(org_id)
 
 
 async def set_user_plan(user_id: int, plan_id: int, reset_usage: bool = True) -> dict[str, Any]:
@@ -639,7 +674,7 @@ async def insert_call(record: dict[str, Any]) -> int:
                     input_tokens, output_tokens, cached_tokens, model_id, cost_paise,
                     sentiment, lead_quality, lead_signals,
                     recording_path, recording_format, recording_size_bytes,
-                    recording_started_at, recording_expires_at
+                    recording_started_at, recording_expires_at, channel
                 ) VALUES (
                     $1, $2, COALESCE($3, now()), COALESCE($4, now()), $5,
                     $6, $7, $8, $9,
@@ -647,7 +682,7 @@ async def insert_call(record: dict[str, Any]) -> int:
                     $12, $13, $14, $15, $16,
                     $17, $18, $19,
                     $20, $21, $22,
-                    $23, $24
+                    $23, $24, $25
                 ) RETURNING id
                 """,
                 int(record["agent_id"]),
@@ -673,6 +708,7 @@ async def insert_call(record: dict[str, Any]) -> int:
                 record.get("recording_size_bytes"),
                 rec_started,
                 rec_expires,
+                record.get("channel"),
             )
             # Phase 9b denormalisation — keep agents.last_call_at + calls_count
             # in lockstep with the calls table. `list_agents` reads these

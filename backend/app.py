@@ -2173,9 +2173,31 @@ async def ws_session(ws: WebSocket) -> None:
     # keeping persistent history server-side and running the function-
     # call loop deterministically. Voice mode (no mode param) keeps the
     # Live API via gemini_bridge.run_session.
-    text_only = (qp.get("mode") or "").strip().lower() == "text"
+    _mode = (qp.get("mode") or "").strip().lower()
+    text_only = _mode == "text"
+    # `mode=chat&agent_id=<id>` → customer-facing AGENT chat (paid add-on).
+    # Gated on the agent's org holding the `chat_channel` entitlement.
+    agent_chat = _mode == "chat" and initial_agent_id is not None
     try:
-        if text_only:
+        if agent_chat:
+            from . import chat_bridge
+            org_id = await db.get_agent_org(initial_agent_id)
+            ent = await db.get_org_entitlements(org_id) if org_id else {}
+            if not ent.get("chat_channel"):
+                try:
+                    await ws.send_text(json.dumps({
+                        "type": "error", "code": "chat_not_entitled",
+                        "message": "Chat is not enabled for this agent.",
+                    }))
+                except Exception:  # noqa: BLE001
+                    pass
+            else:
+                await chat_bridge.run_agent_chat_session(
+                    ws, initial_agent_id,
+                    client_locale=client_locale, client_tz=client_tz,
+                    user_id=user_id, sid=sid,
+                )
+        elif text_only:
             from . import chat_bridge
             await chat_bridge.run_chat_session(
                 ws,
