@@ -118,7 +118,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 277
+APP_BUILD = 278
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1513,6 +1513,23 @@ async def list_agents(request: Request) -> list[dict]:
     return await db.list_agents(user["id"])
 
 
+def _host_allowed(host: Optional[str], allowed: Any) -> bool:
+    """Chat-embed domain gate (Build 278). True if `host` (the page the widget
+    is embedded on, reported by embed.js) matches the operator's allowlist —
+    exact or as a subdomain. An empty/missing allowlist allows any domain.
+    Best-effort: the host is client-reported, so this deters casual snippet
+    copying, not a determined attacker."""
+    domains = [str(d).strip().lower().lstrip("*.") for d in allowed if str(d).strip()] if isinstance(allowed, list) else []
+    if not domains:
+        return True
+    h = (host or "").strip().lower()
+    # Strip a port if present.
+    h = h.split(":")[0]
+    if not h:
+        return False
+    return any(h == d or h.endswith("." + d) for d in domains)
+
+
 def _public_agent(agent: dict) -> dict:
     """Strip carrier secrets before an agent row leaves the API. The raw row
     carries encrypted carrier creds (`telephony_carriers[*].secret_enc` and the
@@ -2315,11 +2332,24 @@ async def ws_session(ws: WebSocket) -> None:
             from . import chat_bridge
             org_id = await db.get_agent_org(initial_agent_id)
             ent = await db.get_org_entitlements(org_id) if org_id else {}
+            _agent = await db.get_agent(initial_agent_id)
+            _cs = (_agent or {}).get("chat_settings") if isinstance((_agent or {}).get("chat_settings"), dict) else {}
             if not ent.get("chat_channel"):
                 try:
                     await ws.send_text(json.dumps({
                         "type": "error", "code": "chat_not_entitled",
                         "message": "Chat is not enabled for this agent.",
+                    }))
+                except Exception:  # noqa: BLE001
+                    pass
+            elif not _host_allowed(qp.get("host"), (_cs or {}).get("allowed_domains")):
+                # Best-effort abuse control: if the operator set an allowlist,
+                # only serve the chat on those domains (the embed reports the
+                # host page). Empty allowlist → any domain.
+                try:
+                    await ws.send_text(json.dumps({
+                        "type": "error", "code": "domain_not_allowed",
+                        "message": "This chat isn't enabled for this website.",
                     }))
                 except Exception:  # noqa: BLE001
                     pass

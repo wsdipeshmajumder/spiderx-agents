@@ -1484,6 +1484,27 @@ def _quick_replies_decl():
 
 _FORM_TYPES = {"text", "tel", "email", "number", "date", "time", "select", "textarea"}
 
+# Data masking (Build 278) — scrub card-like numbers from the STORED transcript
+# so we never persist payment data. Targets 13-19 digit runs (Visa/MC/Amex
+# length) optionally split by spaces/dashes; deliberately does NOT touch 10-12
+# digit phone numbers, which are intended lead data. The live model still sees
+# the original text — this only affects what lands in the calls row.
+_CARD_RE = _re.compile(r"(?<![\d])\d(?:[ \-]?\d){12,18}(?![\d])")
+
+
+def _mask_pii(text: str) -> str:
+    if not text:
+        return text
+    def _repl(m):
+        digits = _re.sub(r"\D", "", m.group(0))
+        if 13 <= len(digits) <= 19:
+            return "•••• " + digits[-4:]   # keep last 4 for reference
+        return m.group(0)
+    try:
+        return _CARD_RE.sub(_repl, text)
+    except Exception:  # noqa: BLE001
+        return text
+
 
 def _show_form_decl():
     field = types.Schema(
@@ -1726,7 +1747,7 @@ async def run_agent_chat_session(
                                              handlers=handlers, send_json=_send_json,
                                              build_monitor=None, usage=usage)
             if greeting and greeting.strip():
-                memory.append({"role": "model", "text": greeting.strip()})
+                memory.append({"role": "model", "text": _mask_pii(greeting.strip())})
         except Exception as e:  # noqa: BLE001
             log.warning("agent-chat[%s] kickoff failed: %s", agent_id, e)
 
@@ -1760,7 +1781,7 @@ async def run_agent_chat_session(
                             agent["_extracted_extra"][str(k)] = v
                 summary = ", ".join(f"{k}: {v}" for k, v in fdata.items() if str(v).strip())
                 turns_used += 1
-                memory.append({"role": "user", "text": f"[Submitted {ftitle}: {summary}]"})
+                memory.append({"role": "user", "text": _mask_pii(f"[Submitted {ftitle}: {summary}]")})
                 try:
                     reply = await _run_model_turn(
                         chat=chat, handlers=handlers, send_json=_send_json,
@@ -1773,7 +1794,7 @@ async def run_agent_chat_session(
                     await _send_json({"type": "error", "message": str(e)[:200]})
                     break
                 if reply and reply.strip():
-                    memory.append({"role": "model", "text": reply.strip()})
+                    memory.append({"role": "model", "text": _mask_pii(reply.strip())})
                 if persisted["done"]:
                     await _send_json({"type": "call_ended"})
                     break
@@ -1799,7 +1820,7 @@ async def run_agent_chat_session(
             if not user_text:
                 continue
             turns_used += 1
-            memory.append({"role": "user", "text": user_text})
+            memory.append({"role": "user", "text": _mask_pii(user_text)})
             try:
                 reply = await _run_model_turn(chat=chat, user_text=user_text,
                                               handlers=handlers, send_json=_send_json,
@@ -1809,7 +1830,7 @@ async def run_agent_chat_session(
                 await _send_json({"type": "error", "message": str(e)[:200]})
                 break
             if reply and reply.strip():
-                memory.append({"role": "model", "text": reply.strip()})
+                memory.append({"role": "model", "text": _mask_pii(reply.strip())})
             if persisted["done"]:
                 await _send_json({"type": "call_ended"})
                 break

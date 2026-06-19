@@ -111,7 +111,12 @@
   // The iframe loads our minimal /embed/<slug> surface — same-origin to our
   // own app, so the WebSocket + mic + audio engine all work inside.
   var iframe = document.createElement("iframe");
-  iframe.src = ourOrigin + "/embed/" + encodeURIComponent(slug) + (channel === "chat" ? "?channel=chat" : "");
+  // Report the host-page domain so the chat can honour a per-agent domain
+  // allowlist (best-effort abuse control).
+  var q = [];
+  if (channel === "chat") q.push("channel=chat");
+  try { if (location.hostname) q.push("host=" + encodeURIComponent(location.hostname)); } catch (e) {}
+  iframe.src = ourOrigin + "/embed/" + encodeURIComponent(slug) + (q.length ? "?" + q.join("&") : "");
   iframe.setAttribute("title", "SpiderX.AI — " + label);
   iframe.setAttribute("allow", "microphone; autoplay; clipboard-read; clipboard-write");
   iframe.setAttribute("loading", "lazy");

@@ -1331,6 +1331,7 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 .chatembed-send:hover:not(:disabled) { filter: brightness(1.07); }
 .chatembed-send:disabled { opacity: 0.5; cursor: default; }
 .chatembed .embed-brand { position: static; transform: none; padding: 6px 0 8px; text-align: center; }
+.chatembed-privacy { font-size: 10.5px; color: var(--fg-dim, #9aa0ad); text-align: center; padding: 4px 14px 0; line-height: 1.4; }
 :root[data-theme="dark"] .chatembed-msg-model .chatembed-bubble { background: #1b1f33; color: #e6e8f2; }
 :root[data-theme="dark"] .chatembed-field { background: #14172a; border-color: #2a2e44; color: #e6e8f2; }
 :root[data-theme="dark"] .chatembed-head { border-color: #2a2e44; }

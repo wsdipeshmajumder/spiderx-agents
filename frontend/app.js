@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 277;
+const SXAI_BUILD = 278;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1654,7 +1654,9 @@ function AgentChatEmbed({ slug }) {
     const sid = `chat-${Math.random().toString(36).slice(2)}`;
     const locale = (navigator.language || "en-US");
     const kickoff = welcome ? "&kickoff=0" : "";
-    const ws = new WebSocket(`${proto}://${location.host}/ws/session?mode=chat&agent_id=${agent.id}&sid=${sid}&locale=${encodeURIComponent(locale)}${kickoff}`);
+    const host = (() => { try { return new URLSearchParams(location.search).get("host") || ""; } catch { return ""; } })();
+    const hostQ = host ? `&host=${encodeURIComponent(host)}` : "";
+    const ws = new WebSocket(`${proto}://${location.host}/ws/session?mode=chat&agent_id=${agent.id}&sid=${sid}&locale=${encodeURIComponent(locale)}${kickoff}${hostQ}`);
     wsRef.current = ws;
     ws.onmessage = (ev) => {
       let m; try { m = JSON.parse(ev.data); } catch { return; }
@@ -1813,6 +1815,7 @@ function AgentChatEmbed({ slug }) {
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
         </button>
       </form>
+      ${cs.privacy_note ? html`<div class="chatembed-privacy">${cs.privacy_note}</div>` : ""}
       <a class="embed-brand" href="https://spiderx.ai" target="_blank" rel="noopener">Powered by SpiderX.AI</a>
     </div>
   `;
@@ -11226,6 +11229,8 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
     avatar_url: _cs0.avatar_url || "",
     launcher_text: _cs0.launcher_text || "",
     welcome_message: _cs0.welcome_message || "",
+    allowed_domains: Array.isArray(_cs0.allowed_domains) ? _cs0.allowed_domains.join(", ") : "",
+    privacy_note: _cs0.privacy_note || "",
   });
   const [chatCfgSaving, setChatCfgSaving] = useState(false);
   const [chatCfgSaved, setChatCfgSaved] = useState(false);
@@ -11233,9 +11238,11 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
   const saveChatCfg = async () => {
     setChatCfgSaving(true);
     try {
+      // allowed_domains is a comma string in the form → array for storage.
+      const payload = { ...chatCfg, allowed_domains: chatCfg.allowed_domains.split(",").map((s) => s.trim()).filter(Boolean) };
       const r = await fetch(`/api/agents/${agent.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_settings: chatCfg }),
+        body: JSON.stringify({ chat_settings: payload }),
       });
       if (r.ok) { setChatCfgSaved(true); setTimeout(() => setChatCfgSaved(false), 2200); refreshAgent && refreshAgent(); }
     } finally { setChatCfgSaving(false); }
@@ -12057,12 +12064,25 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
                      onInput=${(e) => setChatField("welcome_message", e.target.value)} />
             </label>
           </div>
+          <div class="chatcfg-head" style=${{ marginTop: "16px" }}>Trust &amp; privacy</div>
+          <div class="chatcfg-grid">
+            <label class="db-form-field">
+              <span class="db-form-label">Allowed domains <span class="db-form-opt">(comma-separated)</span></span>
+              <input class="db-input" type="text" placeholder="example.com, shop.example.com" value=${chatCfg.allowed_domains}
+                     onInput=${(e) => setChatField("allowed_domains", e.target.value)} />
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Privacy note <span class="db-form-opt">(optional)</span></span>
+              <input class="db-input" type="text" placeholder="We may use this chat to follow up." value=${chatCfg.privacy_note}
+                     onInput=${(e) => setChatField("privacy_note", e.target.value)} />
+            </label>
+          </div>
           <div class="db-actions-row">
             <button type="button" class=${"db-btn-primary db-btn-sm " + (chatCfgSaved ? "is-copied" : "")}
                     onClick=${saveChatCfg} disabled=${chatCfgSaving}>
-              ${chatCfgSaving ? "Saving…" : chatCfgSaved ? "✓ Saved" : "Save appearance"}
+              ${chatCfgSaving ? "Saving…" : chatCfgSaved ? "✓ Saved" : "Save settings"}
             </button>
-            <span class="db-form-help">Behaviour (persona, knowledge, replies) is shared across all channels — only the look is chat-specific.</span>
+            <span class="db-form-help">Card numbers are auto-masked in stored transcripts. Leave domains blank to allow any site. Behaviour is shared across channels — only the look is chat-specific.</span>
           </div>
         </div>
         </div>
