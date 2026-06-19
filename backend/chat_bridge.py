@@ -1591,6 +1591,69 @@ _CHAT_UI_GUIDANCE = (
 )
 
 
+def _agent_chat_system_prompt(agent: dict[str, Any]) -> str:
+    """Chat-NATIVE system prompt. Reuses the SHARED brain — persona, business
+    facts/knowledge, guardrails, outcome catalogue and extraction schema — but
+    replaces the VOICE receptionist rules (speak / greeting-on-pickup / silence
+    / interruptions / TTS) with text-chat behaviour. The data + knowledge layer
+    is identical to voice; only the conversational rules differ."""
+    variables = agent.get("variables") or {}
+    name = agent.get("name") or "Assistant"
+    persona = _gb._substitute_variables(agent.get("persona") or name, variables)
+    agent_prompt = _gb._substitute_variables(agent.get("system_prompt") or "", variables)
+    business = (_gb._format_business_facts_for_prompt(agent) or "").strip()
+    dos, donts = _gb._format_policy_for_prompt(agent)
+    outcomes_csv = ", ".join(agent.get("outcomes") or ["resolved", "callback_requested", "not_interested"])
+    outcomes_block = (_gb._format_outcomes_with_kinds_for_prompt(agent) or "").strip()
+    try:
+        from . import chip_schema as _cs
+        extraction = (_cs.extraction_hints_for_prompt(agent) or "").strip()
+    except Exception:  # noqa: BLE001
+        extraction = ""
+    guard_lines = [f"  - {g}" for g in (agent.get("guardrails") or [])]
+    guard_lines += [f"  - DO: {d}" for d in dos]
+    guard_lines += [f"  - DON'T: {d}" for d in donts]
+    guards = "\n".join(guard_lines) if guard_lines else "  - (none specified)"
+
+    parts = [
+        f"You are {name}, helping a website visitor over TEXT CHAT. The visitor TYPES and "
+        f"READS — this is NOT a phone call. Never use spoken-call language (\"speak\", "
+        f"\"I hear you\", \"say that again\", \"on the line\", \"hold while I check\") and "
+        f"never reference audio, greeting-on-pickup, silence or interruptions.",
+        "\nHOW YOU CHAT:\n"
+        "• Concise and skimmable — usually 1-3 short sentences. Break long info into short "
+        "lines or a tight list; no walls of text.\n"
+        "• Warm, professional, on-brand. Mirror the visitor's language.\n"
+        "• Ask ONE thing at a time — unless you use a form to collect several details at once.\n"
+        "• Use the on-screen widgets (buttons / forms / cards — see CHAT UI) when they save "
+        "the visitor typing.\n"
+        "• You may share links. Use ONLY the business info + knowledge below — never invent "
+        "prices, stock, availability or facts. If unsure, say so and offer to take details.\n"
+        "• Acknowledge briefly, answer, then move the visitor toward the goal (book / capture "
+        "the lead / resolve the query).",
+        f"\n━━━ WHO YOU ARE ━━━\n{persona}",
+    ]
+    if agent_prompt.strip():
+        parts.append(f"\n━━━ YOUR BRIEF ━━━\n{agent_prompt.strip()}")
+    if business:
+        parts.append("\n" + business)
+    parts.append(f"\n━━━ RULES ━━━\n{guards}")
+    parts.append(
+        "\n━━━ WRAP-UP ━━━\nCall `end_call` once the chat reaches a conclusion (lead "
+        "captured, booking made, question answered, or the visitor says bye):\n"
+        f"  outcome → one of: {outcomes_csv}\n"
+        + (outcomes_block + "\n" if outcomes_block else "")
+        + "  reason → CONVERSATION_COMPLETE / USER_REQUESTED / ABANDONED / ESCALATED_TO_HUMAN\n"
+        "  summary → 1-2 factual sentences\n"
+        "  extracted → object of the structured fields you captured (name, phone, …)\n"
+        "  sentiment / lead_quality / lead_signals → assess honestly.\n"
+        "After end_call, send ONE short closing line."
+    )
+    if extraction:
+        parts.append("\n" + extraction)
+    return "\n".join(parts) + _CHAT_UI_GUIDANCE
+
+
 async def run_agent_chat_session(
     ws: WebSocket,
     agent_id: int,
@@ -1723,7 +1786,7 @@ async def run_agent_chat_session(
     handlers["show_cards"] = _show_cards_handler
 
     config = types.GenerateContentConfig(
-        system_instruction=_gb._agent_system_prompt(agent) + _CHAT_UI_GUIDANCE,
+        system_instruction=_agent_chat_system_prompt(agent),
         tools=tools,
         temperature=0.5,
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
@@ -1743,9 +1806,11 @@ async def run_agent_chat_session(
     # a model call and avoids a double-greeting).
     if send_kickoff:
         try:
-            greeting = await _run_model_turn(chat=chat, user_text="<call_start>",
-                                             handlers=handlers, send_json=_send_json,
-                                             build_monitor=None, usage=usage)
+            greeting = await _run_model_turn(
+                chat=chat, handlers=handlers, send_json=_send_json,
+                build_monitor=None, usage=usage,
+                user_text=("[The visitor just opened the chat. Greet them in ONE short, "
+                           "on-brand line and invite their question. Don't mention this note.]"))
             if greeting and greeting.strip():
                 memory.append({"role": "model", "text": _mask_pii(greeting.strip())})
         except Exception as e:  # noqa: BLE001
