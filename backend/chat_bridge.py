@@ -65,6 +65,16 @@ log = logging.getLogger("eva.chat")
 # and (unlike the cascade Live model) treats tool choices deterministically.
 CHAT_MODEL = "gemini-2.5-flash"
 
+# Public chat-embed safety caps (Build 269). The agent-chat WS is
+# unauthenticated (it's an embed on customer sites), so we bound abuse +
+# runaway cost per session: message length, turn count, wall-clock, and a
+# minimum inter-message interval. The agent's system_instruction stays the
+# authoritative anti-injection layer — these are the resource guards.
+_CHAT_MAX_MSG_LEN = 2000          # chars per user message (truncated beyond)
+_CHAT_MAX_TURNS = 60              # user turns per session
+_CHAT_MAX_SESSION_S = 1200        # 20 min wall-clock
+_CHAT_MIN_MSG_INTERVAL_S = 0.4    # drop messages arriving faster than this
+
 # "Best" model for the catch-all (Any-industry) path — used to compose a
 # bespoke agent for any use case imaginable. Falls back to CHAT_MODEL if the
 # pro model isn't available to this key. Override via env.
@@ -1524,6 +1534,9 @@ async def run_agent_chat_session(
     except Exception as e:  # noqa: BLE001
         log.warning("agent-chat[%s] kickoff failed: %s", agent_id, e)
 
+    turns_used = 0
+    deadline = _time_mod.monotonic() + _CHAT_MAX_SESSION_S
+    last_msg_t = 0.0
     try:
         while not persisted["done"]:
             msg = await ws.receive()
@@ -1540,9 +1553,25 @@ async def run_agent_chat_session(
                 break
             if kind != "text" or not data.get("text"):
                 continue
-            user_text = str(data["text"]).strip()
+            # ── Safety caps (public, unauthenticated WS) ──
+            now_t = _time_mod.monotonic()
+            if now_t > deadline:
+                await _send_json({"type": "transcript", "role": "model",
+                                  "text": "\n(This chat session has reached its time limit.)"})
+                await _send_json({"type": "call_ended"})
+                break
+            if turns_used >= _CHAT_MAX_TURNS:
+                await _send_json({"type": "transcript", "role": "model",
+                                  "text": "\n(This chat session has reached its message limit.)"})
+                await _send_json({"type": "call_ended"})
+                break
+            if now_t - last_msg_t < _CHAT_MIN_MSG_INTERVAL_S:
+                continue  # throttle bursts
+            last_msg_t = now_t
+            user_text = str(data["text"]).strip()[:_CHAT_MAX_MSG_LEN]
             if not user_text:
                 continue
+            turns_used += 1
             memory.append({"role": "user", "text": user_text})
             try:
                 reply = await _run_model_turn(chat=chat, user_text=user_text,

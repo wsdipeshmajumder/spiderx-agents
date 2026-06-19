@@ -11402,6 +11402,20 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
 :root[data-theme="dark"] .golive-channel-pill-default {
   background: linear-gradient(135deg, #34d399, #059669);
 }
+/* Chat channel (Build 269) — Add-on pill + active pill + paywall. */
+.golive-channel-pill-addon { background: #eef0ff; color: #4338ca; }
+.golive-channel-pill-ok { background: #ecfdf5; color: #047857; }
+:root[data-theme="dark"] .golive-channel-pill-addon { background: #1e2233; color: #c7d2fe; }
+:root[data-theme="dark"] .golive-channel-pill-ok { background: #11281f; color: #6ee7b7; }
+.golive-embed-hint { font-size: 13px; color: var(--fg-mute, #6b7080); margin: 0 0 12px; }
+.golive-paywall {
+  margin-top: 14px; padding: 18px;
+  border: 1px dashed #cdd2e6; border-radius: 14px;
+  background: linear-gradient(180deg, #f7f6ff 0%, #fbfbff 100%);
+}
+.golive-paywall-copy { margin: 0 0 14px; font-size: 13.5px; line-height: 1.6; color: #4a5066; }
+:root[data-theme="dark"] .golive-paywall { background: #14172a; border-color: #2a2e44; }
+:root[data-theme="dark"] .golive-paywall-copy { color: #aab0c4; }
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * MOBILE RESPONSIVENESS LAYER (build 177)

@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 268;
+const SXAI_BUILD = 269;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -11109,6 +11109,18 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
     catch {}
   };
 
+  // Chat channel (Build 269) — paid add-on, gated on the org's chat_channel
+  // entitlement (surfaced on plan state). Same embed.js, data-channel="chat".
+  const hasChat = !!(plan && plan.entitlements && plan.entitlements.chat_channel);
+  const chatAttrs = [`data-agent="${agent.slug || agent.id}"`, `data-channel="chat"`];
+  if (embedPosition !== "bottom-right") chatAttrs.push(`data-position="${embedPosition}"`);
+  const chatSnippet = `<script src="${embedOrigin}/static/embed.js" ${chatAttrs.join(" ")}></script>`;
+  const [chatCopied, setChatCopied] = useState(false);
+  const copyChatSnippet = async () => {
+    try { await navigator.clipboard.writeText(chatSnippet); setChatCopied(true); setTimeout(() => setChatCopied(false), 1800); }
+    catch {}
+  };
+
   // Publish state — flips agent.published via PATCH. Status banner up top
   // reflects whatever the server returned last. We pessimistically toggle so
   // the UI feels instant; on error we roll back.
@@ -11855,6 +11867,47 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
     </section>
   `;
 
+  const chatPanel = html`
+    <section class="db-panel db-panel-tall golive-channel-card">
+      <div class="db-channel-head">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+        <div style=${{ flex: 1 }}>
+          <h3 class="db-panel-title">Chat widget</h3>
+          <p class="db-panel-sub">
+            A text version of ${agent.name} — same brain, knowledge and lead capture, no mic.
+            ${hasChat ? " Add-on active." : " Optional paid add-on."}
+          </p>
+        </div>
+        ${hasChat
+          ? html`<span class="golive-channel-pill golive-channel-pill-ok">✓ Active</span>`
+          : html`<span class="golive-channel-pill golive-channel-pill-addon">Add-on</span>`}
+      </div>
+      ${hasChat ? html`
+        <p class="golive-embed-hint">Paste one line on any site — visitors chat with ${agent.name} by text.</p>
+        <div class="db-embed-snippet"><code>${chatSnippet}</code></div>
+        <div class="db-actions-row">
+          <button type="button" class=${"db-btn-primary " + (chatCopied ? "is-copied" : "")} onClick=${copyChatSnippet}>
+            ${chatCopied
+              ? html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg><span>Copied!</span>`
+              : html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy snippet</span>`}
+          </button>
+          <a class="db-btn-ghost" href=${`/embed/${agent.slug || agent.id}?channel=chat`} target="_blank" rel="noopener">Open chat preview →</a>
+        </div>
+      ` : html`
+        <div class="golive-paywall">
+          <p class="golive-paywall-copy">
+            The Chat channel captures visitors who won't use a mic — they type to ${agent.name}
+            and you get the same outcomes + lead data as a voice call. Sold as a flat monthly add-on.
+          </p>
+          <button class="db-btn-primary" type="button"
+                  onClick=${() => onNav && onNav("/account/billing?addon=chat_channel")}>
+            Add Chat channel — upgrade →
+          </button>
+        </div>
+      `}
+    </section>
+  `;
+
   // Build 265 — singularity principle: one channel in focus at a time.
   // Tabs replace the side-by-side columns so the operator configures Web
   // OR Phone, never split attention across both. Default to Web (fastest
@@ -11880,9 +11933,17 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
           <span>Phone number</span>
           ${telephonyConfigured ? html`<span class="golive-tab-tag golive-tab-tag-ok">✓ Connected</span>` : ""}
         </button>
+        <button role="tab" type="button"
+                class=${"golive-tab" + (channelTab === "chat" ? " golive-tab-on" : "")}
+                aria-selected=${channelTab === "chat" ? "true" : "false"}
+                onClick=${() => setChannelTab("chat")}>
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+          <span>Chat widget</span>
+          ${hasChat ? html`<span class="golive-tab-tag golive-tab-tag-ok">✓ Active</span>` : html`<span class="golive-tab-tag">Add-on</span>`}
+        </button>
       </div>
       <div class="golive-tabpanel" role="tabpanel">
-        ${channelTab === "web" ? embedPanel : phoneCard}
+        ${channelTab === "web" ? embedPanel : channelTab === "phone" ? phoneCard : chatPanel}
       </div>
       </div>
     </div>
