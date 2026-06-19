@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 266;
+const SXAI_BUILD = 267;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1573,7 +1573,7 @@ function MarkdownEditor({
 // the orb + a "Tap to talk to <agent>" CTA. No brandbar, no top nav, no
 // landing chrome. Uses the SAME `openSession(agent_id)` path the dashboard
 // uses, so the WebSocket + AudioEngine + VoiceBlob all just work.
-function EmbedView({ slug, blobSize, blobMode, engineRef, onPressStart, onPressEnd, onPressCancel, onStart }) {
+function EmbedView({ slug, blobSize, blobMode, engineRef, onPressStart, onPressEnd, onPressCancel, onStart, error }) {
   const [agent, setAgent] = useState(null);
   const [err, setErr] = useState(null);
   useEffect(() => {
@@ -1607,6 +1607,7 @@ function EmbedView({ slug, blobSize, blobMode, engineRef, onPressStart, onPressE
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
         <span>Talk to ${agent.name}</span>
       </button>
+      ${error ? html`<div class="embed-err-inline">${error}</div>` : ""}
       <a class="embed-brand" href="https://spiderx.ai" target="_blank" rel="noopener">
         Powered by SpiderX.AI
       </a>
@@ -16071,6 +16072,7 @@ function App() {
   const [revealAgent, setRevealAgent] = useState(null);   // post-build reveal card
   const [revealSection, setRevealSection] = useState("overview");   // overview | calls | settings | numbers
   const [embedSlug, setEmbedSlug] = useState(null);                  // /embed/<slug> minimal iframe surface
+  const [embedError, setEmbedError] = useState("");                  // publish-gate / connect error shown on the embed surface
   const [accountPage, setAccountPage] = useState(null);               // null | "billing" | "integrations"
   // Two-stage reveal: "unveal" plays a 3-second theatrical curtain, then
   // transitions to "cockpit" where the singular setup wizard lives. The
@@ -16513,6 +16515,7 @@ function App() {
     const initialText = (opts && opts.initialText) || "";
     const startMuted  = !!(opts && opts.startMuted);
     const presetIndustry = (opts && opts.industry) || null;
+    setEmbedError("");
     setView("call");
     // Reset the "did this session commit a new agent?" flag. closeSession
     // reads it to decide whether to surface the recovery banner.
@@ -16593,6 +16596,9 @@ function App() {
       ...tweaksQuery(tweaks),
     };
     if (testAgentId) qsObj.agent_id = String(testAgentId);
+    // Mark live embed-widget sessions so the server can apply the publish
+    // gate (Build 267) — dashboard test calls omit this and stay free.
+    if (opts && opts.embed) qsObj.embed = "1";
     // Industry preset from the landing page (voice path) — server locks
     // that industry's template so the voice build skips triage too.
     if (presetIndustry && !testAgentId) qsObj.industry = String(presetIndustry);
@@ -16822,6 +16828,10 @@ function App() {
         } else if (msg.type === "error") {
           setBlobMode("error");
           flashHint(msg.message?.slice(0, 80) || "Something went wrong.", 3000);
+          // Surface on the embed surface too (the iframe doesn't render hints).
+          if (msg.code === "agent_not_published") {
+            setEmbedError(msg.message || "This assistant isn't live yet.");
+          }
         } else if (msg.type === "go_away") {
           setCallState("reconnecting");
         }
@@ -17092,7 +17102,8 @@ function App() {
           onPressStart=${onPressStart}
           onPressEnd=${onPressEnd}
           onPressCancel=${onPressCancel}
-          onStart=${(id) => openSession(id)}
+          onStart=${(id) => openSession(id, { embed: true })}
+          error=${embedError}
         />
       `}
     `;

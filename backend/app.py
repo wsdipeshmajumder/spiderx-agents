@@ -118,7 +118,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 266
+APP_BUILD = 267
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -2178,6 +2178,27 @@ async def ws_session(ws: WebSocket) -> None:
     # `mode=chat&agent_id=<id>` → customer-facing AGENT chat (paid add-on).
     # Gated on the agent's org holding the `chat_channel` entitlement.
     agent_chat = _mode == "chat" and initial_agent_id is not None
+    # Build 267 — publish gate. Live embed sessions (the third-party web
+    # widget, marked embed=1) only serve a PUBLISHED agent. Dashboard test
+    # calls don't set embed=1, so building/editing/testing stays free — it's
+    # the LIVE channel that publishing unlocks. Publishing itself requires a
+    # paid plan (PATCH /api/agents enforces 402), so this gates real calls on
+    # a paid, published agent.
+    if (qp.get("embed") or "").strip() == "1" and initial_agent_id is not None:
+        _a = await db.get_agent(initial_agent_id)
+        if not _a or not _a.get("published"):
+            try:
+                await ws.send_text(json.dumps({
+                    "type": "error", "code": "agent_not_published",
+                    "message": "This assistant isn't live yet.",
+                }))
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                await ws.close()
+            except Exception:  # noqa: BLE001
+                pass
+            return
     try:
         if agent_chat:
             from . import chat_bridge
@@ -2589,6 +2610,15 @@ async def telephony_answer(provider: str, agent_id: int, request: Request):
     a = await db.get_agent(agent_id)
     if not a:
         raise HTTPException(status_code=404, detail="agent not found")
+    # Build 267 — publish gate for INBOUND phone. A real caller reaching an
+    # unpublished agent gets a polite "not active" hangup; publishing (paid)
+    # unlocks the line. The owner's outbound "Call me back" test bypasses this
+    # via ?test=1 on its answer URL (set in telephony_outbound_call), so the
+    # owner can always test their own number.
+    is_test = (request.query_params.get("test") or "").strip() == "1"
+    if not a.get("published") and not is_test:
+        body, content_type = prov.fallback_xml(agent=a)
+        return PlainTextResponse(content=body, media_type=content_type)
     # Pass `request` so the stream URL falls back to the carrier-facing host
     # (e.g. agents.spiderx.ai) when PUBLIC_HOST isn't set — otherwise the
     # media WebSocket points at wss://YOUR-NGROK-HOST and the call has no audio.
@@ -3088,10 +3118,13 @@ async def telephony_outbound_call(agent_id: int, request: Request) -> dict:
     if not creds.get("auth_id") or not creds.get("auth_token"):
         raise HTTPException(status_code=409, detail="Saved carrier credentials are missing — re-connect the carrier API.")
     urls = _webhook_urls(prov.name, agent_id, request)
+    # Owner-initiated test call — mark the answer URL so the inbound publish
+    # gate lets it through even when the agent isn't published yet.
+    answer_url = urls["answer_url"] + ("&" if "?" in urls["answer_url"] else "?") + "test=1"
     try:
         res = await prov.place_outbound_call(
             creds=creds, from_number=cfg["number"],
-            to_number=to_number, answer_url=urls["answer_url"],
+            to_number=to_number, answer_url=answer_url,
         )
     except TelephonyAuthError as e:
         raise HTTPException(status_code=400, detail=str(e))

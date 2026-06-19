@@ -1122,6 +1122,12 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
 }
+.embed-err-inline {
+  margin-top: 2px; font-size: 12.5px; font-weight: 600;
+  color: #b45309; background: #fef6e7;
+  padding: 8px 14px; border-radius: 10px; max-width: 280px;
+}
+:root[data-theme="dark"] .embed-err-inline { color: #f0c674; background: #2a2410; }
 
 /* Embed in-call surface (Build 263): progress status + explicit End call. */
 .embed-call {
