@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 264;
+const SXAI_BUILD = 265;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -11650,6 +11650,9 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
     return "pick";
   })();
   const [phoneMode, setPhoneMode] = useState(_phoneInitial);
+  // Go-live channel tab (Build 265). Returning operators with a carrier
+  // already connected land on Phone; everyone else starts on Web (fastest).
+  const [channelTab, setChannelTab] = useState(telephonyConfigured ? "phone" : "web");
   // Re-sync when underlying state changes (e.g. config saved on
   // current page) — only forward, never back to "pick" so the
   // operator's explicit choice always wins.
@@ -11740,15 +11743,33 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
     </section>
   `;
 
+  // Build 265 — singularity principle: one channel in focus at a time.
+  // Tabs replace the side-by-side columns so the operator configures Web
+  // OR Phone, never split attention across both. Default to Web (fastest
+  // go-live); the Phone tab shows a ✓ once a carrier is connected.
   const body = html`
     <div class="db-overview">
       ${publishBanner}
-      <!-- Two channels, side-by-side. Web on the left (instant,
-           always available). Phone on the right (state machine:
-           pick provider → configure → connected). -->
-      <div class="db-channels golive-channels">
-        ${embedPanel}
-        ${phoneCard}
+      <div class="golive-tabs" role="tablist" aria-label="Go-live channel">
+        <button role="tab" type="button"
+                class=${"golive-tab" + (channelTab === "web" ? " golive-tab-on" : "")}
+                aria-selected=${channelTab === "web" ? "true" : "false"}
+                onClick=${() => setChannelTab("web")}>
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18"/></svg>
+          <span>Web widget</span>
+          <span class="golive-tab-tag">Fastest</span>
+        </button>
+        <button role="tab" type="button"
+                class=${"golive-tab" + (channelTab === "phone" ? " golive-tab-on" : "")}
+                aria-selected=${channelTab === "phone" ? "true" : "false"}
+                onClick=${() => setChannelTab("phone")}>
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.89.33 1.77.62 2.61a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.47-1.18a2 2 0 0 1 2.11-.45c.84.29 1.72.5 2.61.62A2 2 0 0 1 22 16.92z"/></svg>
+          <span>Phone number</span>
+          ${telephonyConfigured ? html`<span class="golive-tab-tag golive-tab-tag-ok">✓ Connected</span>` : ""}
+        </button>
+      </div>
+      <div class="golive-tabpanel" role="tabpanel">
+        ${channelTab === "web" ? embedPanel : phoneCard}
       </div>
     </div>
   `;
@@ -11759,7 +11780,7 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
       agents=${agents}
       plan=${plan}
       title="Go live"
-      subtitle=${`Two channels to choose from. Ship ${agent.name} on the web today, add a phone number whenever you're ready.`}
+      subtitle=${`Pick one channel to set up. Ship ${agent.name} on the web today, add a phone number whenever you're ready.`}
       onNav=${onNav}
       body=${body}
     />

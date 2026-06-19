@@ -11263,6 +11263,36 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
 @media (max-width: 1100px) {
   .golive-channels { grid-template-columns: 1fr; }
 }
+
+/* Go-live channel tabs (Build 265) — singularity: one channel in focus. */
+.golive-tabs {
+  display: inline-flex; gap: 4px;
+  padding: 4px; margin-bottom: 18px;
+  background: var(--bg-1, #f1f2f6); border-radius: 12px;
+}
+.golive-tab {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 9px 16px; border: 0; border-radius: 9px; cursor: pointer;
+  background: transparent; color: var(--fg-mute, #6b7080);
+  font-size: 14px; font-weight: 600;
+  transition: background 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
+}
+.golive-tab:hover { color: var(--fg, #1f2430); }
+.golive-tab-on {
+  background: var(--bg-0, #fff); color: var(--fg, #1f2430);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.golive-tab-tag {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.02em;
+  padding: 1px 7px; border-radius: 999px;
+  background: #eef0ff; color: #4f46e5;
+}
+.golive-tab-tag-ok { background: #ecfdf5; color: #047857; }
+.golive-tabpanel { max-width: 640px; }
+:root[data-theme="dark"] .golive-tabs { background: #14172a; }
+:root[data-theme="dark"] .golive-tab-on { background: #1e2233; color: #e6e8f0; box-shadow: none; }
+:root[data-theme="dark"] .golive-tab-tag { background: #1e2233; color: #c7d2fe; }
+:root[data-theme="dark"] .golive-tab-tag-ok { background: #11281f; color: #6ee7b7; }
 .golive-channel-card {
   display: flex; flex-direction: column;
   min-height: 420px;
