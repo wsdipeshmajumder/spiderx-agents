@@ -1457,6 +1457,41 @@ async def _run_model_turn(
 # captures the transcript if the visitor just closes the tab. channel="web_chat".
 
 
+# Generative-UI: a chat-only tool the model calls to render tappable
+# quick-reply buttons (Build 275). It does NOT execute server-side — the
+# bridge intercepts it and emits a `quick_replies` WS frame the embed renders.
+def _quick_replies_decl():
+    return types.FunctionDeclaration(
+        name="quick_replies",
+        description=(
+            "Offer the visitor 2-4 tappable quick-reply buttons when there's a small, "
+            "clear set of likely next steps (e.g. 'Book a test drive', 'See pricing', "
+            "'Talk to a human'). Each label becomes a button that sends that exact text "
+            "when tapped. Call it ALONGSIDE a normal one-line reply. Use only when it "
+            "saves the visitor typing; max 4, labels under ~24 chars. Text chat only."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={"options": types.Schema(
+                type=types.Type.ARRAY,
+                items=types.Schema(type=types.Type.STRING),
+                description="2-4 short button labels.",
+            )},
+            required=["options"],
+        ),
+    )
+
+
+_CHAT_UI_GUIDANCE = (
+    "\n\n━━━ CHAT UI (text channel only) ━━━\n"
+    "This is a TEXT chat with on-screen buttons. When there is a small set of obvious "
+    "next steps, call `quick_replies` with 2-4 short labels so the visitor can tap "
+    "instead of type — e.g. after answering, offer ['Book a test drive','See pricing',"
+    "'Talk to a human']. Always write a normal short reply too. Don't show buttons every "
+    "turn — only when they genuinely save typing."
+)
+
+
 async def run_agent_chat_session(
     ws: WebSocket,
     agent_id: int,
@@ -1493,7 +1528,9 @@ async def run_agent_chat_session(
 
     connector_ids = agent.get("connectors") or []
     tool_ids = list(connector_ids) + (["end_call"] if "end_call" not in connector_ids else [])
-    tools = _conn.build_tools(tool_ids)
+    # Connector decls + the chat-only generative-UI tool, in one Tool.
+    conn_decls = [_conn.CONNECTOR_DECLS[c] for c in tool_ids if c in _conn.CONNECTOR_DECLS]
+    tools = [types.Tool(function_declarations=conn_decls + [_quick_replies_decl()])]
 
     memory: list[dict[str, str]] = []          # {role, text}
     usage = {"in": 0, "out": 0}                 # token totals for cost
@@ -1522,8 +1559,16 @@ async def run_agent_chat_session(
 
     handlers = {name: _make_handler(name) for name in tool_ids}
 
+    async def _quick_replies_handler(args: dict[str, Any]) -> dict[str, Any]:
+        raw = args.get("options") or args.get("replies") or []
+        opts = [str(o).strip() for o in raw if str(o).strip()][:4]
+        if opts:
+            await _send_json({"type": "quick_replies", "options": opts})
+        return {"ok": True, "shown": len(opts)}
+    handlers["quick_replies"] = _quick_replies_handler
+
     config = types.GenerateContentConfig(
-        system_instruction=_gb._agent_system_prompt(agent),
+        system_instruction=_gb._agent_system_prompt(agent) + _CHAT_UI_GUIDANCE,
         tools=tools,
         temperature=0.5,
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),

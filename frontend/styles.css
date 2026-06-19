@@ -1256,6 +1256,15 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 .chatembed-msg-model .chatembed-bubble {
   background: var(--bg-1, #f1f2f7); color: var(--fg, #1a1c25); border-bottom-left-radius: 4px;
 }
+/* Quick-reply chips (generative UI, Build 275). */
+.chatembed-chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 2px 14px 10px; }
+.chatembed-chip {
+  border: 1.5px solid var(--chat-accent, #4f46e5); color: var(--chat-accent, #4f46e5);
+  background: transparent; border-radius: 999px; padding: 7px 14px;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.chatembed-chip:hover { background: var(--chat-accent, #4f46e5); color: #fff; }
 .chatembed-input {
   display: flex; align-items: center; gap: 8px;
   padding: 10px 12px; border-top: 1px solid var(--border, #e6e8ef);
@@ -11363,6 +11372,8 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
   margin: 0 auto;
   display: flex; flex-direction: column; align-items: center;
 }
+/* Chat tab is two-pane (settings + live preview) — give it more room. */
+.golive-focus-wide { max-width: 1020px; }
 .golive-tabs {
   display: inline-flex; gap: 4px;
   padding: 4px; margin: 0 auto 18px;
@@ -11473,6 +11484,8 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
 .chatprev-bubble { max-width: 82%; padding: 7px 11px; border-radius: 13px; font-size: 12.5px; line-height: 1.4; }
 .chatprev-msg-model .chatprev-bubble { background: var(--bg-1, #f1f2f7); color: var(--fg, #1a1c25); border-bottom-left-radius: 4px; }
 .chatprev-msg-user .chatprev-bubble { background: var(--chat-accent, #4f46e5); color: #fff; border-bottom-right-radius: 4px; }
+.chatprev-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px; }
+.chatprev-chip { border: 1.5px solid var(--chat-accent, #4f46e5); color: var(--chat-accent, #4f46e5); border-radius: 999px; padding: 4px 10px; font-size: 11.5px; font-weight: 600; }
 .chatprev-input { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border, #e6e8ef); }
 .chatprev-field { flex: 1; padding: 8px 12px; border-radius: 999px; background: var(--bg-1, #f7f8fb); border: 1px solid var(--border, #e6e8ef); font-size: 12.5px; color: var(--fg-dim, #9aa0ad); }
 .chatprev-send { width: 32px; height: 32px; flex-shrink: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--chat-accent, #4f46e5); color: #fff; }

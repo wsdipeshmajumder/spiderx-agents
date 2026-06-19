@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 274;
+const SXAI_BUILD = 275;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1626,6 +1626,7 @@ function AgentChatEmbed({ slug }) {
   const [status, setStatus] = useState("connecting"); // connecting | ready | ended | error
   const [messages, setMessages] = useState([]);        // {role:'user'|'model', text}
   const [input, setInput] = useState("");
+  const [quickReplies, setQuickReplies] = useState([]); // generative-UI tappable buttons
   const wsRef = useRef(null);
   const streamingRef = useRef(false);                  // mid model-turn → append tokens
   const logRef = useRef(null);
@@ -1667,6 +1668,8 @@ function AgentChatEmbed({ slug }) {
           }
           return next;
         });
+      } else if (m.type === "quick_replies" && Array.isArray(m.options)) {
+        setQuickReplies(m.options.filter((o) => typeof o === "string" && o.trim()).slice(0, 4));
       } else if (m.type === "turn_complete") {
         streamingRef.current = false;
       } else if (m.type === "call_ended") {
@@ -1682,15 +1685,16 @@ function AgentChatEmbed({ slug }) {
     try { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; } catch {}
   }, [messages]);
 
-  const send = (e) => {
+  const send = (e, text) => {
     e?.preventDefault();
-    const t = input.trim();
+    const t = (text != null ? text : input).trim();
     if (!t || status !== "ready") return;
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     setMessages((prev) => [...prev, { role: "user", text: t }]);
     try { ws.send(JSON.stringify({ type: "text", text: t })); } catch {}
     setInput("");
+    setQuickReplies([]);   // chips are for one decision point — clear on any send
   };
 
   if (err && !agent) return html`<div class="embed-err">${err}</div>`;
@@ -1727,6 +1731,13 @@ function AgentChatEmbed({ slug }) {
         ${status === "error" && messages.length === 0
           ? html`<div class="chatembed-empty">${err || "Chat is unavailable right now."}</div>` : ""}
       </div>
+      ${quickReplies.length && status === "ready" ? html`
+        <div class="chatembed-chips">
+          ${quickReplies.map((q, i) => html`
+            <button key=${i} type="button" class="chatembed-chip" onClick=${() => send(null, q)}>${q}</button>
+          `)}
+        </div>
+      ` : ""}
       <form class="chatembed-input" onSubmit=${send}>
         <input class="chatembed-field" type="text" autocomplete="off"
                placeholder=${status === "ended" ? "Chat ended" : `Message ${agent.name}…`}
@@ -12006,6 +12017,10 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
               <div class="chatprev-msg chatprev-msg-user"><div class="chatprev-bubble">What are your hours?</div></div>
               <div class="chatprev-msg chatprev-msg-model"><div class="chatprev-bubble">We're open 9 AM–7 PM, Mon–Sat. Anything I can help you with?</div></div>
             </div>
+            <div class="chatprev-chips">
+              <span class="chatprev-chip">Book a visit</span>
+              <span class="chatprev-chip">See pricing</span>
+            </div>
             <div class="chatprev-input">
               <div class="chatprev-field">Message ${agent.name}…</div>
               <div class="chatprev-send"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></div>
@@ -12035,7 +12050,7 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
   const body = html`
     <div class="db-overview">
       ${publishBanner}
-      <div class="golive-focus">
+      <div class=${"golive-focus" + (channelTab === "chat" ? " golive-focus-wide" : "")}>
       <div class="golive-tabs" role="tablist" aria-label="Go-live channel">
         <button role="tab" type="button"
                 class=${"golive-tab" + (channelTab === "web" ? " golive-tab-on" : "")}
