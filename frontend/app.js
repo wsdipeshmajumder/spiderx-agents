@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 263;
+const SXAI_BUILD = 264;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -11625,6 +11625,15 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
   // never verified isn't enough — that would land an operator on a
   // panel showing nothing actionable. Start at the picker; the user
   // can pick the path they actually want.
+  // Build 263 — a carrier configured via the TelephonyPanel now lives on
+  // `agent.telephony_carriers` (per-carrier map), NOT `sip_config`. Detect
+  // it here so an already-connected number lands on the carrier panel at the
+  // outset instead of bouncing the operator back to the picker on reload.
+  const telephonyConfigured = (() => {
+    const tc = agent && agent.telephony_carriers;
+    if (!tc || typeof tc !== "object") return false;
+    return Object.values(tc).some((c) => c && typeof c === "object" && c.number);
+  })();
   const _phoneInitial = (() => {
     // Live = anything the operator already committed to. Build 258
     // adds the manual-saved case: they pasted creds + bound a number
@@ -11636,7 +11645,7 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
       || sipConfig.setup_mode === "auto"
       || (sipConfig.setup_mode === "manual" && sipConfig.number)
     );
-    if (sipLive) return "carrier";
+    if (sipLive || telephonyConfigured) return "carrier";
     if (managedHasActive) return "managed";
     return "pick";
   })();
@@ -11656,11 +11665,11 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
       || sipConfig.setup_mode === "auto"
       || (sipConfig.setup_mode === "manual" && sipConfig.number)
     );
-      if (sipLive) setPhoneMode("carrier");
+      if (sipLive || telephonyConfigured) setPhoneMode("carrier");
       else if (managedHasActive) setPhoneMode("managed");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sipConfig, managedHasActive]);
+  }, [sipConfig, managedHasActive, telephonyConfigured]);
 
   const phoneCard = html`
     <section class="db-panel db-panel-tall golive-channel-card golive-phone-card">
@@ -17026,7 +17035,14 @@ function App() {
   if (embedSlug) {
     return html`
       ${view === "call" ? html`
-        <div class="stage" data-view=${view}>
+        <div class="stage embed-call" data-view=${view}>
+          <!-- Call progress (Build 263): the visitor sees where the call is —
+               connecting / on the line / ending — plus an explicit End-call
+               button (the blob's hold-to-end gesture isn't discoverable). -->
+          <div class=${"embed-call-status embed-call-status-" + (callState || "idle")}>
+            <span class="embed-call-dot" aria-hidden="true"></span>
+            <span>${stateLabel || "connecting…"}</span>
+          </div>
           <button
             class="blob-tap"
             onPointerDown=${onPressStart}
@@ -17036,6 +17052,12 @@ function App() {
             aria-label="Tap to mute, hold to end call"
           >
             <${VoiceBlob} engineRef=${engineRef} mode=${blobMode} size=${blobSize} />
+          </button>
+          <button class="embed-endcall" type="button"
+                  onClick=${() => closeSession()}
+                  disabled=${callState === "ending"}>
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.89.33 1.77.62 2.61a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.47-1.18a2 2 0 0 1 2.11-.45c.84.29 1.72.5 2.61.62A2 2 0 0 1 22 16.92z"/><path d="M2 2l20 20" stroke-width="2"/></svg>
+            <span>${callState === "ending" ? "Ending…" : "End call"}</span>
           </button>
         </div>
       ` : html`

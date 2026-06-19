@@ -1122,6 +1122,43 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
 }
+
+/* Embed in-call surface (Build 263): progress status + explicit End call. */
+.embed-call {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 20px; padding: 22px 18px;
+}
+.embed-call-status {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 600; color: var(--fg-mute);
+  padding: 6px 14px; border-radius: 999px;
+  background: rgba(127, 127, 127, 0.10);
+  text-transform: capitalize; letter-spacing: 0.01em;
+}
+.embed-call-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #9aa0ad;
+}
+.embed-call-status-dialling .embed-call-dot,
+.embed-call-status-reconnecting .embed-call-dot {
+  background: #f59e0b; animation: embed-call-pulse 1.1s ease-in-out infinite;
+}
+.embed-call-status-connected .embed-call-dot {
+  background: #10b981; animation: embed-call-pulse 1.6s ease-in-out infinite;
+}
+.embed-call-status-ending .embed-call-dot { background: #ef4444; }
+@keyframes embed-call-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+.embed-endcall {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 11px 22px; border-radius: 999px; border: 0; cursor: pointer;
+  font-size: 14px; font-weight: 700; color: #fff;
+  background: #ef4444;
+  box-shadow: 0 6px 18px rgba(239, 68, 68, 0.30);
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+.embed-endcall:hover { filter: brightness(1.06); transform: translateY(-1px); }
+.embed-endcall:active { transform: translateY(0.5px); }
+.embed-endcall:disabled { opacity: 0.6; cursor: default; box-shadow: none; }
 .embed-meta { display: flex; flex-direction: column; gap: 4px; }
 .embed-name {
   font-size: 20px;
