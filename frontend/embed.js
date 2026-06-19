@@ -42,7 +42,11 @@
     return;
   }
   var position = (scriptEl.getAttribute("data-position") || "bottom-right").trim();
-  var label = scriptEl.getAttribute("data-label") || ("Talk to " + slug.replace(/-/g, " "));
+  // data-channel: "voice" (default, mic orb) | "chat" (text surface). Chat is
+  // the paid add-on; the iframe surface adapts via the ?channel=chat param.
+  var channel = (scriptEl.getAttribute("data-channel") || "voice").trim().toLowerCase();
+  var defaultVerb = channel === "chat" ? "Chat with " : "Talk to ";
+  var label = scriptEl.getAttribute("data-label") || (defaultVerb + slug.replace(/-/g, " "));
   var mode = scriptEl.getAttribute("data-mode") || "popover";
   var color = scriptEl.getAttribute("data-color") || "";
 
@@ -107,7 +111,7 @@
   // The iframe loads our minimal /embed/<slug> surface — same-origin to our
   // own app, so the WebSocket + mic + audio engine all work inside.
   var iframe = document.createElement("iframe");
-  iframe.src = ourOrigin + "/embed/" + encodeURIComponent(slug);
+  iframe.src = ourOrigin + "/embed/" + encodeURIComponent(slug) + (channel === "chat" ? "?channel=chat" : "");
   iframe.setAttribute("title", "SpiderX.AI — " + label);
   iframe.setAttribute("allow", "microphone; autoplay; clipboard-read; clipboard-write");
   iframe.setAttribute("loading", "lazy");

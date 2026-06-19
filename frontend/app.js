@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 267;
+const SXAI_BUILD = 268;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1611,6 +1611,117 @@ function EmbedView({ slug, blobSize, blobMode, engineRef, onPressStart, onPressE
       <a class="embed-brand" href="https://spiderx.ai" target="_blank" rel="noopener">
         Powered by SpiderX.AI
       </a>
+    </div>
+  `;
+}
+
+// AgentChatEmbed — the TEXT chat surface served at /embed/<slug>?channel=chat
+// (the paid chat add-on). Self-contained: its own WS to /ws/session?mode=chat,
+// streaming model tokens into bubbles. No mic, no AudioEngine. Shares the
+// agent's brain (persona/knowledge/connectors) with the voice + phone channels.
+function AgentChatEmbed({ slug }) {
+  const [agent, setAgent] = useState(null);
+  const [err, setErr] = useState(null);
+  const [status, setStatus] = useState("connecting"); // connecting | ready | ended | error
+  const [messages, setMessages] = useState([]);        // {role:'user'|'model', text}
+  const [input, setInput] = useState("");
+  const wsRef = useRef(null);
+  const streamingRef = useRef(false);                  // mid model-turn → append tokens
+  const logRef = useRef(null);
+
+  useEffect(() => {
+    if (!slug) return;
+    fetch(`/api/agents/by-slug/${encodeURIComponent(slug)}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((a) => a ? setAgent(a) : setErr("Agent not found"))
+      .catch(() => setErr("Couldn't reach SpiderX.AI"));
+  }, [slug]);
+
+  useEffect(() => {
+    if (!agent?.id) return;
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const sid = `chat-${Math.random().toString(36).slice(2)}`;
+    const locale = (navigator.language || "en-US");
+    const ws = new WebSocket(`${proto}://${location.host}/ws/session?mode=chat&agent_id=${agent.id}&sid=${sid}&locale=${encodeURIComponent(locale)}`);
+    wsRef.current = ws;
+    ws.onmessage = (ev) => {
+      let m; try { m = JSON.parse(ev.data); } catch { return; }
+      if (m.type === "ready") setStatus("ready");
+      else if (m.type === "error") { setStatus("error"); setErr(m.message || "Chat unavailable."); }
+      else if (m.type === "transcript" && m.role === "model" && m.text) {
+        setMessages((prev) => {
+          const next = prev.slice();
+          if (streamingRef.current && next.length && next[next.length - 1].role === "model") {
+            next[next.length - 1] = { role: "model", text: next[next.length - 1].text + m.text };
+          } else {
+            next.push({ role: "model", text: m.text });
+            streamingRef.current = true;
+          }
+          return next;
+        });
+      } else if (m.type === "turn_complete") {
+        streamingRef.current = false;
+      } else if (m.type === "call_ended") {
+        setStatus("ended");
+      }
+    };
+    ws.onclose = () => setStatus((s) => (s === "error" || s === "ended") ? s : "ended");
+    ws.onerror = () => setStatus((s) => s === "ended" ? s : "error");
+    return () => { try { ws.close(); } catch {} };
+  }, [agent?.id]);
+
+  useEffect(() => {
+    try { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; } catch {}
+  }, [messages]);
+
+  const send = (e) => {
+    e?.preventDefault();
+    const t = input.trim();
+    if (!t || status !== "ready") return;
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    setMessages((prev) => [...prev, { role: "user", text: t }]);
+    try { ws.send(JSON.stringify({ type: "text", text: t })); } catch {}
+    setInput("");
+  };
+
+  if (err && !agent) return html`<div class="embed-err">${err}</div>`;
+  if (!agent) return html`<div class="embed-loading">Loading…</div>`;
+
+  const statusLabel = status === "connecting" ? "connecting…"
+    : status === "ended" ? "chat ended"
+    : status === "error" ? "connection issue" : "online";
+
+  return html`
+    <div class="chatembed">
+      <header class="chatembed-head">
+        <div class="chatembed-avatar" aria-hidden="true">${(agent.name || "?").trim()[0]}</div>
+        <div class="chatembed-head-meta">
+          <div class="chatembed-name">${agent.name}</div>
+          <div class=${"chatembed-status chatembed-status-" + status}>${statusLabel}</div>
+        </div>
+      </header>
+      <div class="chatembed-log" ref=${logRef}>
+        ${messages.map((m, i) => html`
+          <div key=${i} class=${"chatembed-msg chatembed-msg-" + m.role}>
+            <div class="chatembed-bubble">${m.text}</div>
+          </div>
+        `)}
+        ${status === "connecting" && messages.length === 0
+          ? html`<div class="chatembed-empty">Starting your chat with ${agent.name}…</div>` : ""}
+        ${status === "error" && messages.length === 0
+          ? html`<div class="chatembed-empty">${err || "Chat is unavailable right now."}</div>` : ""}
+      </div>
+      <form class="chatembed-input" onSubmit=${send}>
+        <input class="chatembed-field" type="text" autocomplete="off"
+               placeholder=${status === "ended" ? "Chat ended" : `Message ${agent.name}…`}
+               value=${input} onInput=${(e) => setInput(e.target.value)}
+               disabled=${status !== "ready"} />
+        <button class="chatembed-send" type="submit" disabled=${!input.trim() || status !== "ready"} aria-label="Send">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+        </button>
+      </form>
+      <a class="embed-brand" href="https://spiderx.ai" target="_blank" rel="noopener">Powered by SpiderX.AI</a>
     </div>
   `;
 }
@@ -16072,6 +16183,7 @@ function App() {
   const [revealAgent, setRevealAgent] = useState(null);   // post-build reveal card
   const [revealSection, setRevealSection] = useState("overview");   // overview | calls | settings | numbers
   const [embedSlug, setEmbedSlug] = useState(null);                  // /embed/<slug> minimal iframe surface
+  const [embedChannel, setEmbedChannel] = useState(null);            // "chat" → text embed; null → voice
   const [embedError, setEmbedError] = useState("");                  // publish-gate / connect error shown on the embed surface
   const [accountPage, setAccountPage] = useState(null);               // null | "billing" | "integrations"
   // Two-stage reveal: "unveal" plays a 3-second theatrical curtain, then
@@ -16223,6 +16335,10 @@ function App() {
         setRevealAgent(null);
         setAuthPage(null);
         setEmbedSlug(eMatch[1]);
+        try {
+          const ch = new URLSearchParams(window.location.search).get("channel");
+          setEmbedChannel(ch === "chat" ? "chat" : null);
+        } catch { setEmbedChannel(null); }
         return;
       }
       // /agent/<slug>           → overview page
@@ -16230,6 +16346,7 @@ function App() {
       // /agent/<slug>/settings  → knowledge & settings (Phase 4)
       // /agent/<slug>/numbers   → folded into /go-live; redirect transparently.
       setEmbedSlug(null);
+      setEmbedChannel(null);
       const m = path.match(/^\/agent\/([\w-]+)(?:\/(calls|outcomes|persona|small-talk|knowledge|guardrails|voice|test-call|go-live|numbers|settings|developer|profile|purpose|extra-info))?/);
       if (m) {
         setAgentsListOpen(false);
@@ -17065,6 +17182,10 @@ function App() {
   // Pre-render gate: /embed/<slug> takes over the whole surface — no
   // brandbar, no landing chrome, just the orb + CTA. Loaded inside the
   // floating iframe that /static/embed.js injects on third-party sites.
+  if (embedSlug && embedChannel === "chat") {
+    // Paid chat add-on: text surface, its own WS. No voice engine.
+    return html`<${AgentChatEmbed} slug=${embedSlug} />`;
+  }
   if (embedSlug) {
     return html`
       ${view === "call" ? html`
