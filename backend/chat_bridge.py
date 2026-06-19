@@ -1601,6 +1601,10 @@ def _agent_chat_system_prompt(agent: dict[str, Any]) -> str:
     name = agent.get("name") or "Assistant"
     persona = _gb._substitute_variables(agent.get("persona") or name, variables)
     agent_prompt = _gb._substitute_variables(agent.get("system_prompt") or "", variables)
+    # Operator's CHAT-ONLY extra instructions (tone/rules on top of the shared
+    # brief) — chat_settings.instructions. Capped so it can't bloat the prompt.
+    _cs = agent.get("chat_settings") if isinstance(agent.get("chat_settings"), dict) else {}
+    chat_instr = _gb._substitute_variables((str(_cs.get("instructions") or "").strip())[:1500], variables)
     business = (_gb._format_business_facts_for_prompt(agent) or "").strip()
     dos, donts = _gb._format_policy_for_prompt(agent)
     outcomes_csv = ", ".join(agent.get("outcomes") or ["resolved", "callback_requested", "not_interested"])
@@ -1635,6 +1639,8 @@ def _agent_chat_system_prompt(agent: dict[str, Any]) -> str:
     ]
     if agent_prompt.strip():
         parts.append(f"\n━━━ YOUR BRIEF ━━━\n{agent_prompt.strip()}")
+    if chat_instr.strip():
+        parts.append(f"\n━━━ CHAT-ONLY INSTRUCTIONS (operator) ━━━\n{chat_instr.strip()}")
     if business:
         parts.append("\n" + business)
     parts.append(f"\n━━━ RULES ━━━\n{guards}")

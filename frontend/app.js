@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 279;
+const SXAI_BUILD = 280;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -11229,6 +11229,7 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
     avatar_url: _cs0.avatar_url || "",
     launcher_text: _cs0.launcher_text || "",
     welcome_message: _cs0.welcome_message || "",
+    instructions: _cs0.instructions || "",
     allowed_domains: Array.isArray(_cs0.allowed_domains) ? _cs0.allowed_domains.join(", ") : "",
     privacy_note: _cs0.privacy_note || "",
   });
@@ -12064,6 +12065,14 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
                      onInput=${(e) => setChatField("welcome_message", e.target.value)} />
             </label>
           </div>
+          <div class="chatcfg-head" style=${{ marginTop: "16px" }}>Chat behaviour <span class="db-form-opt" style=${{ fontWeight: 400 }}>(optional)</span></div>
+          <label class="db-form-field">
+            <span class="db-form-label">Chat-only instructions — tone/rules layered on the shared brief</span>
+            <textarea class="db-input" rows="3"
+                      placeholder=${`e.g. Be a touch more playful than the phone line. Always mention free home delivery. Offer a brochure link before booking.`}
+                      value=${chatCfg.instructions}
+                      onInput=${(e) => setChatField("instructions", e.target.value)}></textarea>
+          </label>
           <div class="chatcfg-head" style=${{ marginTop: "16px" }}>Trust &amp; privacy</div>
           <div class="chatcfg-grid">
             <label class="db-form-field">
