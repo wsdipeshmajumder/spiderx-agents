@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 273;
+const SXAI_BUILD = 274;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -11174,6 +11174,10 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
     try { await navigator.clipboard.writeText(chatSnippet); setChatCopied(true); setTimeout(() => setChatCopied(false), 1800); }
     catch {}
   };
+  // Live-preview values (update as the operator edits — no save needed to see).
+  const prevAccent = /^#[0-9a-fA-F]{3,8}$/.test(chatCfg.accent_color || "") ? chatCfg.accent_color : "#4f46e5";
+  const prevAvatar = (chatCfg.avatar_url || "").trim();
+  const prevWelcome = (chatCfg.welcome_message || "").trim() || `Hi! I'm ${agent.name}. How can I help?`;
 
   // Publish state — flips agent.published via PATCH. Status banner up top
   // reflects whatever the server returned last. We pessimistically toggle so
@@ -11937,6 +11941,8 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
           : html`<span class="golive-channel-pill golive-channel-pill-addon">Add-on</span>`}
       </div>
       ${hasChat ? html`
+        <div class="chatcfg-layout">
+        <div class="chatcfg-main">
         <p class="golive-embed-hint">Paste one line on any site — visitors chat with ${agent.name} by text.</p>
         <div class="db-embed-snippet"><code>${chatSnippet}</code></div>
         <div class="db-actions-row">
@@ -11981,6 +11987,32 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
             </button>
             <span class="db-form-help">Behaviour (persona, knowledge, replies) is shared across all channels — only the look is chat-specific.</span>
           </div>
+        </div>
+        </div>
+        <aside class="chatcfg-preview-col">
+          <div class="chatcfg-preview-label">Live preview</div>
+          <div class="chatprev" style=${{ "--chat-accent": prevAccent }}>
+            <div class="chatprev-head">
+              ${prevAvatar
+                ? html`<img class="chatprev-avatar chatprev-avatar-img" src=${prevAvatar} alt=${agent.name} />`
+                : html`<div class="chatprev-avatar">${(agent.name || "?").trim()[0]}</div>`}
+              <div class="chatprev-headmeta">
+                <div class="chatprev-name">${agent.name}</div>
+                <div class="chatprev-status">online</div>
+              </div>
+            </div>
+            <div class="chatprev-log">
+              <div class="chatprev-msg chatprev-msg-model"><div class="chatprev-bubble">${prevWelcome}</div></div>
+              <div class="chatprev-msg chatprev-msg-user"><div class="chatprev-bubble">What are your hours?</div></div>
+              <div class="chatprev-msg chatprev-msg-model"><div class="chatprev-bubble">We're open 9 AM–7 PM, Mon–Sat. Anything I can help you with?</div></div>
+            </div>
+            <div class="chatprev-input">
+              <div class="chatprev-field">Message ${agent.name}…</div>
+              <div class="chatprev-send"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></div>
+            </div>
+          </div>
+          <div class="chatcfg-preview-note">Live preview — changes here apply once you Save.</div>
+        </aside>
         </div>
       ` : html`
         <div class="golive-paywall">
