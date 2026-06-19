@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 271;
+const SXAI_BUILD = 272;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1640,10 +1640,17 @@ function AgentChatEmbed({ slug }) {
 
   useEffect(() => {
     if (!agent?.id) return;
+    // Per-agent appearance (channel-specific presentation; brain stays shared).
+    const cs = agent.chat_settings || {};
+    const welcome = (cs.welcome_message || "").trim();
+    // A configured welcome message is the instant opener → skip the model's
+    // kickoff greeting (saves a model call, avoids a double greeting).
+    if (welcome) setMessages([{ role: "model", text: welcome }]);
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const sid = `chat-${Math.random().toString(36).slice(2)}`;
     const locale = (navigator.language || "en-US");
-    const ws = new WebSocket(`${proto}://${location.host}/ws/session?mode=chat&agent_id=${agent.id}&sid=${sid}&locale=${encodeURIComponent(locale)}`);
+    const kickoff = welcome ? "&kickoff=0" : "";
+    const ws = new WebSocket(`${proto}://${location.host}/ws/session?mode=chat&agent_id=${agent.id}&sid=${sid}&locale=${encodeURIComponent(locale)}${kickoff}`);
     wsRef.current = ws;
     ws.onmessage = (ev) => {
       let m; try { m = JSON.parse(ev.data); } catch { return; }
@@ -1693,10 +1700,17 @@ function AgentChatEmbed({ slug }) {
     : status === "ended" ? "chat ended"
     : status === "error" ? "connection issue" : "online";
 
+  const cs = agent.chat_settings || {};
+  const accent = /^#[0-9a-fA-F]{3,8}$/.test(cs.accent_color || "") ? cs.accent_color : null;
+  const avatarUrl = (cs.avatar_url || "").trim();
+  const rootStyle = accent ? { "--chat-accent": accent } : {};
+
   return html`
-    <div class="chatembed">
+    <div class="chatembed" style=${rootStyle}>
       <header class="chatembed-head">
-        <div class="chatembed-avatar" aria-hidden="true">${(agent.name || "?").trim()[0]}</div>
+        ${avatarUrl
+          ? html`<img class="chatembed-avatar chatembed-avatar-img" src=${avatarUrl} alt=${agent.name} />`
+          : html`<div class="chatembed-avatar" aria-hidden="true">${(agent.name || "?").trim()[0]}</div>`}
         <div class="chatembed-head-meta">
           <div class="chatembed-name">${agent.name}</div>
           <div class=${"chatembed-status chatembed-status-" + status}>${statusLabel}</div>
@@ -11127,8 +11141,33 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
   const hasChat = chatEntitled != null
     ? chatEntitled
     : !!(plan && plan.entitlements && plan.entitlements.chat_channel);
+  // Chat appearance (Build 272) — channel-specific presentation saved to the
+  // agent's chat_settings. Behaviour stays shared across channels.
+  const _cs0 = agent.chat_settings || {};
+  const [chatCfg, setChatCfg] = useState({
+    accent_color: _cs0.accent_color || "",
+    avatar_url: _cs0.avatar_url || "",
+    launcher_text: _cs0.launcher_text || "",
+    welcome_message: _cs0.welcome_message || "",
+  });
+  const [chatCfgSaving, setChatCfgSaving] = useState(false);
+  const [chatCfgSaved, setChatCfgSaved] = useState(false);
+  const setChatField = (k, v) => { setChatCfg((c) => ({ ...c, [k]: v })); setChatCfgSaved(false); };
+  const saveChatCfg = async () => {
+    setChatCfgSaving(true);
+    try {
+      const r = await fetch(`/api/agents/${agent.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_settings: chatCfg }),
+      });
+      if (r.ok) { setChatCfgSaved(true); setTimeout(() => setChatCfgSaved(false), 2200); refreshAgent && refreshAgent(); }
+    } finally { setChatCfgSaving(false); }
+  };
+
   const chatAttrs = [`data-agent="${agent.slug || agent.id}"`, `data-channel="chat"`];
   if (embedPosition !== "bottom-right") chatAttrs.push(`data-position="${embedPosition}"`);
+  if (chatCfg.accent_color) chatAttrs.push(`data-color="${chatCfg.accent_color}"`);
+  if (chatCfg.launcher_text.trim()) chatAttrs.push(`data-label="${chatCfg.launcher_text.replace(/"/g, "'")}"`);
   const chatSnippet = `<script src="${embedOrigin}/static/embed.js" ${chatAttrs.join(" ")}></script>`;
   const [chatCopied, setChatCopied] = useState(false);
   const copyChatSnippet = async () => {
@@ -11907,6 +11946,41 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
               : html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy snippet</span>`}
           </button>
           <a class="db-btn-ghost" href=${`/embed/${agent.slug || agent.id}?channel=chat`} target="_blank" rel="noopener">Open chat preview →</a>
+        </div>
+        <div class="chatcfg">
+          <div class="chatcfg-head">Appearance</div>
+          <div class="chatcfg-grid">
+            <label class="db-form-field">
+              <span class="db-form-label">Accent colour</span>
+              <div class="chatcfg-color">
+                <input type="color" value=${chatCfg.accent_color || "#4f46e5"} onInput=${(e) => setChatField("accent_color", e.target.value)} />
+                <input class="db-input" type="text" placeholder="#4f46e5" value=${chatCfg.accent_color}
+                       onInput=${(e) => setChatField("accent_color", e.target.value)} />
+              </div>
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Logo / avatar URL</span>
+              <input class="db-input" type="url" placeholder="https://…/logo.png" value=${chatCfg.avatar_url}
+                     onInput=${(e) => setChatField("avatar_url", e.target.value)} />
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Launcher text</span>
+              <input class="db-input" type="text" placeholder=${`Chat with ${agent.name}`} value=${chatCfg.launcher_text}
+                     onInput=${(e) => setChatField("launcher_text", e.target.value)} />
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Welcome message <span class="db-form-opt">(optional)</span></span>
+              <input class="db-input" type="text" placeholder="Hi! How can I help today?" value=${chatCfg.welcome_message}
+                     onInput=${(e) => setChatField("welcome_message", e.target.value)} />
+            </label>
+          </div>
+          <div class="db-actions-row">
+            <button type="button" class=${"db-btn-primary db-btn-sm " + (chatCfgSaved ? "is-copied" : "")}
+                    onClick=${saveChatCfg} disabled=${chatCfgSaving}>
+              ${chatCfgSaving ? "Saving…" : chatCfgSaved ? "✓ Saved" : "Save appearance"}
+            </button>
+            <span class="db-form-help">Behaviour (persona, knowledge, replies) is shared across all channels — only the look is chat-specific.</span>
+          </div>
         </div>
       ` : html`
         <div class="golive-paywall">

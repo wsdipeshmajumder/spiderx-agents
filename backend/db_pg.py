@@ -414,7 +414,10 @@ _AGENT_JSON = ("guardrails", "connectors", "sip_config", "voice_tweaks",
                "outcome_overrides", "digest_settings", "chip_overrides",
                # Build 260 — per-carrier telephony auto-setup map (twilio /
                # plivo each independent). See migration 0029.
-               "telephony_carriers")
+               "telephony_carriers",
+               # Build 272 — chat-widget appearance (accent/avatar/launcher/
+               # welcome). See migration 0031.
+               "chat_settings")
 # Per the baseline schema, these JSONB cols are NOT NULL with a structural
 # default. Callers (and the SQLite-compat contract) sometimes send `None` to
 # mean "clear" — we coerce to the column default so the constraint holds.
@@ -440,6 +443,8 @@ _AGENT_JSON_NOT_NULL = {
     # Build 260 — telephony_carriers is NOT NULL DEFAULT '{}' (migration
     # 0029). None coerces to empty map so a full disconnect can clear it.
     "telephony_carriers": {},
+    # Build 272 — chat_settings is NOT NULL DEFAULT '{}' (migration 0031).
+    "chat_settings": {},
 }
 
 

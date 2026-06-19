@@ -1455,6 +1455,7 @@ async def run_agent_chat_session(
     client_tz: str = "UTC",
     user_id: Optional[int] = None,
     sid: Optional[str] = None,
+    send_kickoff: bool = True,
 ) -> None:
     from datetime import datetime, timezone
     from . import connectors as _conn
@@ -1525,14 +1526,17 @@ async def run_agent_chat_session(
     await _send_json({"type": "ready", "model": CHAT_MODEL, "kind": "agent",
                       "agent": {"id": agent.get("id"), "name": agent.get("name")}})
 
-    # Kickoff: the universal system prompt greets on <call_start>.
-    try:
-        greeting = await _run_model_turn(chat=chat, user_text="<call_start>",
-                                         handlers=handlers, send_json=_send_json, build_monitor=None)
-        if greeting and greeting.strip():
-            memory.append({"role": "model", "text": greeting.strip()})
-    except Exception as e:  # noqa: BLE001
-        log.warning("agent-chat[%s] kickoff failed: %s", agent_id, e)
+    # Kickoff: the universal system prompt greets on <call_start>. Skipped
+    # when the embed shows a configured static welcome message instead (saves
+    # a model call and avoids a double-greeting).
+    if send_kickoff:
+        try:
+            greeting = await _run_model_turn(chat=chat, user_text="<call_start>",
+                                             handlers=handlers, send_json=_send_json, build_monitor=None)
+            if greeting and greeting.strip():
+                memory.append({"role": "model", "text": greeting.strip()})
+        except Exception as e:  # noqa: BLE001
+            log.warning("agent-chat[%s] kickoff failed: %s", agent_id, e)
 
     turns_used = 0
     deadline = _time_mod.monotonic() + _CHAT_MAX_SESSION_S

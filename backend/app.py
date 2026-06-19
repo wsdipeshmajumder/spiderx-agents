@@ -118,7 +118,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 271
+APP_BUILD = 272
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1820,7 +1820,7 @@ async def patch_agent(agent_id: int, request: Request) -> dict:
             )
     except Exception as _e:  # noqa: BLE001
         log.debug("events.emit on patch_agent failed: %s", _e)
-    return updated
+    return _public_agent(updated)
 
 
 @app.get("/api/agents/{agent_id}/outcomes/catalogue")
@@ -2328,6 +2328,7 @@ async def ws_session(ws: WebSocket) -> None:
                     ws, initial_agent_id,
                     client_locale=client_locale, client_tz=client_tz,
                     user_id=user_id, sid=sid,
+                    send_kickoff=(qp.get("kickoff") != "0"),
                 )
         elif text_only:
             from . import chat_bridge
