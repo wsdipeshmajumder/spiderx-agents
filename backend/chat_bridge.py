@@ -1482,13 +1482,53 @@ def _quick_replies_decl():
     )
 
 
+_FORM_TYPES = {"text", "tel", "email", "number", "date", "time", "select", "textarea"}
+
+
+def _show_form_decl():
+    field = types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "key": types.Schema(type=types.Type.STRING, description="snake_case key, e.g. party_size, phone, date — reuse the extraction-schema keys where they fit."),
+            "label": types.Schema(type=types.Type.STRING),
+            "type": types.Schema(type=types.Type.STRING, description="one of: text, tel, email, number, date, time, select, textarea"),
+            "required": types.Schema(type=types.Type.BOOLEAN),
+            "options": types.Schema(type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING), description="choices when type=select"),
+        },
+        required=["key", "label", "type"],
+    )
+    return types.FunctionDeclaration(
+        name="show_form",
+        description=(
+            "Render an inline form to collect structured details in one go (e.g. a booking "
+            "or lead-capture form) instead of asking field-by-field. Prefer this when you "
+            "need 2+ specifics. Reuse the extraction-schema field keys where they fit. Max "
+            "6 fields. Write a one-line lead-in too. Text chat only."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "title": types.Schema(type=types.Type.STRING),
+                "submit_label": types.Schema(type=types.Type.STRING),
+                "fields": types.Schema(type=types.Type.ARRAY, items=field),
+            },
+            required=["title", "fields"],
+        ),
+    )
+
+
 _CHAT_UI_GUIDANCE = (
     "\n\n━━━ CHAT UI (text channel only) ━━━\n"
-    "This is a TEXT chat with on-screen buttons. When there is a small set of obvious "
-    "next steps, call `quick_replies` with 2-4 short labels so the visitor can tap "
-    "instead of type — e.g. after answering, offer ['Book a test drive','See pricing',"
-    "'Talk to a human']. Always write a normal short reply too. Don't show buttons every "
-    "turn — only when they genuinely save typing."
+    "This is a TEXT chat with on-screen widgets. Two tools are available IN ADDITION to "
+    "your normal tools:\n"
+    "• `quick_replies` — 2-4 tappable buttons for a small set of obvious next steps "
+    "(e.g. ['Book a test drive','See pricing','Talk to a human']).\n"
+    "• `show_form` — an inline form to collect 2+ structured details at once (name, "
+    "phone, date, party size, …) instead of asking one question at a time. When the "
+    "visitor submits it you'll receive the values; acknowledge and take the next step "
+    "(confirm + use your normal tools to record/send the lead).\n"
+    "Always write a short normal reply alongside a widget. Use widgets only when they "
+    "save the visitor typing — not every turn."
 )
 
 
@@ -1530,7 +1570,7 @@ async def run_agent_chat_session(
     tool_ids = list(connector_ids) + (["end_call"] if "end_call" not in connector_ids else [])
     # Connector decls + the chat-only generative-UI tool, in one Tool.
     conn_decls = [_conn.CONNECTOR_DECLS[c] for c in tool_ids if c in _conn.CONNECTOR_DECLS]
-    tools = [types.Tool(function_declarations=conn_decls + [_quick_replies_decl()])]
+    tools = [types.Tool(function_declarations=conn_decls + [_quick_replies_decl(), _show_form_decl()])]
 
     memory: list[dict[str, str]] = []          # {role, text}
     usage = {"in": 0, "out": 0}                 # token totals for cost
@@ -1566,6 +1606,30 @@ async def run_agent_chat_session(
             await _send_json({"type": "quick_replies", "options": opts})
         return {"ok": True, "shown": len(opts)}
     handlers["quick_replies"] = _quick_replies_handler
+
+    async def _show_form_handler(args: dict[str, Any]) -> dict[str, Any]:
+        title = (str(args.get("title") or "Details").strip())[:80]
+        submit_label = (str(args.get("submit_label") or "Submit").strip())[:40]
+        fields = []
+        for f in (args.get("fields") or [])[:6]:
+            if not isinstance(f, dict):
+                continue
+            key = str(f.get("key") or "").strip()
+            if not key:
+                continue
+            ftype = str(f.get("type") or "text").strip().lower()
+            if ftype not in _FORM_TYPES:
+                ftype = "text"
+            item = {"key": key, "label": (str(f.get("label") or key).strip())[:60],
+                    "type": ftype, "required": bool(f.get("required"))}
+            if ftype == "select":
+                item["options"] = [str(o).strip() for o in (f.get("options") or []) if str(o).strip()][:12]
+            fields.append(item)
+        if not fields:
+            return {"ok": False, "error": "no valid fields"}
+        await _send_json({"type": "form", "form": {"title": title, "submit_label": submit_label, "fields": fields}})
+        return {"ok": True, "shown": len(fields)}
+    handlers["show_form"] = _show_form_handler
 
     config = types.GenerateContentConfig(
         system_instruction=_gb._agent_system_prompt(agent) + _CHAT_UI_GUIDANCE,
@@ -1613,6 +1677,37 @@ async def run_agent_chat_session(
             kind = data.get("type")
             if kind == "stop":
                 break
+            if kind == "form_submit":
+                if turns_used >= _CHAT_MAX_TURNS or _time_mod.monotonic() > deadline:
+                    await _send_json({"type": "call_ended"})
+                    break
+                fdata = data.get("data") if isinstance(data.get("data"), dict) else {}
+                ftitle = (str(data.get("title") or "form").strip())[:80]
+                # Form values → extracted (scalars). Cleaner than parsing free text.
+                if isinstance(agent.get("_extracted_extra"), dict):
+                    for k, v in fdata.items():
+                        if isinstance(v, (str, int, float, bool)) and str(v).strip():
+                            agent["_extracted_extra"][str(k)] = v
+                summary = ", ".join(f"{k}: {v}" for k, v in fdata.items() if str(v).strip())
+                turns_used += 1
+                memory.append({"role": "user", "text": f"[Submitted {ftitle}: {summary}]"})
+                try:
+                    reply = await _run_model_turn(
+                        chat=chat, handlers=handlers, send_json=_send_json,
+                        build_monitor=None, usage=usage,
+                        user_text=(f"[The visitor submitted the '{ftitle}' form: {summary}. "
+                                   f"Acknowledge briefly and take the next step — confirm and use "
+                                   f"your tools to record/send it.]"))
+                except Exception as e:  # noqa: BLE001
+                    log.exception("agent-chat[%s] form turn failed: %s", agent_id, e)
+                    await _send_json({"type": "error", "message": str(e)[:200]})
+                    break
+                if reply and reply.strip():
+                    memory.append({"role": "model", "text": reply.strip()})
+                if persisted["done"]:
+                    await _send_json({"type": "call_ended"})
+                    break
+                continue
             if kind != "text" or not data.get("text"):
                 continue
             # ── Safety caps (public, unauthenticated WS) ──

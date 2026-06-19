@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 275;
+const SXAI_BUILD = 276;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1627,6 +1627,8 @@ function AgentChatEmbed({ slug }) {
   const [messages, setMessages] = useState([]);        // {role:'user'|'model', text}
   const [input, setInput] = useState("");
   const [quickReplies, setQuickReplies] = useState([]); // generative-UI tappable buttons
+  const [activeForm, setActiveForm] = useState(null);   // inline form spec {title, fields, submit_label}
+  const [formValues, setFormValues] = useState({});
   const wsRef = useRef(null);
   const streamingRef = useRef(false);                  // mid model-turn → append tokens
   const logRef = useRef(null);
@@ -1670,6 +1672,8 @@ function AgentChatEmbed({ slug }) {
         });
       } else if (m.type === "quick_replies" && Array.isArray(m.options)) {
         setQuickReplies(m.options.filter((o) => typeof o === "string" && o.trim()).slice(0, 4));
+      } else if (m.type === "form" && m.form && Array.isArray(m.form.fields)) {
+        setQuickReplies([]); setActiveForm(m.form); setFormValues({});
       } else if (m.type === "turn_complete") {
         streamingRef.current = false;
       } else if (m.type === "call_ended") {
@@ -1694,7 +1698,24 @@ function AgentChatEmbed({ slug }) {
     setMessages((prev) => [...prev, { role: "user", text: t }]);
     try { ws.send(JSON.stringify({ type: "text", text: t })); } catch {}
     setInput("");
-    setQuickReplies([]);   // chips are for one decision point — clear on any send
+    setQuickReplies([]); setActiveForm(null);   // widgets are one decision point — clear on send
+  };
+
+  const submitForm = (e) => {
+    e?.preventDefault();
+    if (!activeForm || status !== "ready") return;
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    // Required-field guard.
+    const missing = (activeForm.fields || []).filter((f) => f.required && !String(formValues[f.key] || "").trim());
+    if (missing.length) return;
+    const data = {};
+    (activeForm.fields || []).forEach((f) => { const v = String(formValues[f.key] || "").trim(); if (v) data[f.key] = v; });
+    const summary = (activeForm.fields || [])
+      .map((f) => formValues[f.key] && `${f.label}: ${formValues[f.key]}`).filter(Boolean).join(" · ");
+    setMessages((prev) => [...prev, { role: "user", text: summary || `Submitted ${activeForm.title}` }]);
+    try { ws.send(JSON.stringify({ type: "form_submit", title: activeForm.title, data })); } catch {}
+    setActiveForm(null); setFormValues({}); setQuickReplies([]);
   };
 
   if (err && !agent) return html`<div class="embed-err">${err}</div>`;
@@ -1737,6 +1758,28 @@ function AgentChatEmbed({ slug }) {
             <button key=${i} type="button" class="chatembed-chip" onClick=${() => send(null, q)}>${q}</button>
           `)}
         </div>
+      ` : ""}
+      ${activeForm && status === "ready" ? html`
+        <form class="chatembed-form" onSubmit=${submitForm}>
+          <div class="chatembed-form-title">${activeForm.title}</div>
+          ${(activeForm.fields || []).map((f, i) => html`
+            <label key=${i} class="chatembed-form-field">
+              <span class="chatembed-form-label">${f.label}${f.required ? html`<span class="chatembed-form-req"> *</span>` : ""}</span>
+              ${f.type === "textarea"
+                ? html`<textarea class="chatembed-form-input" rows="2" value=${formValues[f.key] || ""}
+                          onInput=${(e) => setFormValues((v) => ({ ...v, [f.key]: e.target.value }))}></textarea>`
+                : f.type === "select"
+                  ? html`<select class="chatembed-form-input" value=${formValues[f.key] || ""}
+                            onChange=${(e) => setFormValues((v) => ({ ...v, [f.key]: e.target.value }))}>
+                            <option value="">Select…</option>
+                            ${(f.options || []).map((o, j) => html`<option key=${j} value=${o}>${o}</option>`)}
+                          </select>`
+                  : html`<input class="chatembed-form-input" type=${f.type || "text"} value=${formValues[f.key] || ""}
+                            onInput=${(e) => setFormValues((v) => ({ ...v, [f.key]: e.target.value }))} />`}
+            </label>
+          `)}
+          <button class="chatembed-form-submit" type="submit">${activeForm.submit_label || "Submit"}</button>
+        </form>
       ` : ""}
       <form class="chatembed-input" onSubmit=${send}>
         <input class="chatembed-field" type="text" autocomplete="off"
