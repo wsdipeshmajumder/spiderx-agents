@@ -5063,6 +5063,16 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   background: rgba(255, 255, 255, 0.05);
   color: var(--fg-mute);
 }
+/* Channel badge (Build 270) — distinguishes chat / phone from web voice. */
+.call-channel {
+  font-size: 10.5px; font-weight: 600; margin-left: 6px;
+  padding: 2px 7px; border-radius: 6px; white-space: nowrap;
+  background: #eef0ff; color: #4338ca;
+}
+.call-channel-phone { background: #ecfdf5; color: #047857; }
+.call-channel-web_chat { background: #eef0ff; color: #4338ca; }
+:root[data-theme="dark"] .call-channel-web_chat { background: #1e2233; color: #c7d2fe; }
+:root[data-theme="dark"] .call-channel-phone { background: #11281f; color: #6ee7b7; }
 .call-outcome-booked,
 .call-outcome-resolved,
 .call-outcome-qualified,

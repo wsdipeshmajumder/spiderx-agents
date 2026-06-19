@@ -118,7 +118,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 269
+APP_BUILD = 270
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -574,6 +574,117 @@ async def razorpay_order(request: Request) -> dict:
         "name": user.get("name") or user.get("email"),
         "email": user.get("email"),
     }
+
+
+# ── Paid add-ons (Build 270) ──────────────────────────────────────────────
+# Flat, one-time Razorpay order that flips an ORG-level entitlement (vs the
+# plan, which is per-user). Prices are placeholders — tune `_ADDONS` (or move
+# to a table) as the catalogue grows. The chat channel is the first add-on.
+_ADDONS: dict[str, dict[str, Any]] = {
+    "chat_channel": {"label": "Chat channel", "price_paise": 149900, "currency": "INR"},
+}
+
+
+@app.get("/api/addons")
+async def list_addons(request: Request) -> dict:
+    """Add-on catalogue + which ones the caller's org already holds."""
+    user = await current_user(request)
+    ent = await db.get_org_entitlements_for_user(user["id"])
+    return {"addons": [
+        {"key": k, "label": v["label"], "price_paise": v["price_paise"],
+         "currency": v["currency"], "active": bool(ent.get(k))}
+        for k, v in _ADDONS.items()
+    ]}
+
+
+@app.post("/api/razorpay/addon-order")
+async def razorpay_addon_order(request: Request) -> dict:
+    """Create a Razorpay order for an add-on. Demo stub when keys are unset."""
+    user = await current_user(request)
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid JSON body")
+    key = (body.get("addon") or "").strip()
+    addon = _ADDONS.get(key)
+    if not addon:
+        raise HTTPException(status_code=404, detail="unknown add-on")
+    key_id = os.environ.get("RAZORPAY_KEY_ID")
+    key_secret = os.environ.get("RAZORPAY_KEY_SECRET")
+    common = {"amount_paise": addon["price_paise"], "currency": addon["currency"],
+              "addon": key, "addon_label": addon["label"],
+              "name": user.get("name") or user.get("email"), "email": user.get("email")}
+    if not key_id or not key_secret:
+        return {"demo": True, "key": None, "order_id": f"demo_addon_{key}_{user['id']}", **common}
+    import base64, json as _json, urllib.request, urllib.error
+    payload = _json.dumps({
+        "amount": addon["price_paise"], "currency": addon["currency"],
+        "receipt": f"addon_{key}_user_{user['id']}",
+        "notes": {"addon": key, "user_id": str(user["id"])},
+    }).encode("utf-8")
+    auth = base64.b64encode(f"{key_id}:{key_secret}".encode("utf-8")).decode("ascii")
+    req = urllib.request.Request(
+        "https://api.razorpay.com/v1/orders", data=payload,
+        headers={"Authorization": f"Basic {auth}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            order = _json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        log.error("razorpay.addon_order_http err=%s body=%s", e.code, e.read()[:300])
+        raise HTTPException(status_code=502, detail="razorpay error")
+    except Exception:
+        log.exception("razorpay.addon_order failed")
+        raise HTTPException(status_code=502, detail="razorpay unreachable")
+    return {"demo": False, "key": key_id, "order_id": order.get("id"), **common}
+
+
+@app.post("/api/me/addon")
+async def activate_addon(request: Request) -> dict:
+    """Activate a paid add-on on the caller's ORG after payment. Verifies the
+    Razorpay HMAC (or accepts demo mode when the secret is unset), then flips
+    the org entitlement."""
+    user = await current_user(request)
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid JSON body")
+    key = (body.get("addon") or "").strip()
+    if key not in _ADDONS:
+        raise HTTPException(status_code=404, detail="unknown add-on")
+    from . import auth as _auth
+    org_id = await _auth.primary_org_id(user["id"])
+    if not org_id:
+        raise HTTPException(status_code=400, detail="no org for user")
+    razorpay_secret = os.environ.get("RAZORPAY_KEY_SECRET")
+    if razorpay_secret:
+        order_id = (body.get("razorpay_order_id") or "").strip()
+        payment_id = (body.get("razorpay_payment_id") or "").strip()
+        signature = (body.get("razorpay_signature") or "").strip()
+        if not (order_id and payment_id and signature):
+            raise HTTPException(status_code=400, detail="razorpay payment fields required")
+        import hashlib, hmac
+        expected = hmac.new(
+            razorpay_secret.encode("utf-8"),
+            f"{order_id}|{payment_id}".encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(expected, signature):
+            raise HTTPException(status_code=400, detail="signature mismatch")
+        log.info("addon.razorpay user=%s addon=%s payment=%s", user["id"], key, payment_id)
+    else:
+        log.warning("addon.demo (RAZORPAY_KEY_SECRET unset) user=%s addon=%s", user["id"], key)
+    ent = await db.update_org_entitlements(org_id, {key: True})
+    try:
+        from . import events
+        await events.emit(kind="billing.addon_activated",
+                          title=f"Add-on '{key}' activated for org {org_id}",
+                          severity="info", source="user",
+                          payload={"addon": key, "org_id": org_id})
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "addon": key, "entitlements": ent}
 
 
 @app.post("/api/auth/signup")

@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 269;
+const SXAI_BUILD = 270;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -768,6 +768,7 @@ function AgentCockpit({ agent, presets, onTest, onEdit, onGoLive, onDismiss, onT
                     <li key=${c.id} class="call-row">
                       <div class="call-row-head">
                         <span class=${"call-outcome call-outcome-" + (c.outcome || "unknown")}>${(c.outcome || "unknown").replace(/_/g, " ")}</span>
+                        ${c.channel && c.channel !== "web_voice" ? html`<span class=${"call-channel call-channel-" + c.channel}>${c.channel === "web_chat" ? "💬 Chat" : c.channel === "phone" ? "📞 Phone" : "Web"}</span>` : ""}
                         <span class="call-time">${fmtTime(c.started_at)}</span>
                         <span class="call-dur">${Math.round(c.duration_s || 0)}s</span>
                       </div>
@@ -7846,7 +7847,10 @@ function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
                   <tr key=${c.id}>
                     <td>${fmtTime(c.started_at)}</td>
                     <td>${c.duration_s ? Number(c.duration_s).toFixed(1) + "s" : "—"}</td>
-                    <td><span class=${"db-tag " + tagColor(c.outcome)}>${(c.outcome || "unknown").replace(/_/g, " ")}</span></td>
+                    <td>
+                      <span class=${"db-tag " + tagColor(c.outcome)}>${(c.outcome || "unknown").replace(/_/g, " ")}</span>
+                      ${c.channel && c.channel !== "web_voice" ? html`<span class=${"call-channel call-channel-" + c.channel}>${c.channel === "web_chat" ? "💬 Chat" : c.channel === "phone" ? "📞 Phone" : "Web"}</span>` : ""}
+                    </td>
                     <td>
                       ${c.lead_quality
                         ? html`<span class=${"db-lead db-lead-" + c.lead_quality} title=${c.lead_signals || ""}>${c.lead_quality}</span>`
@@ -14860,6 +14864,11 @@ function BillingPage({ agents, plan, onNav, onPlanChanged }) {
   const [me, setMe] = useState(null);   // plan_state
   const [busy, setBusy] = useState(null);   // plan slug currently checking out
   const [toast, setToast] = useState(null);
+  const [addons, setAddons] = useState([]);   // paid add-on catalogue + active flags
+  const wantAddon = (() => {
+    try { return new URLSearchParams(window.location.search).get("addon"); }
+    catch { return null; }
+  })();
 
   // Optional contextual return flow — when the user lands here from the
   // Go-live Publish gate, the path is /account/billing?return=<agent-slug>.
@@ -14876,6 +14885,7 @@ function BillingPage({ agents, plan, onNav, onPlanChanged }) {
   useEffect(() => {
     fetch("/api/plans").then((r) => r.json()).then((arr) => setPlans(Array.isArray(arr) ? arr : []));
     fetch("/api/me/plan").then((r) => r.json()).then(setMe).catch(() => {});
+    fetch("/api/addons").then((r) => r.json()).then((d) => setAddons(Array.isArray(d?.addons) ? d.addons : [])).catch(() => {});
   }, []);
 
   // Load the Razorpay Checkout script lazily — only when the user clicks an
@@ -14955,6 +14965,60 @@ function BillingPage({ agents, plan, onNav, onPlanChanged }) {
           if (returnSlug) {
             setTimeout(() => onNav && onNav(`/agent/${returnSlug}/go-live`), 1200);
           }
+        },
+        modal: { ondismiss: () => setBusy(null) },
+      });
+      rzp.open();
+    } catch (err) {
+      setToast({ kind: "err", msg: "Couldn't start checkout — try again." });
+    } finally {
+      setBusy(null);
+      setTimeout(() => setToast(null), 4500);
+    }
+  };
+
+  const handleAddon = async (addon) => {
+    setBusy(`addon:${addon.key}`);
+    const finish = (ent) => {
+      setAddons((prev) => prev.map((a) => a.key === addon.key ? { ...a, active: true } : a));
+      // Refresh plan state so other pages (Go-live) see the entitlement.
+      fetch("/api/me/plan").then((r) => r.json()).then((fresh) => { setMe(fresh); onPlanChanged && onPlanChanged(fresh); }).catch(() => {});
+      setToast({ kind: "ok", msg: `${addon.label} add-on activated.` });
+      if (wantAddon) setTimeout(() => onNav && onNav(`/account/billing`), 100);
+    };
+    try {
+      const oRes = await fetch("/api/razorpay/addon-order", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ addon: addon.key }),
+      });
+      if (!oRes.ok) throw new Error("order failed");
+      const order = await oRes.json();
+      const activate = (resp) => fetch("/api/me/addon", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ addon: addon.key, ...(resp || {}) }),
+      });
+      if (order.demo) {
+        const u = await activate(null);
+        if (!u.ok) throw new Error("activate failed");
+        const d = await u.json();
+        finish(d.entitlements);
+        setToast({ kind: "ok", msg: `${addon.label} activated (demo mode — no real payment).` });
+        return;
+      }
+      await ensureRzpScript();
+      const rzp = new window.Razorpay({
+        key: order.key, order_id: order.order_id, amount: order.amount_paise, currency: order.currency,
+        name: "SpiderX.AI", description: `${order.addon_label} add-on`,
+        prefill: { name: order.name, email: order.email }, theme: { color: "#6366f1" },
+        handler: async (response) => {
+          const u = await activate({
+            razorpay_order_id: response.razorpay_order_id,
+            razorpay_payment_id: response.razorpay_payment_id,
+            razorpay_signature: response.razorpay_signature,
+          });
+          if (!u.ok) { setToast({ kind: "err", msg: "Payment didn't verify — email support@spiderx.ai." }); return; }
+          const d = await u.json();
+          finish(d.entitlements);
         },
         modal: { ondismiss: () => setBusy(null) },
       });
@@ -15050,6 +15114,37 @@ function BillingPage({ agents, plan, onNav, onPlanChanged }) {
           })}
         </div>
       </section>
+
+      ${addons.length ? html`
+        <section style=${{ marginTop: "26px" }}>
+          <h3 class="db-panel-title" style=${{ marginBottom: "8px" }}>Add-ons</h3>
+          <p class="db-panel-sub" style=${{ marginBottom: "16px" }}>Optional channels billed on top of your plan. Add or keep them as you need.</p>
+          <div class="billing-grid">
+            ${addons.map((a) => html`
+              <div key=${a.key} class=${"billing-card billing-addon-card" + (a.active ? " billing-card-current" : "") + (wantAddon === a.key && !a.active ? " billing-card-featured" : "")}>
+                ${wantAddon === a.key && !a.active ? html`<div class="billing-card-flag">Selected</div>` : ""}
+                <div class="billing-card-label">${a.label}</div>
+                <div class="billing-card-price">
+                  <span class="billing-card-amount">${fmtPrice(a.price_paise, a.currency)}</span>
+                  <span class="billing-card-period">/ month</span>
+                </div>
+                <div class="billing-card-tagline">
+                  ${a.key === "chat_channel"
+                    ? "A text-chat widget for your agent — same brain, captures the visitors who won't use a mic."
+                    : "Optional add-on channel."}
+                </div>
+                <button
+                  type="button"
+                  class=${"db-btn-primary billing-card-cta" + (a.active ? " billing-card-cta-current" : "")}
+                  disabled=${a.active || busy === `addon:${a.key}`}
+                  onClick=${() => !a.active && handleAddon(a)}>
+                  ${a.active ? "✓ Active" : busy === `addon:${a.key}` ? "Loading…" : `Add ${a.label}`}
+                </button>
+              </div>
+            `)}
+          </div>
+        </section>
+      ` : ""}
     </div>
   `;
 

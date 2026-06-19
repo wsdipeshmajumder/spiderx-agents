@@ -1005,7 +1005,7 @@ async def list_calls_for_agent(agent_id: int, limit: int = 50) -> list[dict[str,
     async with pool.acquire() as conn:
         rs = await conn.fetch(
             "SELECT id, agent_id, started_at, ended_at, duration_s, outcome, reason, summary, "
-            "       sentiment, lead_quality, lead_signals, extracted "
+            "       sentiment, lead_quality, lead_signals, extracted, channel "
             "FROM calls WHERE agent_id = $1 ORDER BY id DESC LIMIT $2",
             agent_id, limit,
         )
