@@ -270,6 +270,8 @@ KINDS = {
     "recording.purged", "recording.purge.error",
     # calls
     "call.completed", "call.abandoned", "call.outcome.captured",
+    # chat (build 288 — live web-chat human handoff)
+    "chat.handoff.requested",
     # cost
     "cost.agent.monthly.computed", "cost.agent.threshold.warning",
     "cost.agent.threshold.exceeded",

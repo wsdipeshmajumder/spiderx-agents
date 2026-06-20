@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 287;
+const SXAI_BUILD = 288;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1630,6 +1630,7 @@ function AgentChatEmbed({ slug, contained }) {
   const [activeForm, setActiveForm] = useState(null);   // inline form spec {title, fields, submit_label}
   const [formValues, setFormValues] = useState({});
   const [activeCards, setActiveCards] = useState([]);   // rich media cards
+  const [handoff, setHandoff] = useState(null);         // {reason} once a human is requested
   const wsRef = useRef(null);
   const streamingRef = useRef(false);                  // mid model-turn → append tokens
   const logRef = useRef(null);
@@ -1680,6 +1681,8 @@ function AgentChatEmbed({ slug, contained }) {
         setQuickReplies([]); setActiveCards([]); setActiveForm(m.form); setFormValues({});
       } else if (m.type === "cards" && Array.isArray(m.cards)) {
         setQuickReplies([]); setActiveForm(null); setActiveCards(m.cards.slice(0, 6));
+      } else if (m.type === "handoff") {
+        setHandoff({ reason: m.reason || "" });
       } else if (m.type === "turn_complete") {
         streamingRef.current = false;
       } else if (m.type === "call_ended") {
@@ -1724,6 +1727,18 @@ function AgentChatEmbed({ slug, contained }) {
     setActiveForm(null); setFormValues({}); setQuickReplies([]);
   };
 
+  // Visitor asks for a human. The server runs a model turn that calls
+  // request_human_handoff (notifies the team) and collects contact details.
+  const requestHuman = () => {
+    if (status !== "ready" || handoff) return;
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    setMessages((prev) => [...prev, { role: "user", text: "Talk to a human" }]);
+    setHandoff({ reason: "" });   // optimistic — server confirms with a handoff frame
+    setQuickReplies([]); setActiveForm(null); setActiveCards([]);
+    try { ws.send(JSON.stringify({ type: "request_handoff" })); } catch {}
+  };
+
   if (err && !agent) return html`<div class="embed-err">${err}</div>`;
   if (!agent) return html`<div class="embed-loading">Loading…</div>`;
 
@@ -1746,6 +1761,10 @@ function AgentChatEmbed({ slug, contained }) {
           <div class="chatembed-name">${agent.name}</div>
           <div class=${"chatembed-status chatembed-status-" + status}>${statusLabel}</div>
         </div>
+        ${status === "ready" && !handoff ? html`
+          <button type="button" class="chatembed-human" onClick=${requestHuman}
+            title="Talk to a human">Talk to a human</button>
+        ` : ""}
       </header>
       <div class="chatembed-log" ref=${logRef}>
         ${messages.map((m, i) => html`
@@ -1806,6 +1825,12 @@ function AgentChatEmbed({ slug, contained }) {
           `)}
           <button class="chatembed-form-submit" type="submit">${activeForm.submit_label || "Submit"}</button>
         </form>
+      ` : ""}
+      ${handoff ? html`
+        <div class="chatembed-handoff" role="status">
+          <span class="chatembed-handoff-dot" aria-hidden="true"></span>
+          A team member has been notified — they'll follow up here or via your contact details.
+        </div>
       ` : ""}
       <form class="chatembed-input" onSubmit=${send}>
         <input class="chatembed-field" type="text" autocomplete="off"

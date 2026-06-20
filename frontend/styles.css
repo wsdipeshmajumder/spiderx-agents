@@ -1231,6 +1231,29 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 }
 .chatembed-avatar-img { object-fit: cover; background: var(--bg-1, #f1f2f7); }
 .chatembed-head-meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.chatembed-human {
+  margin-left: auto; flex-shrink: 0;
+  background: transparent; border: 1px solid var(--border, #d7dae3);
+  color: var(--chat-accent, #4f46e5); font: inherit; font-size: 12px; font-weight: 600;
+  padding: 5px 11px; border-radius: 999px; cursor: pointer; white-space: nowrap;
+  transition: background .12s, border-color .12s;
+}
+.chatembed-human:hover { background: var(--chat-accent, #4f46e5); border-color: var(--chat-accent, #4f46e5); color: #fff; }
+.chatembed-handoff {
+  display: flex; align-items: center; gap: 8px; margin: 0 12px 8px;
+  padding: 9px 12px; border-radius: 10px; line-height: 1.4;
+  background: rgba(245,158,11,0.10); border: 1px solid rgba(245,158,11,0.28);
+  color: var(--fg, #6b4f12); font-size: 12.5px;
+}
+.chatembed-handoff-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; flex-shrink: 0;
+  box-shadow: 0 0 0 0 rgba(245,158,11,0.5); animation: chatembed-pulse 1.8s infinite;
+}
+@keyframes chatembed-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(245,158,11,0.45); }
+  70% { box-shadow: 0 0 0 7px rgba(245,158,11,0); }
+  100% { box-shadow: 0 0 0 0 rgba(245,158,11,0); }
+}
 .chatembed-name { font-weight: 700; font-size: 14px; color: var(--fg, #1a1c25); }
 .chatembed-status { font-size: 11px; color: var(--fg-dim, #9aa0ad); }
 .chatembed-status::before {

@@ -1574,6 +1574,30 @@ def _show_cards_decl():
     )
 
 
+def _request_human_decl():
+    return types.FunctionDeclaration(
+        name="request_human_handoff",
+        description=(
+            "Hand the conversation to a human teammate. Call this when the visitor explicitly "
+            "asks to talk to a person, is clearly frustrated/upset, has a complaint or a request "
+            "that's beyond what you can resolve, or the matter is sensitive (refunds, legal, "
+            "safety). It notifies the team and flags the chat for follow-up — it does NOT end the "
+            "chat. After calling it, reassure the visitor a human has been notified and, if you "
+            "don't already have it, ask for the best phone or email to reach them on."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "reason": types.Schema(
+                    type=types.Type.STRING,
+                    description="One short line on why a human is needed (for the teammate).",
+                ),
+            },
+            required=["reason"],
+        ),
+    )
+
+
 _CHAT_UI_GUIDANCE = (
     "\n\n━━━ CHAT UI (text channel only) ━━━\n"
     "This is a TEXT chat with on-screen widgets. These tools are available IN ADDITION to "
@@ -1641,7 +1665,13 @@ def _agent_chat_system_prompt(agent: dict[str, Any]) -> str:
         "• REMEMBER WHAT THEY'VE TOLD YOU: track everything the visitor has already shared in "
         "this chat (name, phone, email, dates, vehicle, party size, preferences, …). NEVER ask "
         "for the same detail twice or re-confirm what you already have. When you show a form, "
-        "include ONLY the fields you don't already know — drop the ones already answered.",
+        "include ONLY the fields you don't already know — drop the ones already answered.\n"
+        "• HUMAN HANDOFF: if the visitor asks to talk to a person, is upset, has a complaint, or "
+        "needs something you can't resolve (refund, legal, safety, account-specific), call "
+        "`request_human_handoff` with a short reason. Then reassure them a teammate has been "
+        "notified and — if you don't already have it — ask for the best phone or email to reach "
+        "them on. Don't promise an exact response time; say someone will follow up shortly. Offer "
+        "'Talk to a human' as a quick reply when it's clearly what they want.",
         f"\n━━━ WHO YOU ARE ━━━\n{persona}",
     ]
     if agent_prompt.strip():
@@ -1757,7 +1787,7 @@ async def run_agent_chat_session(
     tool_ids = list(connector_ids) + (["end_call"] if "end_call" not in connector_ids else [])
     # Connector decls + the chat-only generative-UI tool, in one Tool.
     conn_decls = [_conn.CONNECTOR_DECLS[c] for c in tool_ids if c in _conn.CONNECTOR_DECLS]
-    tools = [types.Tool(function_declarations=conn_decls + [_quick_replies_decl(), _show_form_decl(), _show_cards_decl()])]
+    tools = [types.Tool(function_declarations=conn_decls + [_quick_replies_decl(), _show_form_decl(), _show_cards_decl(), _request_human_decl()])]
 
     memory: list[dict[str, str]] = []          # {role, text}
     usage = {"in": 0, "out": 0}                 # token totals for cost
@@ -1854,6 +1884,46 @@ async def run_agent_chat_session(
         await _send_json({"type": "cards", "cards": cards})
         return {"ok": True, "shown": len(cards)}
     handlers["show_cards"] = _show_cards_handler
+
+    handoff = {"requested": False}
+    async def _request_human_handler(args: dict[str, Any]) -> dict[str, Any]:
+        reason = (str(args.get("reason") or "").strip())[:300] or "Visitor asked to talk to a human."
+        first = not handoff["requested"]
+        handoff["requested"] = True
+        # Flag it on the captured data so it surfaces in the call's `extracted`.
+        if isinstance(agent.get("_extracted_extra"), dict):
+            agent["_extracted_extra"]["handoff_requested"] = True
+            agent["_extracted_extra"]["handoff_reason"] = reason
+        # Tell the embed to show the "a human has been notified" banner.
+        await _send_json({"type": "handoff", "status": "requested", "reason": reason})
+        # Notify the team via the events ledger (Observability + escalation pager).
+        # Best-effort: a notification failure must never break the chat. Preview
+        # sessions are silent (operator testing their own widget).
+        if first and not preview:
+            try:
+                from . import events as _events
+                contact = {}
+                ex = agent.get("_extracted_extra") if isinstance(agent.get("_extracted_extra"), dict) else {}
+                for k in ("name", "phone", "email"):
+                    if ex.get(k):
+                        contact[k] = ex[k]
+                await _events.emit(
+                    kind="chat.handoff.requested",
+                    title=f"Live chat handoff — {agent.get('name') or 'agent'}",
+                    severity="warning",
+                    source="external",
+                    org_id=agent.get("org_id"),
+                    agent_id=agent.get("id"),
+                    message=reason,
+                    payload={"reason": reason, "contact": contact, "sid": sid},
+                )
+            except Exception as e:  # noqa: BLE001
+                log.warning("agent-chat[%s] handoff emit failed: %s", agent_id, e)
+        return {"ok": True, "handoff": True,
+                "instruction": ("A teammate has been notified. Reassure the visitor warmly that "
+                                "a human will follow up shortly, and if you don't already have a "
+                                "phone or email, ask for the best one to reach them on.")}
+    handlers["request_human_handoff"] = _request_human_handler
 
     config = types.GenerateContentConfig(
         system_instruction=_agent_chat_system_prompt(agent),
@@ -1984,6 +2054,30 @@ async def run_agent_chat_session(
                     await _send_json({"type": "call_ended"})
                     break
                 await _maybe_recall()   # form often carries the phone/email
+                continue
+            if kind == "request_handoff":
+                # Visitor tapped "Talk to a human". Drive a model turn so the
+                # agent triggers request_human_handoff and collects contact in
+                # its own voice (rather than a canned line).
+                if turns_used >= _CHAT_MAX_TURNS or _time_mod.monotonic() > deadline:
+                    await _send_json({"type": "call_ended"})
+                    break
+                turns_used += 1
+                memory.append({"role": "user", "text": "[Asked to talk to a human]"})
+                try:
+                    reply = await _run_model_turn(
+                        chat=chat, handlers=handlers, send_json=_send_json,
+                        build_monitor=None, usage=usage,
+                        user_text=("[The visitor tapped 'Talk to a human'. Call "
+                                   "request_human_handoff now with a brief reason, then warmly "
+                                   "reassure them a teammate will follow up and ask for the best "
+                                   "phone or email if you don't already have it.]"))
+                except Exception as e:  # noqa: BLE001
+                    log.exception("agent-chat[%s] handoff turn failed: %s", agent_id, e)
+                    await _send_json({"type": "error", "message": str(e)[:200]})
+                    break
+                if reply and reply.strip():
+                    memory.append({"role": "model", "text": _mask_pii(reply.strip())})
                 continue
             if kind != "text" or not data.get("text"):
                 continue
