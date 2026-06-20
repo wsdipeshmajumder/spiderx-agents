@@ -49,6 +49,12 @@
   var label = scriptEl.getAttribute("data-label") || (defaultVerb + slug.replace(/-/g, " "));
   var mode = scriptEl.getAttribute("data-mode") || "popover";
   var color = scriptEl.getAttribute("data-color") || "";
+  // Proactive teaser (Build 293): show a small message bubble after a delay to
+  // invite the visitor in. data-teaser="<msg>" enables it; data-teaser-delay in
+  // seconds (default 8). Shown once per browser session (sessionStorage).
+  var teaserMsg = (scriptEl.getAttribute("data-teaser") || "").trim();
+  var teaserDelay = parseInt(scriptEl.getAttribute("data-teaser-delay") || "8", 10);
+  if (isNaN(teaserDelay) || teaserDelay < 0) teaserDelay = 8;
 
   // Resolve our origin from the script's src so we know where to point the
   // iframe. Works regardless of how the host page is hosted.
@@ -85,6 +91,14 @@
     ".sxai-close{position:absolute;top:10px;right:10px;width:28px;height:28px;border-radius:50%;border:0;background:rgba(255,255,255,0.10);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);}",
     ".sxai-close:hover{background:rgba(255,255,255,0.18);}",
     ".sxai-close svg{width:14px;height:14px;}",
+    // Proactive teaser bubble (Build 293)
+    ".sxai-teaser{position:absolute;bottom:100%;right:0;margin-bottom:12px;max-width:260px;padding:12px 34px 12px 14px;border-radius:14px;background:#fff;color:#1a1c25;font-size:13.5px;line-height:1.4;box-shadow:0 10px 30px rgba(0,0,0,0.18);opacity:0;transform:translateY(8px) scale(.96);transition:opacity .25s ease,transform .25s ease;pointer-events:none;cursor:pointer;text-align:left;}",
+    ".sxai-teaser.show{opacity:1;transform:translateY(0) scale(1);pointer-events:auto;}",
+    ".sxai-root[data-pos='bottom-left'] .sxai-teaser{left:0;right:auto;}",
+    ".sxai-teaser:after{content:'';position:absolute;bottom:-6px;right:24px;width:12px;height:12px;background:#fff;transform:rotate(45deg);box-shadow:3px 3px 6px rgba(0,0,0,0.06);}",
+    ".sxai-root[data-pos='bottom-left'] .sxai-teaser:after{left:24px;right:auto;}",
+    ".sxai-teaser-x{position:absolute;top:6px;right:7px;width:18px;height:18px;border:0;border-radius:50%;background:rgba(0,0,0,0.06);color:#6b7280;font-size:13px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;}",
+    ".sxai-teaser-x:hover{background:rgba(0,0,0,0.12);}",
   ].join("");
   document.head.appendChild(styleEl);
 
@@ -139,8 +153,48 @@
     panel.classList.toggle("open", open);
     fab.style.display = open ? "none" : "flex";
   };
-  fab.addEventListener("click", function () { setOpen(true); });
+  fab.addEventListener("click", function () { setOpen(true); hideTeaser(); });
   closeBtn.addEventListener("click", function () { setOpen(false); });
+
+  // ─── Proactive teaser ─────────────────────────────────────────────────────
+  var teaser = null;
+  var hideTeaser = function () {
+    if (teaser) teaser.classList.remove("show");
+  };
+  if (teaserMsg) {
+    var seenKey = "sxai_teaser_" + slug;
+    var alreadySeen = false;
+    try { alreadySeen = sessionStorage.getItem(seenKey) === "1"; } catch (e) {}
+    if (!alreadySeen) {
+      teaser = document.createElement("div");
+      teaser.className = "sxai-teaser";
+      var teaserText = document.createElement("span");
+      teaserText.textContent = teaserMsg;
+      teaser.appendChild(teaserText);
+      var teaserX = document.createElement("button");
+      teaserX.className = "sxai-teaser-x";
+      teaserX.type = "button";
+      teaserX.setAttribute("aria-label", "Dismiss");
+      teaserX.innerHTML = "&times;";
+      teaser.appendChild(teaserX);
+      root.appendChild(teaser);
+      teaserX.addEventListener("click", function (e) {
+        e.stopPropagation();
+        hideTeaser();
+        try { sessionStorage.setItem(seenKey, "1"); } catch (er) {}
+      });
+      teaser.addEventListener("click", function () {
+        setOpen(true); hideTeaser();
+        try { sessionStorage.setItem(seenKey, "1"); } catch (er) {}
+      });
+      setTimeout(function () {
+        if (!open && teaser) {
+          teaser.classList.add("show");
+          try { sessionStorage.setItem(seenKey, "1"); } catch (er) {}
+        }
+      }, teaserDelay * 1000);
+    }
+  }
   // ESC dismisses the popover when focus is inside our iframe context (best
   // effort — cross-frame ESC can't be intercepted from the host page).
   document.addEventListener("keydown", function (e) {

@@ -2012,6 +2012,8 @@ async def run_agent_chat_session(
                 res = await _conn.handle("end_call", args, agent)
                 if isinstance(res, dict) and res.get("ok") and not res.get("rejected"):
                     persisted["done"] = True
+                    if res.get("call_id"):
+                        persisted["call_id"] = res["call_id"]   # for the CSAT prompt
                 return res
             # Harvest structured connector args into extracted (industry-agnostic).
             try:
@@ -2213,6 +2215,41 @@ async def run_agent_chat_session(
         except Exception as e:  # noqa: BLE001
             log.warning("agent-chat[%s] recall turn failed: %s", agent_id, e)
 
+    async def _finish_with_feedback() -> None:
+        # Tell the embed the chat is done, then (real chats only) ask for a 👍/👎
+        # CSAT rating and wait briefly for it. The session is already persisted
+        # via end_call, so this just annotates the existing call row.
+        await _send_json({"type": "call_ended"})
+        cid = persisted.get("call_id")
+        if preview or not cid:
+            return
+        await _send_json({"type": "feedback_request"})
+        try:
+            end_by = _time_mod.monotonic() + 120
+            while _time_mod.monotonic() < end_by:
+                remaining = end_by - _time_mod.monotonic()
+                msg = await asyncio.wait_for(ws.receive(), timeout=max(1.0, remaining))
+                if msg.get("type") == "websocket.disconnect":
+                    return
+                if "text" not in msg or msg["text"] is None:
+                    continue
+                try:
+                    d = json.loads(msg["text"])
+                except json.JSONDecodeError:
+                    continue
+                t = d.get("type")
+                if t == "feedback":
+                    ok = await db.set_call_feedback(cid, str(d.get("rating") or ""), d.get("comment"))
+                    await _send_json({"type": "feedback_thanks", "ok": bool(ok)})
+                    return
+                if t in ("feedback_skip", "stop"):
+                    return
+        except (asyncio.TimeoutError, WebSocketDisconnect):
+            return
+        except Exception as e:  # noqa: BLE001
+            log.warning("agent-chat[%s] feedback collect failed: %s", agent_id, e)
+            return
+
     turns_used = 0
     deadline = _time_mod.monotonic() + _CHAT_MAX_SESSION_S
     last_msg_t = 0.0
@@ -2258,7 +2295,7 @@ async def run_agent_chat_session(
                 if reply and reply.strip():
                     memory.append({"role": "model", "text": _mask_pii(reply.strip())})
                 if persisted["done"]:
-                    await _send_json({"type": "call_ended"})
+                    await _finish_with_feedback()
                     break
                 await _maybe_recall()   # form often carries the phone/email
                 continue
@@ -2328,7 +2365,7 @@ async def run_agent_chat_session(
                 if live is not None:
                     live.mirror("model", reply.strip())
             if persisted["done"]:
-                await _send_json({"type": "call_ended"})
+                await _finish_with_feedback()
                 break
             await _maybe_recall()   # if the visitor just identified themselves
     except WebSocketDisconnect:

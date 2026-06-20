@@ -84,6 +84,7 @@ get_agent_org         = db_pg.get_agent_org
 insert_call               = db_pg.insert_call
 list_calls_for_agent      = db_pg.list_calls_for_agent
 get_call_detail           = db_pg.get_call_detail
+set_call_feedback         = db_pg.set_call_feedback
 recall_visitor_history    = db_pg.recall_visitor_history
 visitor_key_from_extracted = db_pg.visitor_key_from_extracted
 update_call_recording_path = db_pg.update_call_recording_path

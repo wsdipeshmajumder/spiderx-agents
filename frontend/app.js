@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 292;
+const SXAI_BUILD = 293;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1633,6 +1633,7 @@ function AgentChatEmbed({ slug, contained }) {
   const [handoff, setHandoff] = useState(null);         // {reason} once a human is requested
   const [humanAgent, setHumanAgent] = useState(null);   // operator name once a human takes over
   const [thinking, setThinking] = useState(false);      // "agent is typing…" indicator
+  const [csat, setCsat] = useState(null);               // null | "asking" | "up" | "down" | "done"
   const wsRef = useRef(null);
   const streamingRef = useRef(false);                  // mid model-turn → append tokens
   const logRef = useRef(null);
@@ -1699,6 +1700,10 @@ function AgentChatEmbed({ slug, contained }) {
         setMessages((prev) => [...prev, { role: "human", text: m.text, operator: m.operator }]);
       } else if (m.type === "turn_complete") {
         streamingRef.current = false; setThinking(false);
+      } else if (m.type === "feedback_request") {
+        if (!contained) setCsat((c) => c || "asking");   // skip CSAT in the operator preview
+      } else if (m.type === "feedback_thanks") {
+        setCsat("done");
       } else if (m.type === "call_ended") {
         setStatus("ended"); setThinking(false);
       }
@@ -1754,6 +1759,13 @@ function AgentChatEmbed({ slug, contained }) {
     setThinking(true);
     setQuickReplies([]); setActiveForm(null); setActiveCards([]);
     try { ws.send(JSON.stringify({ type: "request_handoff" })); } catch {}
+  };
+
+  // End-of-chat CSAT — sent over the still-open WS during the feedback window.
+  const rate = (rating) => {
+    setCsat(rating);
+    const ws = wsRef.current;
+    try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "feedback", rating })); } catch {}
   };
 
   if (err && !agent) return html`<div class="embed-err">${err}</div>`;
@@ -1857,6 +1869,17 @@ function AgentChatEmbed({ slug, contained }) {
         <div class="chatembed-handoff" role="status">
           <span class="chatembed-handoff-dot" aria-hidden="true"></span>
           A team member has been notified — they'll follow up here or via your contact details.
+        </div>
+      ` : ""}
+      ${csat ? html`
+        <div class="chatembed-csat">
+          ${csat === "asking" ? html`
+            <span class="chatembed-csat-q">How was this chat?</span>
+            <button type="button" class="chatembed-csat-btn" onClick=${() => rate("up")} aria-label="Good">👍</button>
+            <button type="button" class="chatembed-csat-btn" onClick=${() => rate("down")} aria-label="Could be better">👎</button>
+          ` : html`
+            <span class="chatembed-csat-thanks">${csat === "down" ? "Thanks — we'll use this to do better. 🙏" : "Thanks for the feedback! 🙌"}</span>
+          `}
         </div>
       ` : ""}
       <form class="chatembed-input" onSubmit=${send}>
@@ -11072,6 +11095,8 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
     instructions: _cs0.instructions || "",
     language: _cs0.language || "auto",
     language_other: _cs0.language_other || "",
+    teaser: _cs0.teaser || "",
+    teaser_delay: _cs0.teaser_delay || 8,
     allowed_domains: Array.isArray(_cs0.allowed_domains) ? _cs0.allowed_domains.join(", ") : "",
     privacy_note: _cs0.privacy_note || "",
   });
@@ -11163,6 +11188,10 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   if (embedPosition !== "bottom-right") chatAttrs.push(`data-position="${embedPosition}"`);
   if (chatCfg.accent_color) chatAttrs.push(`data-color="${chatCfg.accent_color}"`);
   if (chatCfg.launcher_text.trim()) chatAttrs.push(`data-label="${chatCfg.launcher_text.replace(/"/g, "'")}"`);
+  if ((chatCfg.teaser || "").trim()) {
+    chatAttrs.push(`data-teaser="${chatCfg.teaser.trim().replace(/"/g, "'")}"`);
+    if (Number(chatCfg.teaser_delay) > 0 && Number(chatCfg.teaser_delay) !== 8) chatAttrs.push(`data-teaser-delay="${Number(chatCfg.teaser_delay)}"`);
+  }
   const chatSnippet = `<script src="${embedOrigin}/static/embed.js" ${chatAttrs.join(" ")}></script>`;
   const [chatCopied, setChatCopied] = useState(false);
   const [embedOpen, setEmbedOpen] = useState(false);   // top-right embed-code flyout
@@ -11218,6 +11247,21 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
               <input class="db-input" type="text" placeholder="Hi! How can I help today?" value=${chatCfg.welcome_message}
                      onInput=${(e) => setChatField("welcome_message", e.target.value)} />
             </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Proactive nudge <span class="db-form-opt">(optional)</span></span>
+              <input class="db-input" type="text" placeholder="👋 Looking for something? Ask me anything." value=${chatCfg.teaser}
+                     onInput=${(e) => setChatField("teaser", e.target.value)} />
+              <span class="db-form-help">A teaser bubble that pops up next to the launcher to invite visitors in. Leave blank to disable.</span>
+            </label>
+            ${(chatCfg.teaser || "").trim() ? html`
+              <label class="db-form-field">
+                <span class="db-form-label">Show after</span>
+                <div style=${{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <input class="db-input" type="number" min="1" max="120" style=${{ width: "90px" }} value=${chatCfg.teaser_delay}
+                         onInput=${(e) => setChatField("teaser_delay", Math.max(1, Math.min(120, Number(e.target.value) || 8)))} />
+                  <span class="db-form-help" style=${{ margin: 0 }}>seconds on the page</span>
+                </div>
+              </label>` : ""}
           </div>
           <div class="chatcfg-head" style=${{ marginTop: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
             <span>Chat behaviour</span>

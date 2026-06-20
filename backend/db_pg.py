@@ -1061,6 +1061,29 @@ async def get_call_detail(agent_id: int, call_id: int) -> Optional[dict[str, Any
     return _record_to_dict(r) if r else None
 
 
+async def set_call_feedback(call_id: int, rating: str, comment: Optional[str] = None) -> bool:
+    """Merge a visitor CSAT rating into a call's `extracted` JSONB (Build 293).
+    Pass a NATIVE dict to the jsonb param — the pool codec encodes it (never
+    pre-serialise, or it double-encodes). Best-effort: returns False on any miss."""
+    rating = (rating or "").strip().lower()
+    if rating not in ("up", "down"):
+        return False
+    patch: dict[str, Any] = {"csat": rating}
+    if comment and str(comment).strip():
+        patch["csat_comment"] = str(comment).strip()[:500]
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            res = await conn.execute(
+                "UPDATE calls SET extracted = COALESCE(extracted, '{}'::jsonb) || $2 "
+                "WHERE id = $1",
+                int(call_id), patch,
+            )
+        return not res.endswith(" 0")
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _channel_filter(channel: Optional[str]) -> str:
     """SQL fragment for the channel split. channel='web_chat' → chat only;
     otherwise → exclude chat (voice + phone; NULL legacy rows count as voice)."""

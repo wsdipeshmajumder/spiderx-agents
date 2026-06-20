@@ -1265,6 +1265,18 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 :root[data-theme="dark"] .chatembed-livebar { background: rgba(16,185,129,0.14); color: #6ee7b7; }
 :root[data-theme="dark"] .chatembed-bubble-human { background: #0c2a22 !important; color: #a7f3d0 !important; }
 
+/* End-of-chat CSAT (Build 293) */
+.chatembed-csat { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 0 12px 8px; padding: 9px 12px; border-radius: 10px;
+  background: var(--bg-1, #f1f2f7); font-size: 13px; }
+.chatembed-csat-q { color: var(--fg, #1a1c25); font-weight: 600; }
+.chatembed-csat-btn { background: var(--db-card-bg, #fff); border: 1px solid var(--border, #d7dae3);
+  border-radius: 9px; padding: 4px 12px; font-size: 17px; line-height: 1; cursor: pointer; transition: transform .1s, border-color .12s; }
+.chatembed-csat-btn:hover { transform: scale(1.12); border-color: var(--chat-accent, #4f46e5); }
+.chatembed-csat-thanks { color: var(--fg, #1a1c25); font-weight: 600; }
+:root[data-theme="dark"] .chatembed-csat { background: #161a26; }
+:root[data-theme="dark"] .chatembed-csat-btn { background: #1b1f33; border-color: #3a3f52; }
+
 /* Chat-widget page tabs + conversations + live chat modal (Build 290) */
 .db-tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--border, #e6e8ef); }
 .db-tab { background: none; border: none; border-bottom: 2px solid transparent; padding: 8px 14px;
