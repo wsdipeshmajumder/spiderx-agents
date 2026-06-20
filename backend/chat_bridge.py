@@ -1616,6 +1616,72 @@ _CHAT_UI_GUIDANCE = (
 )
 
 
+# Chat language policy. The shared brain carries a VOICE persona/brief that
+# often says "speak Hinglish / reply in Hindi" — that's a phone habit and must
+# NOT leak into text chat. Operators set a chat-specific language here; the
+# default ("auto") makes the agent mirror whatever language+script the visitor
+# actually types in. Resolves to a directive string (None = auto/mirror).
+_CHAT_LANG_LABELS = {
+    "en": "English",
+    "hi": "Hindi (हिंदी — Devanagari script)",
+    "hinglish": "Hinglish — Hindi written in Roman/Latin script, mixed naturally with English",
+    "bn": "Bengali (বাংলা)",
+    "ta": "Tamil (தமிழ்)",
+    "te": "Telugu (తెలుగు)",
+    "mr": "Marathi (मराठी)",
+}
+
+
+def _resolve_chat_language(cs: dict[str, Any]) -> Optional[str]:
+    """chat_settings.language → a human directive, or None for auto/mirror."""
+    lang = (str(cs.get("language") or "auto")).strip().lower()
+    if lang in ("", "auto"):
+        return None
+    if lang == "other":
+        return (str(cs.get("language_other") or "")).strip() or None
+    return _CHAT_LANG_LABELS.get(lang) or lang
+
+
+def _chat_language_lead(cs: dict[str, Any]) -> str:
+    """One forceful line placed at the very TOP of the prompt (primacy) — the
+    detailed block repeats at the end (recency) so the rule survives a persona
+    that is itself written entirely in Hinglish/Hindi."""
+    resolved = _resolve_chat_language(cs)
+    if resolved:
+        return (
+            f"⚠️ LANGUAGE RULE (overrides everything below): write EVERY message in {resolved}, "
+            "no matter what language the visitor types in. Ignore any 'speak Hindi/Hinglish' style "
+            "in the persona or brief — that is for phone calls.\n\n"
+        )
+    return (
+        "⚠️ LANGUAGE RULE (overrides everything below): reply in the EXACT language the visitor "
+        "types in (English→English, हिंदी→हिंदी). Do NOT default to Hindi or Hinglish from your "
+        "persona — that is a phone habit, not for text. Greet in English until they type.\n\n"
+    )
+
+
+def _chat_language_block(cs: dict[str, Any]) -> str:
+    resolved = _resolve_chat_language(cs)
+    if resolved:
+        return (
+            "\n━━━ LANGUAGE (text chat — highest priority) ━━━\n"
+            f"Write EVERY reply in {resolved}, regardless of what language the visitor types in. "
+            "This is the chat channel's set language and it OVERRIDES any \"speak in …\" / Hindi / "
+            "Hinglish instruction in your persona or brief (those are for PHONE calls only). Stay in "
+            f"{resolved} for the entire conversation."
+        )
+    return (
+        "\n━━━ LANGUAGE (text chat — highest priority) ━━━\n"
+        "Reply in the SAME language AND script the visitor is typing in — match them exactly "
+        "(English→English, हिंदी→हिंदी, Roman-Hindi/Hinglish→Hinglish, বাংলা→বাংলা). Do NOT switch "
+        "to Hindi or Hinglish just because your persona sounds Indian — that is a phone-call habit "
+        "and does NOT apply to text chat. Lock onto the visitor's language from their FIRST typed "
+        "message and never drift mid-conversation unless THEY switch. Your opening greeting (before "
+        "they've typed anything) should be in English. Explicitly ignore any \"respond in "
+        "Hindi/Hinglish\" directive in the persona or brief — it applies to the voice channel only."
+    )
+
+
 def _agent_chat_system_prompt(agent: dict[str, Any]) -> str:
     """Chat-NATIVE system prompt. Reuses the SHARED brain — persona, business
     facts/knowledge, guardrails, outcome catalogue and extraction schema — but
@@ -1630,6 +1696,9 @@ def _agent_chat_system_prompt(agent: dict[str, Any]) -> str:
     # brief) — chat_settings.instructions. Capped so it can't bloat the prompt.
     _cs = agent.get("chat_settings") if isinstance(agent.get("chat_settings"), dict) else {}
     chat_instr = _gb._substitute_variables((str(_cs.get("instructions") or "").strip())[:1500], variables)
+    # Resolve the chat-specific language directive NOW — `_cs` is shadowed below.
+    lang_lead = _chat_language_lead(_cs)
+    lang_block = _chat_language_block(_cs)
     business = (_gb._format_business_facts_for_prompt(agent) or "").strip()
     dos, donts = _gb._format_policy_for_prompt(agent)
     outcomes_csv = ", ".join(agent.get("outcomes") or ["resolved", "callback_requested", "not_interested"])
@@ -1645,6 +1714,7 @@ def _agent_chat_system_prompt(agent: dict[str, Any]) -> str:
     guards = "\n".join(guard_lines) if guard_lines else "  - (none specified)"
 
     parts = [
+        lang_lead +
         f"You are {name}, helping a website visitor over TEXT CHAT. The visitor TYPES and "
         f"READS — this is NOT a phone call. Never use spoken-call language (\"speak\", "
         f"\"I hear you\", \"say that again\", \"on the line\", \"hold while I check\") and "
@@ -1652,7 +1722,7 @@ def _agent_chat_system_prompt(agent: dict[str, Any]) -> str:
         "\nHOW YOU CHAT:\n"
         "• Concise and skimmable — usually 1-3 short sentences. Break long info into short "
         "lines or a tight list; no walls of text.\n"
-        "• Warm, professional, on-brand. Mirror the visitor's language.\n"
+        "• Warm, professional, on-brand. Match the visitor's language exactly (see LANGUAGE).\n"
         "• Ask ONE thing at a time — unless you use a form to collect several details at once.\n"
         "• Use the on-screen widgets (buttons / forms / cards — see CHAT UI) when they save "
         "the visitor typing.\n"
@@ -1678,6 +1748,9 @@ def _agent_chat_system_prompt(agent: dict[str, Any]) -> str:
         parts.append(f"\n━━━ YOUR BRIEF ━━━\n{agent_prompt.strip()}")
     if chat_instr.strip():
         parts.append(f"\n━━━ CHAT-ONLY INSTRUCTIONS (operator) ━━━\n{chat_instr.strip()}")
+    # Placed AFTER the (voice-derived) brief so it wins on recency over any
+    # "speak Hinglish/Hindi" directive baked into the shared persona/system_prompt.
+    parts.append(lang_block)
     if business:
         parts.append("\n" + business)
     parts.append(f"\n━━━ RULES ━━━\n{guards}")

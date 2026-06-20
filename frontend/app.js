@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 288;
+const SXAI_BUILD = 289;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -10959,6 +10959,8 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
     launcher_text: _cs0.launcher_text || "",
     welcome_message: _cs0.welcome_message || "",
     instructions: _cs0.instructions || "",
+    language: _cs0.language || "auto",
+    language_other: _cs0.language_other || "",
     allowed_domains: Array.isArray(_cs0.allowed_domains) ? _cs0.allowed_domains.join(", ") : "",
     privacy_note: _cs0.privacy_note || "",
   });
@@ -11091,6 +11093,32 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
                       onInput=${(e) => setChatField("instructions", e.target.value)}></textarea>
             <span class="db-form-help">✨ Auto-drafted from your industry, business context and what this agent captures — edit or clear it freely.</span>
           </label>
+          <div class="chatcfg-grid">
+            <label class="db-form-field">
+              <span class="db-form-label">Chat language</span>
+              <select class="db-input" value=${chatCfg.language}
+                      onChange=${(e) => setChatField("language", e.target.value)}>
+                <option value="auto">Auto — match the visitor's language</option>
+                <option value="en">English</option>
+                <option value="hi">Hindi (हिंदी)</option>
+                <option value="hinglish">Hinglish (Roman)</option>
+                <option value="bn">Bengali (বাংলা)</option>
+                <option value="ta">Tamil (தமிழ்)</option>
+                <option value="te">Telugu (తెలుగు)</option>
+                <option value="mr">Marathi (मराठी)</option>
+                <option value="other">Other…</option>
+              </select>
+              <span class="db-form-help">Text chat sets its own language — it does not inherit the phone line's. Auto replies in whatever language the visitor types.</span>
+            </label>
+            ${chatCfg.language === "other" ? html`
+              <label class="db-form-field">
+                <span class="db-form-label">Language name</span>
+                <input class="db-input" type="text" placeholder="e.g. Gujarati, Kannada, Spanish"
+                       value=${chatCfg.language_other}
+                       onInput=${(e) => setChatField("language_other", e.target.value)} />
+              </label>
+            ` : ""}
+          </div>
           <div class="chatcfg-head" style=${{ marginTop: "16px" }}>Trust &amp; privacy</div>
           <div class="chatcfg-grid">
             <label class="db-form-field">
