@@ -118,7 +118,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 293
+APP_BUILD = 294
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -2471,6 +2471,7 @@ async def ws_session(ws: WebSocket) -> None:
                     user_id=user_id, sid=sid,
                     send_kickoff=(qp.get("kickoff") != "0"),
                     preview=(qp.get("preview") == "1"),
+                    resume=(qp.get("resume") == "1"),
                 )
         elif text_only:
             from . import chat_bridge
@@ -3118,6 +3119,17 @@ async def suggest_chat_instructions(agent_id: int, request: Request) -> dict:
     if not text:
         raise HTTPException(status_code=502, detail="Couldn't generate suggestions right now — try again.")
     return {"instructions": text}
+
+
+@app.post("/api/agents/{agent_id}/chat-starters/suggest")
+async def suggest_chat_starters(agent_id: int, request: Request) -> dict:
+    """LLM-draft 3-4 visitor-voice starter questions for the chat-open chips,
+    grounded in this agent's industry, knowledge and goals (Build 294)."""
+    user = await current_user(request)
+    agent = await _require_agent_owned(agent_id, user)
+    from . import chat_bridge
+    starters = await chat_bridge.generate_chat_starters(agent)
+    return {"starters": starters or []}
 
 
 @app.get("/api/agents/{agent_id}/telephony")

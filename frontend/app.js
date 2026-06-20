@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 293;
+const SXAI_BUILD = 294;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1637,6 +1637,8 @@ function AgentChatEmbed({ slug, contained }) {
   const wsRef = useRef(null);
   const streamingRef = useRef(false);                  // mid model-turn → append tokens
   const logRef = useRef(null);
+  const sidRef = useRef(null);                         // stable per-session id (for resume)
+  const resumeKeyRef = useRef(null);                   // sessionStorage key, null in preview
 
   useEffect(() => {
     if (!slug) return;
@@ -1651,18 +1653,43 @@ function AgentChatEmbed({ slug, contained }) {
     // Per-agent appearance (channel-specific presentation; brain stays shared).
     const cs = agent.chat_settings || {};
     const welcome = (cs.welcome_message || "").trim();
-    // A configured welcome message is the instant opener → skip the model's
-    // kickoff greeting (saves a model call, avoids a double greeting).
-    if (welcome) setMessages([{ role: "model", text: welcome }]);
+    // Conversation resume (Build 294): on a page refresh, restore the prior
+    // transcript from sessionStorage and reconnect — the model is re-seeded
+    // with that history so context carries. Skipped in the operator preview.
+    const resumeKey = `sxai_resume_${agent.id}`;
+    let restored = null;
+    if (!contained) {
+      try {
+        const raw = sessionStorage.getItem(resumeKey);
+        const obj = raw ? JSON.parse(raw) : null;
+        // Only resume a recent, non-trivial conversation (< 2h, has real turns).
+        if (obj && obj.sid && Array.isArray(obj.messages) && obj.messages.some((m) => m.role === "user")
+            && (Date.now() - (obj.ts || 0)) < 2 * 3600 * 1000) restored = obj;
+      } catch {}
+    }
+    resumeKeyRef.current = contained ? null : resumeKey;
+    if (restored) setMessages(restored.messages);
+    else if (welcome) setMessages([{ role: "model", text: welcome }]);
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    const sid = `chat-${Math.random().toString(36).slice(2)}`;
+    const sid = restored ? restored.sid : `chat-${Math.random().toString(36).slice(2)}`;
+    sidRef.current = sid;
     const locale = (navigator.language || "en-US");
-    const kickoff = welcome ? "&kickoff=0" : "";
+    // Resume + configured-welcome both skip the model kickoff greeting.
+    const kickoff = (welcome || restored) ? "&kickoff=0" : "";
+    const resumeQ = restored ? "&resume=1" : "";
     const host = (() => { try { return new URLSearchParams(location.search).get("host") || ""; } catch { return ""; } })();
     const hostQ = host ? `&host=${encodeURIComponent(host)}` : "";
     const previewQ = contained ? "&preview=1" : "";   // operator preview — don't log it
-    const ws = new WebSocket(`${proto}://${location.host}/ws/session?mode=chat&agent_id=${agent.id}&sid=${sid}&locale=${encodeURIComponent(locale)}${kickoff}${hostQ}${previewQ}`);
+    const ws = new WebSocket(`${proto}://${location.host}/ws/session?mode=chat&agent_id=${agent.id}&sid=${sid}&locale=${encodeURIComponent(locale)}${kickoff}${resumeQ}${hostQ}${previewQ}`);
     wsRef.current = ws;
+    if (restored) {
+      ws.onopen = () => {
+        const history = (restored.messages || [])
+          .filter((m) => m.role === "user" || m.role === "model")
+          .slice(-20).map((m) => ({ role: m.role, text: m.text }));
+        try { ws.send(JSON.stringify({ type: "resume", history })); } catch {}
+      };
+    }
     ws.onmessage = (ev) => {
       let m; try { m = JSON.parse(ev.data); } catch { return; }
       if (m.type === "ready") setStatus("ready");
@@ -1716,6 +1743,20 @@ function AgentChatEmbed({ slug, contained }) {
   useEffect(() => {
     try { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; } catch {}
   }, [messages, thinking]);
+
+  // Persist the transcript for resume-after-refresh (real chats only). Cleared
+  // when the chat ends (no point resuming a finished conversation).
+  useEffect(() => {
+    const key = resumeKeyRef.current;
+    if (!key) return;
+    try {
+      if (status === "ended") { sessionStorage.removeItem(key); return; }
+      if (messages.some((m) => m.role === "user")) {
+        const keep = messages.filter((m) => m.role === "user" || m.role === "model" || m.role === "human").slice(-30);
+        sessionStorage.setItem(key, JSON.stringify({ sid: sidRef.current, messages: keep, ts: Date.now() }));
+      }
+    } catch {}
+  }, [messages, status]);
 
   const send = (e, text) => {
     e?.preventDefault();
@@ -1780,6 +1821,11 @@ function AgentChatEmbed({ slug, contained }) {
   const avatarUrl = (cs.avatar_url || "").trim();
   const rootStyle = accent ? { "--chat-accent": accent } : {};
 
+  // Suggested starter chips — shown on open until the visitor sends anything.
+  const starters = Array.isArray(cs.starters) ? cs.starters.filter((s) => typeof s === "string" && s.trim()).slice(0, 4) : [];
+  const hasUserMsg = messages.some((m) => m.role === "user");
+  const showStarters = starters.length && status === "ready" && !hasUserMsg && !humanAgent && !csat && !activeForm && !quickReplies.length;
+
   return html`
     <div class=${"chatembed" + (contained ? " chatembed-contained" : "")} style=${rootStyle}>
       <header class="chatembed-head">
@@ -1816,6 +1862,13 @@ function AgentChatEmbed({ slug, contained }) {
         ${status === "error" && messages.length === 0
           ? html`<div class="chatembed-empty">${err || "Chat is unavailable right now."}</div>` : ""}
       </div>
+      ${showStarters ? html`
+        <div class="chatembed-chips chatembed-starters">
+          ${starters.map((q, i) => html`
+            <button key=${i} type="button" class="chatembed-chip" onClick=${() => send(null, q)}>${q}</button>
+          `)}
+        </div>
+      ` : ""}
       ${quickReplies.length && status === "ready" ? html`
         <div class="chatembed-chips">
           ${quickReplies.map((q, i) => html`
@@ -11097,6 +11150,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
     language_other: _cs0.language_other || "",
     teaser: _cs0.teaser || "",
     teaser_delay: _cs0.teaser_delay || 8,
+    starters: Array.isArray(_cs0.starters) ? _cs0.starters.join("\n") : "",
     allowed_domains: Array.isArray(_cs0.allowed_domains) ? _cs0.allowed_domains.join(", ") : "",
     privacy_note: _cs0.privacy_note || "",
   });
@@ -11106,7 +11160,11 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   const saveChatCfg = async () => {
     setChatCfgSaving(true);
     try {
-      const payload = { ...chatCfg, allowed_domains: chatCfg.allowed_domains.split(",").map((s) => s.trim()).filter(Boolean) };
+      const payload = {
+        ...chatCfg,
+        allowed_domains: chatCfg.allowed_domains.split(",").map((s) => s.trim()).filter(Boolean),
+        starters: (chatCfg.starters || "").split("\n").map((s) => s.trim()).filter(Boolean).slice(0, 4),
+      };
       const r = await fetch(`/api/agents/${agent.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ chat_settings: payload }),
@@ -11183,6 +11241,16 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasChat]);
+
+  // Suggested starter questions — auto-draft from the agent's brain.
+  const [suggestingStarters, setSuggestingStarters] = useState(false);
+  const suggestStarters = async () => {
+    setSuggestingStarters(true);
+    try {
+      const r = await fetch(`/api/agents/${agent.id}/chat-starters/suggest`, { method: "POST" });
+      if (r.ok) { const d = await r.json(); if (d && Array.isArray(d.starters) && d.starters.length) setChatField("starters", d.starters.join("\n")); }
+    } catch { /* leave as-is */ } finally { setSuggestingStarters(false); }
+  };
 
   const chatAttrs = [`data-agent="${agent.slug || agent.id}"`, `data-channel="chat"`];
   if (embedPosition !== "bottom-right") chatAttrs.push(`data-position="${embedPosition}"`);
@@ -11277,6 +11345,18 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
                       value=${chatCfg.instructions}
                       onInput=${(e) => setChatField("instructions", e.target.value)}></textarea>
             <span class="db-form-help">✨ Auto-drafted from your industry, business context and what this agent captures — edit or clear it freely. ${(chatCfg.instructions || "").length} characters.</span>
+          </label>
+          <label class="db-form-field">
+            <span class="db-form-label" style=${{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span>Suggested questions <span class="db-form-opt">(shown as tappable chips on open — one per line, up to 4)</span></span>
+              <button type="button" class="db-btn-ghost db-btn-sm" style=${{ marginLeft: "auto" }} onClick=${suggestStarters} disabled=${suggestingStarters}>
+                ${suggestingStarters ? "✨ Drafting…" : "✨ Suggest"}
+              </button>
+            </span>
+            <textarea class="db-input" rows="3"
+                      placeholder=${`Book a test drive\nSee pricing\nWhat are your hours?`}
+                      value=${chatCfg.starters}
+                      onInput=${(e) => setChatField("starters", e.target.value)}></textarea>
           </label>
           <div class="chatcfg-grid">
             <label class="db-form-field">

@@ -1915,6 +1915,54 @@ async def generate_chat_instructions(agent: dict[str, Any]) -> Optional[str]:
         return (txt.strip()[:1500]) or None
 
 
+async def generate_chat_starters(agent: dict[str, Any]) -> Optional[list[str]]:
+    """Draft 3-4 short suggested starter questions (in the VISITOR's voice) shown
+    as tappable chips when the chat opens — grounded in this business's industry,
+    knowledge and goals. None on failure (the UI just shows nothing)."""
+    name = agent.get("name") or "the agent"
+    sector = agent.get("sector") or "general"
+    variables = agent.get("variables") or {}
+    persona = _gb._substitute_variables(agent.get("persona") or "", variables)
+    business = (_gb._format_business_facts_for_prompt(agent) or "").strip()
+    try:
+        purpose = (_gb._format_purpose_for_prompt(agent) or "").strip()
+    except Exception:  # noqa: BLE001
+        purpose = ""
+    outcomes = ", ".join(agent.get("outcomes") or [])
+    system = (
+        "You write SUGGESTED STARTER QUESTIONS for a business's website chat — the "
+        "tappable chips a visitor sees the moment they open the chat. Write 3-4, in "
+        "the VISITOR'S voice (first person — what THEY would ask), each SHORT (2-6 "
+        "words), specific to what THIS business can actually help with (book, pricing, "
+        "availability, product/service info, support). No greetings, no emoji, no "
+        "duplicates, no trailing period. Output STRICT JSON: "
+        "{\"starters\": [\"...\", \"...\", \"...\"]}"
+    )
+    ctx = [
+        f"Business / agent: {name}", f"Industry: {sector}",
+        (f"Persona: {persona}" if persona else ""),
+        business, purpose,
+        (f"Goals it drives toward: {outcomes}" if outcomes else ""),
+    ]
+    prompt = "\n\n".join(c for c in ctx if c and c.strip())
+    txt, _model = await _best_generate(system, prompt, temperature=0.6)
+    if not txt:
+        return None
+    try:
+        m = _re.search(r"\{.*\}", txt, _re.S)
+        data = json.loads(m.group(0)) if m else {}
+        out: list[str] = []
+        for s in (data.get("starters") or []):
+            s = str(s).strip().strip('"').rstrip(".").strip()[:60]
+            if s and s.lower() not in [o.lower() for o in out]:
+                out.append(s)
+            if len(out) >= 4:
+                break
+        return out or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 async def run_agent_chat_session(
     ws: WebSocket,
     agent_id: int,
@@ -1925,6 +1973,7 @@ async def run_agent_chat_session(
     sid: Optional[str] = None,
     send_kickoff: bool = True,
     preview: bool = False,
+    resume: bool = False,
 ) -> None:
     from datetime import datetime, timezone
     from . import connectors as _conn
@@ -2148,10 +2197,38 @@ async def run_agent_chat_session(
     await _send_json({"type": "ready", "model": CHAT_MODEL, "kind": "agent",
                       "agent": {"id": agent.get("id"), "name": agent.get("name")}})
 
+    # Resume after a page refresh (Build 294): the embed replays its stored
+    # transcript so the agent keeps context. Recreate the chat seeded with that
+    # history — MODEL context only, NOT `memory`, so the continuation logs just
+    # the new turns instead of duplicating the prior call row.
+    resumed_ok = False
+    if resume:
+        try:
+            rmsg = await asyncio.wait_for(ws.receive(), timeout=5)
+            if rmsg.get("type") != "websocket.disconnect" and rmsg.get("text"):
+                rd = json.loads(rmsg["text"])
+                if rd.get("type") == "resume" and isinstance(rd.get("history"), list):
+                    hist = []
+                    for h in rd["history"][-20:]:
+                        if not isinstance(h, dict):
+                            continue
+                        role = "user" if h.get("role") == "user" else "model"
+                        txt = str(h.get("text") or "").strip()[:2000]
+                        if txt:
+                            hist.append(types.Content(role=role, parts=[types.Part(text=txt)]))
+                    if hist:
+                        chat = client.aio.chats.create(model=CHAT_MODEL, config=config, history=hist)
+                        resumed_ok = True
+        except (asyncio.TimeoutError, WebSocketDisconnect):
+            pass
+        except Exception as e:  # noqa: BLE001
+            log.warning("agent-chat[%s] resume seed failed: %s", agent_id, e)
+
     # Kickoff: the universal system prompt greets on <call_start>. Skipped
     # when the embed shows a configured static welcome message instead (saves
-    # a model call and avoids a double-greeting).
-    if send_kickoff:
+    # a model call and avoids a double-greeting), and on resume (context is
+    # already there).
+    if send_kickoff and not resumed_ok:
         try:
             greeting = await _run_model_turn(
                 chat=chat, handlers=handlers, send_json=_send_json,
@@ -2384,8 +2461,10 @@ async def run_agent_chat_session(
             inject_task.cancel()
         # Fallback: visitor closed the tab without the model wrapping up via
         # end_call. Persist a transcript-derived row so the chat still logs.
-        # Skip entirely for the operator's in-dashboard preview.
-        if not persisted["done"] and not preview:
+        # Skip entirely for the operator's in-dashboard preview, and for a
+        # resumed session that added no new turns (just a refresh → don't log
+        # an empty duplicate; the prior session already persisted).
+        if not persisted["done"] and not preview and not (resumed_ok and turns_used == 0):
             await _persist_agent_chat(agent, memory, started_at, usage)
 
 
