@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 290;
+const SXAI_BUILD = 291;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -11148,6 +11148,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   if (chatCfg.launcher_text.trim()) chatAttrs.push(`data-label="${chatCfg.launcher_text.replace(/"/g, "'")}"`);
   const chatSnippet = `<script src="${embedOrigin}/static/embed.js" ${chatAttrs.join(" ")}></script>`;
   const [chatCopied, setChatCopied] = useState(false);
+  const [embedOpen, setEmbedOpen] = useState(false);   // top-right embed-code flyout
   const copyChatSnippet = async () => {
     try { await navigator.clipboard.writeText(chatSnippet); setChatCopied(true); setTimeout(() => setChatCopied(false), 1800); }
     catch {}
@@ -11174,16 +11175,6 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
       ${hasChat ? html`
         <div class="chatcfg-layout">
         <div class="chatcfg-main">
-        <p class="golive-embed-hint">Paste one line on any site — visitors chat with ${agent.name} by text.</p>
-        <div class="db-embed-snippet"><code>${chatSnippet}</code></div>
-        <div class="db-actions-row">
-          <button type="button" class=${"db-btn-primary " + (chatCopied ? "is-copied" : "")} onClick=${copyChatSnippet}>
-            ${chatCopied
-              ? html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg><span>Copied!</span>`
-              : html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy snippet</span>`}
-          </button>
-          <a class="db-btn-ghost" href=${`/embed/${agent.slug || agent.id}?channel=chat`} target="_blank" rel="noopener">Open chat preview →</a>
-        </div>
         <div class="chatcfg">
           <div class="chatcfg-head">Appearance</div>
           <div class="chatcfg-grid">
@@ -11348,12 +11339,44 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
     </section>
   ` : "";
 
+  const embedFlyout = html`
+    <div class="chatembed-codeflyout" onClick=${(e) => e.stopPropagation()}>
+      <div class="chatembed-codeflyout-head">
+        <strong>Embed on your website</strong>
+        <button class="db-modal-close" onClick=${() => setEmbedOpen(false)} aria-label="Close">×</button>
+      </div>
+      <p class="db-form-help">Paste this one line on any page — visitors chat with ${agent.name} by text.</p>
+      <div class="db-embed-snippet"><code>${chatSnippet}</code></div>
+      <div class="db-actions-row">
+        <button type="button" class=${"db-btn-primary db-btn-sm " + (chatCopied ? "is-copied" : "")} onClick=${copyChatSnippet}>
+          ${chatCopied
+            ? html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg><span>Copied!</span>`
+            : html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy snippet</span>`}
+        </button>
+        <a class="db-btn-ghost db-btn-sm" href=${`/embed/${agent.slug || agent.id}?channel=chat`} target="_blank" rel="noopener">Open preview →</a>
+      </div>
+    </div>
+  `;
+
   const chatTabs = hasChat ? html`
-    <div class="db-tabs chatpage-tabs">
-      <button class=${"db-tab" + (chatTab === "settings" ? " is-active" : "")} onClick=${() => setChatTab("settings")}>Settings</button>
-      <button class=${"db-tab" + (chatTab === "conversations" ? " is-active" : "")} onClick=${() => setChatTab("conversations")}>
-        Conversations${liveChats.length > 0 ? html` <span class="db-pill-live">🟢 ${liveChats.length}</span>` : ""}
-      </button>
+    <div class="chatpage-tabbar">
+      <div class="db-tabs chatpage-tabs">
+        <button class=${"db-tab" + (chatTab === "settings" ? " is-active" : "")} onClick=${() => setChatTab("settings")}>Settings</button>
+        <button class=${"db-tab" + (chatTab === "conversations" ? " is-active" : "")} onClick=${() => setChatTab("conversations")}>
+          Conversations${liveChats.length > 0 ? html` <span class="db-pill-live">🟢 ${liveChats.length}</span>` : ""}
+        </button>
+      </div>
+      <div class="chatembed-codeanchor">
+        <button type="button" class=${"db-btn-primary db-btn-sm chatembed-codebtn" + (embedOpen ? " is-open" : "")}
+                onClick=${() => setEmbedOpen((o) => !o)}>
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          <span>Embed code</span>
+        </button>
+        ${embedOpen ? html`
+          <div class="chatembed-codebackdrop" onClick=${() => setEmbedOpen(false)}></div>
+          ${embedFlyout}
+        ` : ""}
+      </div>
     </div>
   ` : "";
 

@@ -1273,6 +1273,24 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 .db-tab.is-active { color: var(--db-accent, #4f46e5); border-bottom-color: var(--db-accent, #4f46e5); }
 .db-pill-live { display: inline-block; font-size: 11px; font-weight: 700; color: #047857;
   background: rgba(16,185,129,0.12); border-radius: 999px; padding: 1px 8px; vertical-align: middle; }
+
+/* Tab bar with a top-right "Embed code" flyout (Build 291) */
+.chatpage-tabbar { display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 12px; margin-bottom: 16px; border-bottom: 1px solid var(--border, #e6e8ef); }
+.chatpage-tabbar .db-tabs { margin-bottom: 0; border-bottom: none; }
+.chatembed-codeanchor { position: relative; padding-bottom: 6px; }
+.chatembed-codebtn { display: inline-flex; align-items: center; gap: 6px; }
+.chatembed-codebtn.is-open { box-shadow: 0 0 0 3px rgba(79,70,229,0.18); }
+.chatembed-codebackdrop { position: fixed; inset: 0; z-index: 55; }
+.chatembed-codeflyout { position: absolute; top: calc(100% + 4px); right: 0; z-index: 60;
+  width: min(440px, calc(100vw - 96px)); background: var(--db-card-bg, #ffffff);
+  border: 1px solid var(--border, #e6e8ef); border-radius: 12px;
+  box-shadow: 0 14px 44px rgba(15,23,42,0.18); padding: 14px; text-align: left; }
+.chatembed-codeflyout-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.chatembed-codeflyout-head strong { font-size: 14px; color: var(--fg, #1a1c25); }
+.chatembed-codeflyout .db-embed-snippet { margin: 8px 0; max-width: 100%; overflow: hidden; }
+.chatembed-codeflyout .db-embed-snippet code { white-space: pre-wrap; word-break: break-all; }
+:root[data-theme="dark"] .chatembed-codeflyout { background: var(--db-card-bg, #14171f); border-color: #2a2f3d; }
 .call-row-clickable, .livechat-live-row { cursor: pointer; transition: background .12s; }
 .call-row-clickable:hover, .livechat-live-row:hover { background: var(--bg-1, #f7f8fa); }
 .livechat-live-row { border-left: 3px solid #10b981; }
