@@ -1319,16 +1319,18 @@ async def get_invite_by_token(token: str) -> Optional[dict[str, Any]]:
 
 
 async def list_pending_invites(org_id: int) -> list[dict[str, Any]]:
-    """Active invites only — not accepted, declined, revoked, or expired."""
+    """Open invites — not accepted, declined or revoked. INCLUDES expired ones
+    (Build 287) so the UI can offer regenerate/delete; `token` is returned so the
+    invite link can be copied. Caller/UI flags expiry via `expires_at`."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         rs = await conn.fetch(
             """
-            SELECT id, org_id, email, role, invited_by, expires_at, created_at
+            SELECT id, org_id, email, role, invited_by, token, expires_at, created_at,
+                   (expires_at <= now()) AS expired
               FROM org_invites
              WHERE org_id = $1
                AND accepted_at IS NULL AND declined_at IS NULL AND revoked_at IS NULL
-               AND expires_at > now()
              ORDER BY id DESC
             """,
             org_id,

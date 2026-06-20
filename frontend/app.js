@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 286;
+const SXAI_BUILD = 287;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -12319,12 +12319,14 @@ function TeamPage({ onNav, org, currentUser }) {
       },
     });
   };
-  const onRevokeInvite = (id, email) => {
+  const onRevokeInvite = (id, email, expired) => {
     setConfirmAction({
       kind: "revoke_invite",
-      title: "Revoke invite?",
-      body: html`The link sent to <strong>${email || "this teammate"}</strong> will stop working. They won't be notified — you can send a fresh invite anytime.`,
-      confirmLabel: "Revoke",
+      title: expired ? "Delete invite?" : "Revoke invite?",
+      body: expired
+        ? html`Remove the expired invite for <strong>${email || "this teammate"}</strong> from the list. To re-invite them, use Regenerate instead.`
+        : html`The link sent to <strong>${email || "this teammate"}</strong> will stop working. They won't be notified — you can send a fresh invite anytime.`,
+      confirmLabel: expired ? "Delete" : "Revoke",
       onConfirm: async () => {
         const r = await fetch(`/api/org/invites/${id}`, { method: "DELETE" });
         if (!r.ok) throw new Error(`Failed (${r.status})`);
@@ -12332,6 +12334,49 @@ function TeamPage({ onNav, org, currentUser }) {
         await refresh();
       },
     });
+  };
+
+  // Copy the join link for an invite. Token comes straight from the list now
+  // (Build 287) so no extra round-trip is needed.
+  const [copiedId, setCopiedId] = useState(null);
+  const copyInviteLink = async (inv) => {
+    const url = `${location.origin}/invite/${inv.token}`;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch (_e) {
+      // Fallback for non-secure contexts / older browsers
+      const ta = document.createElement("textarea");
+      ta.value = url; document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); } catch (_e2) {}
+      document.body.removeChild(ta);
+    }
+    setCopiedId(inv.id);
+    setTimeout(() => setCopiedId((c) => (c === inv.id ? null : c)), 1800);
+  };
+
+  // Regenerate an expired invite: revoke the stale one, then mint a fresh
+  // invite for the same email + role. Reuses the existing endpoints so there's
+  // no special-case backend path.
+  const [busyInvite, setBusyInvite] = useState(null);
+  const onRegenerateInvite = async (inv) => {
+    setBusyInvite(inv.id);
+    try {
+      await fetch(`/api/org/invites/${inv.id}`, { method: "DELETE" });
+      const r = await fetch("/api/org/invites", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: inv.email, role: inv.role }),
+      });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        alert(e.detail?.message || e.detail || `Failed (${r.status})`);
+      }
+    } catch (e) {
+      alert(String(e));
+    } finally {
+      setBusyInvite(null);
+      await refresh();
+    }
   };
 
   const body = html`
@@ -12422,20 +12467,40 @@ function TeamPage({ onNav, org, currentUser }) {
                     <tr>
                       <th>Email</th>
                       <th>Role</th>
-                      <th>Expires</th>
+                      <th>Invite link</th>
+                      <th>Status</th>
                       ${canManage ? html`<th></th>` : null}
                     </tr>
                   </thead>
                   <tbody>
                     ${invites.map((i) => html`
-                      <tr key=${i.id}>
+                      <tr key=${i.id} class=${i.expired ? "db-invite-expired" : ""}>
                         <td>${i.email}</td>
                         <td><span class="db-role-tag db-role-${i.role}">${i.role}</span></td>
-                        <td class="db-muted">${new Date(i.expires_at).toLocaleDateString()}</td>
+                        <td>
+                          ${i.expired ? html`
+                            <span class="db-muted">— link expired —</span>
+                          ` : html`
+                            <button class="db-btn-copy" onClick=${() => copyInviteLink(i)} title="Copy invite link">
+                              ${copiedId === i.id ? "✓ Copied" : "Copy link"}
+                            </button>
+                          `}
+                        </td>
+                        <td>
+                          ${i.expired
+                            ? html`<span class="db-pill-warn">Expired ${new Date(i.expires_at).toLocaleDateString()}</span>`
+                            : html`<span class="db-muted">Expires ${new Date(i.expires_at).toLocaleDateString()}</span>`}
+                        </td>
                         ${canManage ? html`
                           <td class="db-row-actions">
-                            <button class="db-btn-ghost-danger" onClick=${() => onRevokeInvite(i.id, i.email)}>
-                              Revoke
+                            ${i.expired ? html`
+                              <button class="db-btn-ghost" disabled=${busyInvite === i.id}
+                                onClick=${() => onRegenerateInvite(i)}>
+                                ${busyInvite === i.id ? "Regenerating…" : "Regenerate"}
+                              </button>
+                            ` : null}
+                            <button class="db-btn-ghost-danger" onClick=${() => onRevokeInvite(i.id, i.email, i.expired)}>
+                              ${i.expired ? "Delete" : "Revoke"}
                             </button>
                           </td>
                         ` : null}
