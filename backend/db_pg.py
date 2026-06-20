@@ -693,6 +693,11 @@ async def insert_call(record: dict[str, Any]) -> int:
     duration_s = float(record.get("duration_s") or 0)
     minutes = duration_s / 60.0
     outcome_key = record.get("outcome") or "unknown"
+    # Build 286 — web_chat calls land in `calls` (queryable per-channel for the
+    # Chat page) but are kept OUT of the voice/phone rollups so the Outcomes
+    # dashboard + agent stats stay channel-pure. Cost still goes to the llm_calls
+    # ledger. The Chat page computes its own stats directly from `calls`.
+    is_chat = (record.get("channel") == "web_chat")
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -809,46 +814,47 @@ async def insert_call(record: dict[str, Any]) -> int:
                 in_tok, out_tok, record.get("cached_tokens"),
                 model_id, cost,
             )
-            # agent_daily_stats — ON CONFLICT do atomic increment. Outcomes
-            # JSONB gets merged: existing[outcome] + 1.
-            await conn.execute(
-                """
-                INSERT INTO agent_daily_stats AS s (
-                    agent_id, day, calls, minutes, input_tokens, output_tokens,
-                    cost_paise, outcomes
-                )
-                VALUES ($1, current_date, 1, $2, COALESCE($3,0), COALESCE($4,0),
-                         COALESCE($5,0), jsonb_build_object($6::text, 1))
-                ON CONFLICT (agent_id, day) DO UPDATE SET
-                  calls         = s.calls + 1,
-                  minutes       = s.minutes + EXCLUDED.minutes,
-                  input_tokens  = s.input_tokens + COALESCE(EXCLUDED.input_tokens, 0),
-                  output_tokens = s.output_tokens + COALESCE(EXCLUDED.output_tokens, 0),
-                  cost_paise    = s.cost_paise + COALESCE(EXCLUDED.cost_paise, 0),
-                  outcomes      = jsonb_set(
-                    s.outcomes,
-                    ARRAY[$6::text],
-                    to_jsonb(COALESCE((s.outcomes->>$6)::int, 0) + 1)
-                  )
-                """,
-                int(record["agent_id"]), minutes, in_tok, out_tok, cost, outcome_key,
-            )
-            if org_id is not None:
+            if not is_chat:
+                # agent_daily_stats — ON CONFLICT do atomic increment. Outcomes
+                # JSONB gets merged: existing[outcome] + 1.
                 await conn.execute(
                     """
-                    INSERT INTO org_daily_stats AS s (
-                        org_id, day, calls, minutes, input_tokens, output_tokens, cost_paise
+                    INSERT INTO agent_daily_stats AS s (
+                        agent_id, day, calls, minutes, input_tokens, output_tokens,
+                        cost_paise, outcomes
                     )
-                    VALUES ($1, current_date, 1, $2, COALESCE($3,0), COALESCE($4,0), COALESCE($5,0))
-                    ON CONFLICT (org_id, day) DO UPDATE SET
+                    VALUES ($1, current_date, 1, $2, COALESCE($3,0), COALESCE($4,0),
+                             COALESCE($5,0), jsonb_build_object($6::text, 1))
+                    ON CONFLICT (agent_id, day) DO UPDATE SET
                       calls         = s.calls + 1,
                       minutes       = s.minutes + EXCLUDED.minutes,
                       input_tokens  = s.input_tokens + COALESCE(EXCLUDED.input_tokens, 0),
                       output_tokens = s.output_tokens + COALESCE(EXCLUDED.output_tokens, 0),
-                      cost_paise    = s.cost_paise + COALESCE(EXCLUDED.cost_paise, 0)
+                      cost_paise    = s.cost_paise + COALESCE(EXCLUDED.cost_paise, 0),
+                      outcomes      = jsonb_set(
+                        s.outcomes,
+                        ARRAY[$6::text],
+                        to_jsonb(COALESCE((s.outcomes->>$6)::int, 0) + 1)
+                      )
                     """,
-                    org_id, minutes, in_tok, out_tok, cost,
+                    int(record["agent_id"]), minutes, in_tok, out_tok, cost, outcome_key,
                 )
+                if org_id is not None:
+                    await conn.execute(
+                        """
+                        INSERT INTO org_daily_stats AS s (
+                            org_id, day, calls, minutes, input_tokens, output_tokens, cost_paise
+                        )
+                        VALUES ($1, current_date, 1, $2, COALESCE($3,0), COALESCE($4,0), COALESCE($5,0))
+                        ON CONFLICT (org_id, day) DO UPDATE SET
+                          calls         = s.calls + 1,
+                          minutes       = s.minutes + EXCLUDED.minutes,
+                          input_tokens  = s.input_tokens + COALESCE(EXCLUDED.input_tokens, 0),
+                          output_tokens = s.output_tokens + COALESCE(EXCLUDED.output_tokens, 0),
+                          cost_paise    = s.cost_paise + COALESCE(EXCLUDED.cost_paise, 0)
+                        """,
+                        org_id, minutes, in_tok, out_tok, cost,
+                    )
     return cid
 
 
@@ -1055,31 +1061,45 @@ async def get_call_detail(agent_id: int, call_id: int) -> Optional[dict[str, Any
     return _record_to_dict(r) if r else None
 
 
-async def list_calls_for_agent(agent_id: int, limit: int = 50) -> list[dict[str, Any]]:
+def _channel_filter(channel: Optional[str]) -> str:
+    """SQL fragment for the channel split. channel='web_chat' → chat only;
+    otherwise → exclude chat (voice + phone; NULL legacy rows count as voice)."""
+    if channel == "web_chat":
+        return "AND channel = 'web_chat'"
+    return "AND (channel IS NULL OR channel <> 'web_chat')"
+
+
+async def list_calls_for_agent(agent_id: int, limit: int = 50,
+                               channel: Optional[str] = None) -> list[dict[str, Any]]:
     """Build 217: include the `extracted` JSONB so the call log's
     Tags column can render per-industry chips (party_size, date,
     seating_pref, etc.) without an extra round-trip per row. Payload
-    grows ~150 B per call — trivial at any reasonable list size."""
+    grows ~150 B per call — trivial at any reasonable list size.
+
+    `channel='web_chat'` returns only chat sessions (Chat page); the default
+    returns voice + phone (Call logs), keeping the two surfaces separate."""
+    chf = _channel_filter(channel)
     pool = await get_pool()
     async with pool.acquire() as conn:
         rs = await conn.fetch(
             "SELECT id, agent_id, started_at, ended_at, duration_s, outcome, reason, summary, "
             "       sentiment, lead_quality, lead_signals, extracted, channel "
-            "FROM calls WHERE agent_id = $1 ORDER BY id DESC LIMIT $2",
+            f"FROM calls WHERE agent_id = $1 {chf} ORDER BY id DESC LIMIT $2",
             agent_id, limit,
         )
     return _records_to_list(rs)
 
 
-async def call_stats_for_agent(agent_id: int) -> dict[str, Any]:
+async def call_stats_for_agent(agent_id: int, channel: Optional[str] = None) -> dict[str, Any]:
+    chf = _channel_filter(channel)
     pool = await get_pool()
     async with pool.acquire() as conn:
         total = await conn.fetchval(
-            "SELECT COUNT(*) FROM calls WHERE agent_id = $1", agent_id
+            f"SELECT COUNT(*) FROM calls WHERE agent_id = $1 {chf}", agent_id
         )
         rs = await conn.fetch(
             "SELECT outcome, COUNT(*) AS n FROM calls "
-            "WHERE agent_id = $1 GROUP BY outcome ORDER BY n DESC",
+            f"WHERE agent_id = $1 {chf} GROUP BY outcome ORDER BY n DESC",
             agent_id,
         )
     outcomes = [{"outcome": r["outcome"] or "unknown", "count": r["n"]} for r in rs]

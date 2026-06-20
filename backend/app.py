@@ -118,7 +118,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 285
+APP_BUILD = 286
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1591,15 +1591,17 @@ async def delete_agent(agent_id: int, request: Request) -> dict:
 
 
 @app.get("/api/agents/{agent_id}/stats")
-async def agent_stats(agent_id: int, request: Request) -> dict:
+async def agent_stats(agent_id: int, request: Request, channel: Optional[str] = None) -> dict:
     await _require_agent_owned(agent_id, await current_user(request))
-    return await db.call_stats_for_agent(agent_id)
+    return await db.call_stats_for_agent(agent_id, channel=channel)
 
 
 @app.get("/api/agents/{agent_id}/calls")
-async def agent_calls(agent_id: int, limit: int = 50, request: Request = None) -> list[dict]:
+async def agent_calls(agent_id: int, limit: int = 50, channel: Optional[str] = None, request: Request = None) -> list[dict]:
+    """Default: voice + phone (Call logs). `?channel=web_chat` → chat sessions
+    (Chat-widget page)."""
     await _require_agent_owned(agent_id, await current_user(request))
-    return await db.list_calls_for_agent(agent_id, limit=limit)
+    return await db.list_calls_for_agent(agent_id, limit=limit, channel=channel)
 
 
 @app.get("/api/agents/{agent_id}/calls/{call_id}")

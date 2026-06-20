@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 285;
+const SXAI_BUILD = 286;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -10954,6 +10954,14 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   // Live preview is a real embedded chat session; remount it after Save so it
   // picks up the new appearance/behaviour. Also lets the operator restart it.
   const [previewKey, setPreviewKey] = useState(0);
+  // Chat conversation logs live here (separate from voice/phone Call logs).
+  const [chatLogs, setChatLogs] = useState(null);
+  useEffect(() => {
+    if (!hasChat) return;
+    fetch(`/api/agents/${agent.id}/calls?channel=web_chat&limit=25`)
+      .then((r) => r.json()).then((d) => setChatLogs(Array.isArray(d) ? d : []))
+      .catch(() => setChatLogs([]));
+  }, [hasChat]);
 
   // Chat instructions auto-draft from industry × context × the agent's
   // knowledge schema. Auto-runs once when the field is empty; regenerate on
@@ -11105,6 +11113,32 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
     </section>
   `;
 
+  const chatLogsPanel = hasChat ? html`
+    <section class="db-panel" style=${{ marginTop: "18px" }}>
+      <div class="db-panel-head">
+        <div>
+          <h3 class="db-panel-title">Recent chats</h3>
+          <p class="db-panel-sub">Web-chat conversations log here — separate from voice &amp; phone Call logs.</p>
+        </div>
+      </div>
+      ${chatLogs === null ? html`<div class="db-loading-sm">Loading…</div>`
+        : chatLogs.length === 0 ? html`<div class="db-form-help" style=${{ padding: "10px 0" }}>No chats yet — conversations appear here once visitors start chatting.</div>`
+        : html`<ul class="call-log">
+            ${chatLogs.map((c) => html`
+              <li key=${c.id} class="call-row">
+                <div class="call-row-head">
+                  <span class=${"call-outcome call-outcome-" + (c.outcome || "unknown")}>${(c.outcome || "unknown").replace(/_/g, " ")}</span>
+                  <span class="call-channel call-channel-web_chat">💬 Chat</span>
+                  <span class="call-time">${fmtTime(c.started_at)}</span>
+                  ${c.duration_s ? html`<span class="call-dur">${Math.round(c.duration_s)}s</span>` : ""}
+                </div>
+                ${c.summary ? html`<div class="call-summary">${c.summary}</div>` : ""}
+              </li>
+            `)}
+          </ul>`}
+    </section>
+  ` : "";
+
   return html`
     <${DashboardShell}
       activeKey="chat"
@@ -11114,7 +11148,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
       title="Chat widget"
       subtitle=${`A text version of ${agent.name} for your website — same brain, knowledge and lead capture, no mic.`}
       onNav=${onNav}
-      body=${html`<div class="db-overview chatpage"><div class="golive-focus golive-focus-wide">${chatPanel}</div></div>`}
+      body=${html`<div class="db-overview chatpage"><div class="golive-focus golive-focus-wide">${chatPanel}${chatLogsPanel}</div></div>`}
     />
   `;
 }
