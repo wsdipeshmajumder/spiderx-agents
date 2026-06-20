@@ -53,7 +53,15 @@ async def emit(
     """
     sev = severity if severity in _VALID_SEVERITIES else "info"
     src = source if source in _VALID_SOURCES else "system"
-    payload_json = json.dumps(payload or {}, default=str)
+    # The pool registers a jsonb codec (encoder=json.dumps), so the param MUST
+    # be a NATIVE dict — pre-serialising here double-encodes it (stored as a
+    # jsonb string scalar, breaking SQL `payload->>...` path queries). Round-trip
+    # through json with default=str to drop non-JSON values (datetimes, etc.)
+    # while keeping a plain dict the codec can encode once. See db_pg.py:367.
+    try:
+        payload_obj = json.loads(json.dumps(payload or {}, default=str))
+    except Exception:  # noqa: BLE001
+        payload_obj = {}
     try:
         pool = await _db.get_pool()
         async with pool.acquire() as conn:
@@ -72,7 +80,7 @@ async def emit(
                     RETURNING id
                     """,
                     kind, sev, src, org_id, agent_id, user_id,
-                    title, message, payload_json, dedupe_key,
+                    title, message, payload_obj, dedupe_key,
                 )
                 if row:
                     return int(row["id"])
@@ -90,7 +98,7 @@ async def emit(
                 RETURNING id
                 """,
                 kind, sev, src, org_id, agent_id, user_id,
-                title, message, payload_json,
+                title, message, payload_obj,
             )
             return int(row["id"]) if row else None
     except Exception as e:  # noqa: BLE001
