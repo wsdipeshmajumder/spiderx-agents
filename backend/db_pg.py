@@ -631,6 +631,51 @@ async def list_agents(user_id: int) -> list[dict[str, Any]]:
 
 # ─── calls ───────────────────────────────────────────────────────────────
 
+import re as _re_vk
+
+# Contact-detail keys we'll derive a cross-session recall key from. Phone first
+# (most reliable), then email.
+_VK_PHONE_KEYS = ("phone", "phone_number", "mobile", "contact_number", "caller_phone", "whatsapp")
+_VK_EMAIL_KEYS = ("email", "email_address", "e_mail")
+
+
+def visitor_key_from_extracted(extracted: Any) -> Optional[str]:
+    """Deterministic per-person key from a call's captured contact detail —
+    `tel:<last-10-digits>` or `email:<lowercased>`. None when no usable contact
+    field is present. Region-agnostic (last 10 digits) so +91/0-prefixed and
+    bare forms of the same number collide. Used for identifier-based recall."""
+    if not isinstance(extracted, dict):
+        return None
+    for k in _VK_PHONE_KEYS:
+        v = extracted.get(k)
+        if v:
+            digits = _re_vk.sub(r"\D", "", str(v))
+            if len(digits) >= 10:
+                return "tel:" + digits[-10:]
+    for k in _VK_EMAIL_KEYS:
+        v = extracted.get(k)
+        if v and "@" in str(v):
+            return "email:" + str(v).strip().lower()
+    return None
+
+
+async def recall_visitor_history(agent_id: int, visitor_key: str, *, limit: int = 3) -> list[dict[str, Any]]:
+    """Past calls for this agent by the same person (any channel), newest first.
+    Returns [{started_at, channel, outcome, summary, extracted}]. Empty when the
+    key is missing or there's no history."""
+    if not visitor_key:
+        return []
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rs = await conn.fetch(
+            "SELECT started_at, channel, outcome, summary, extracted "
+            "FROM calls WHERE agent_id = $1 AND visitor_key = $2 "
+            "ORDER BY started_at DESC LIMIT $3",
+            int(agent_id), visitor_key, int(limit),
+        )
+    return _records_to_list(rs)
+
+
 async def insert_call(record: dict[str, Any]) -> int:
     """Inserts a call AND UPSERTs the agent_daily_stats + org_daily_stats
     rollups in the same transaction. If `cost_paise` isn't supplied,
@@ -687,7 +732,7 @@ async def insert_call(record: dict[str, Any]) -> int:
                     input_tokens, output_tokens, cached_tokens, model_id, cost_paise,
                     sentiment, lead_quality, lead_signals,
                     recording_path, recording_format, recording_size_bytes,
-                    recording_started_at, recording_expires_at, channel
+                    recording_started_at, recording_expires_at, channel, visitor_key
                 ) VALUES (
                     $1, $2, COALESCE($3, now()), COALESCE($4, now()), $5,
                     $6, $7, $8, $9,
@@ -695,7 +740,7 @@ async def insert_call(record: dict[str, Any]) -> int:
                     $12, $13, $14, $15, $16,
                     $17, $18, $19,
                     $20, $21, $22,
-                    $23, $24, $25
+                    $23, $24, $25, $26
                 ) RETURNING id
                 """,
                 int(record["agent_id"]),
@@ -722,6 +767,7 @@ async def insert_call(record: dict[str, Any]) -> int:
                 rec_started,
                 rec_expires,
                 record.get("channel"),
+                record.get("visitor_key") or visitor_key_from_extracted(record.get("extracted")),
             )
             # Phase 9b denormalisation — keep agents.last_call_at + calls_count
             # in lockstep with the calls table. `list_agents` reads these

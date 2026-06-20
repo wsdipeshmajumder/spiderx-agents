@@ -1761,6 +1761,7 @@ async def run_agent_chat_session(
     memory: list[dict[str, str]] = []          # {role, text}
     usage = {"in": 0, "out": 0}                 # token totals for cost
     persisted = {"done": False}
+    recall = {"done": False}                     # cross-session recall fired once
 
     def _make_handler(name: str):
         async def _h(args: dict[str, Any]) -> dict[str, Any]:
@@ -1880,6 +1881,56 @@ async def run_agent_chat_session(
         except Exception as e:  # noqa: BLE001
             log.warning("agent-chat[%s] kickoff failed: %s", agent_id, e)
 
+    async def _maybe_recall() -> None:
+        # Identifier-based cross-session recall: once the visitor's phone/email
+        # is captured, look up their prior calls (any channel) for THIS agent and
+        # have the agent acknowledge + not re-ask. Fires at most once per chat.
+        if recall["done"]:
+            return
+        try:
+            vkey = db.visitor_key_from_extracted(agent.get("_extracted_extra"))
+        except Exception:  # noqa: BLE001
+            vkey = None
+        if not vkey:
+            return
+        recall["done"] = True
+        try:
+            rows = await db.recall_visitor_history(agent_id, vkey, limit=3)
+        except Exception as e:  # noqa: BLE001
+            log.warning("agent-chat[%s] recall lookup failed: %s", agent_id, e)
+            return
+        if not rows:
+            return
+        known: dict[str, Any] = {}
+        for r in reversed(rows):
+            ex = r.get("extracted")
+            if isinstance(ex, dict):
+                for k, v in ex.items():
+                    if isinstance(v, (str, int, float, bool)) and str(v).strip():
+                        known[k] = v
+        last = rows[0]
+        sa = last.get("started_at")
+        try:
+            date = sa.strftime("%d %b") if hasattr(sa, "strftime") else str(sa)[:10]
+        except Exception:  # noqa: BLE001
+            date = "recently"
+        ch = (last.get("channel") or "chat").replace("web_", "").replace("_", " ")
+        summ = (last.get("summary") or "").strip()
+        fields = ", ".join(f"{k}={v}" for k, v in list(known.items())[:8])
+        note = (
+            f"[RETURNING VISITOR — this person has contacted us before ({len(rows)} prior; "
+            f"most recent {date} via {ch}" + (f": {summ}" if summ else "") + f"). On file: {fields}. "
+            "Warmly acknowledge you remember them (greet by name if known), do NOT re-ask these "
+            "details — confirm instead — and continue toward their goal. Keep it brief and natural.]"
+        )
+        try:
+            reply = await _run_model_turn(chat=chat, user_text=note, handlers=handlers,
+                                          send_json=_send_json, build_monitor=None, usage=usage)
+            if reply and reply.strip():
+                memory.append({"role": "model", "text": _mask_pii(reply.strip())})
+        except Exception as e:  # noqa: BLE001
+            log.warning("agent-chat[%s] recall turn failed: %s", agent_id, e)
+
     turns_used = 0
     deadline = _time_mod.monotonic() + _CHAT_MAX_SESSION_S
     last_msg_t = 0.0
@@ -1927,6 +1978,7 @@ async def run_agent_chat_session(
                 if persisted["done"]:
                     await _send_json({"type": "call_ended"})
                     break
+                await _maybe_recall()   # form often carries the phone/email
                 continue
             if kind != "text" or not data.get("text"):
                 continue
@@ -1963,6 +2015,7 @@ async def run_agent_chat_session(
             if persisted["done"]:
                 await _send_json({"type": "call_ended"})
                 break
+            await _maybe_recall()   # if the visitor just identified themselves
     except WebSocketDisconnect:
         log.info("agent-chat[%s]: client disconnect", agent_id)
     except Exception as e:  # noqa: BLE001
