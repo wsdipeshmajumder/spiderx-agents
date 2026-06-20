@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 291;
+const SXAI_BUILD = 292;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1632,6 +1632,7 @@ function AgentChatEmbed({ slug, contained }) {
   const [activeCards, setActiveCards] = useState([]);   // rich media cards
   const [handoff, setHandoff] = useState(null);         // {reason} once a human is requested
   const [humanAgent, setHumanAgent] = useState(null);   // operator name once a human takes over
+  const [thinking, setThinking] = useState(false);      // "agent is typing…" indicator
   const wsRef = useRef(null);
   const streamingRef = useRef(false);                  // mid model-turn → append tokens
   const logRef = useRef(null);
@@ -1664,8 +1665,9 @@ function AgentChatEmbed({ slug, contained }) {
     ws.onmessage = (ev) => {
       let m; try { m = JSON.parse(ev.data); } catch { return; }
       if (m.type === "ready") setStatus("ready");
-      else if (m.type === "error") { setStatus("error"); setErr(m.message || "Chat unavailable."); }
+      else if (m.type === "error") { setStatus("error"); setErr(m.message || "Chat unavailable."); setThinking(false); }
       else if (m.type === "transcript" && m.role === "model" && m.text) {
+        setThinking(false);
         setMessages((prev) => {
           const next = prev.slice();
           if (streamingRef.current && next.length && next[next.length - 1].role === "model") {
@@ -1685,7 +1687,7 @@ function AgentChatEmbed({ slug, contained }) {
       } else if (m.type === "handoff") {
         setHandoff({ reason: m.reason || "" });
       } else if (m.type === "human_joined") {
-        streamingRef.current = false;
+        streamingRef.current = false; setThinking(false);
         setHumanAgent(m.operator || "a team member");
         setMessages((prev) => [...prev, { role: "system", text: `${m.operator || "A team member"} has joined the chat.` }]);
       } else if (m.type === "human_left") {
@@ -1693,12 +1695,12 @@ function AgentChatEmbed({ slug, contained }) {
         setHumanAgent(null);
         setMessages((prev) => [...prev, { role: "system", text: "You're back with the assistant." }]);
       } else if (m.type === "human_message" && m.text) {
-        streamingRef.current = false;
+        streamingRef.current = false; setThinking(false);
         setMessages((prev) => [...prev, { role: "human", text: m.text, operator: m.operator }]);
       } else if (m.type === "turn_complete") {
-        streamingRef.current = false;
+        streamingRef.current = false; setThinking(false);
       } else if (m.type === "call_ended") {
-        setStatus("ended");
+        setStatus("ended"); setThinking(false);
       }
     };
     ws.onclose = () => setStatus((s) => (s === "error" || s === "ended") ? s : "ended");
@@ -1708,7 +1710,7 @@ function AgentChatEmbed({ slug, contained }) {
 
   useEffect(() => {
     try { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; } catch {}
-  }, [messages]);
+  }, [messages, thinking]);
 
   const send = (e, text) => {
     e?.preventDefault();
@@ -1719,6 +1721,7 @@ function AgentChatEmbed({ slug, contained }) {
     setMessages((prev) => [...prev, { role: "user", text: t }]);
     try { ws.send(JSON.stringify({ type: "text", text: t })); } catch {}
     setInput("");
+    if (!humanAgent) setThinking(true);   // show "typing…" until the AI responds
     setQuickReplies([]); setActiveForm(null); setActiveCards([]);  // widgets are one decision point — clear on send
   };
 
@@ -1736,6 +1739,7 @@ function AgentChatEmbed({ slug, contained }) {
       .map((f) => formValues[f.key] && `${f.label}: ${formValues[f.key]}`).filter(Boolean).join(" · ");
     setMessages((prev) => [...prev, { role: "user", text: summary || `Submitted ${activeForm.title}` }]);
     try { ws.send(JSON.stringify({ type: "form_submit", title: activeForm.title, data })); } catch {}
+    if (!humanAgent) setThinking(true);
     setActiveForm(null); setFormValues({}); setQuickReplies([]);
   };
 
@@ -1747,6 +1751,7 @@ function AgentChatEmbed({ slug, contained }) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     setMessages((prev) => [...prev, { role: "user", text: "Talk to a human" }]);
     setHandoff({ reason: "" });   // optimistic — server confirms with a handoff frame
+    setThinking(true);
     setQuickReplies([]); setActiveForm(null); setActiveCards([]);
     try { ws.send(JSON.stringify({ type: "request_handoff" })); } catch {}
   };
@@ -1790,6 +1795,10 @@ function AgentChatEmbed({ slug, contained }) {
             <div class=${"chatembed-bubble" + (m.role === "human" ? " chatembed-bubble-human" : "")}>${m.text}</div>
           </div>
         `)}
+        ${thinking ? html`
+          <div class="chatembed-msg chatembed-msg-model">
+            <div class="chatembed-bubble chatembed-typing"><span></span><span></span><span></span></div>
+          </div>` : ""}
         ${status === "connecting" && messages.length === 0
           ? html`<div class="chatembed-empty">Starting your chat with ${agent.name}…</div>` : ""}
         ${status === "error" && messages.length === 0
@@ -11126,6 +11135,14 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   // knowledge schema. Auto-runs once when the field is empty; regenerate on
   // demand. The operator edits/overrides freely.
   const [suggesting, setSuggesting] = useState(false);
+  const [instrFull, setInstrFull] = useState(false);   // fullscreen instructions editor
+  // "What this chat knows" disclosure — exactly the brain the chat draws on.
+  const [kbInfo, setKbInfo] = useState(null);
+  useEffect(() => {
+    if (!hasChat) return;
+    fetch(`/api/agents/${agent.id}/chat/knowledge`).then((r) => r.ok ? r.json() : null)
+      .then((d) => setKbInfo(d)).catch(() => setKbInfo(null));
+  }, [hasChat, chatCfgSaved]);
   const autoTriedRef = useRef(false);
   const suggestInstructions = async () => {
     setSuggesting(true);
@@ -11207,14 +11224,15 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
             <button type="button" class="db-btn-ghost db-btn-sm" onClick=${suggestInstructions} disabled=${suggesting}>
               ${suggesting ? "✨ Drafting…" : (chatCfg.instructions || "").trim() ? "✨ Regenerate" : "✨ Suggest"}
             </button>
+            <button type="button" class="db-btn-ghost db-btn-sm" style=${{ marginLeft: "auto" }} onClick=${() => setInstrFull(true)}>⤢ Expand editor</button>
           </div>
           <label class="db-form-field">
             <span class="db-form-label">Chat-only instructions — tone/rules layered on the shared brief</span>
-            <textarea class="db-input" rows="4"
+            <textarea class="db-input chatcfg-instr" rows="10"
                       placeholder=${suggesting ? "Drafting from your industry & knowledge…" : `e.g. Be a touch more playful than the phone line. Always mention free home delivery. Offer a brochure link before booking.`}
                       value=${chatCfg.instructions}
                       onInput=${(e) => setChatField("instructions", e.target.value)}></textarea>
-            <span class="db-form-help">✨ Auto-drafted from your industry, business context and what this agent captures — edit or clear it freely.</span>
+            <span class="db-form-help">✨ Auto-drafted from your industry, business context and what this agent captures — edit or clear it freely. ${(chatCfg.instructions || "").length} characters.</span>
           </label>
           <div class="chatcfg-grid">
             <label class="db-form-field">
@@ -11262,6 +11280,47 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
             </button>
             <span class="db-form-help">Card numbers are auto-masked in stored transcripts. Leave domains blank to allow any site. Behaviour is shared across channels — only the look is chat-specific.</span>
           </div>
+          ${kbInfo ? html`
+          <div class="chatkb">
+            <div class="chatcfg-head" style=${{ marginTop: "20px" }}>What this chat knows <span class="db-form-opt">(shared brain — same as the phone line)</span></div>
+            <p class="db-form-help" style=${{ marginTop: "-4px" }}>Exactly what ${agent.name} draws on to answer in chat. Edit these on the Knowledge, Outcomes and Voice & behaviour pages — changes apply to every channel.</p>
+            <div class="chatkb-grid">
+              <div class="chatkb-card">
+                <div class="chatkb-card-h">📚 Knowledge topics</div>
+                ${kbInfo.knowledge_groups && kbInfo.knowledge_groups.length
+                  ? html`<ul class="chatkb-list">${kbInfo.knowledge_groups.map((g, i) => html`<li key=${i}>${g.emoji} ${g.label}</li>`)}</ul>`
+                  : html`<div class="chatkb-empty">No reference knowledge groups yet — add them on the Knowledge page so the chat can answer from your content.</div>`}
+                ${kbInfo.business_facts_present ? html`<div class="chatkb-foot">✓ Business facts filled in</div>` : ""}
+              </div>
+              <div class="chatkb-card">
+                <div class="chatkb-card-h">🛠 Actions it can take</div>
+                ${kbInfo.tools && kbInfo.tools.length
+                  ? html`<ul class="chatkb-list">${kbInfo.tools.map((t, i) => html`<li key=${i}>${t.label}</li>`)}</ul>`
+                  : html`<div class="chatkb-empty">No tools connected — it can answer + capture leads, but can't book/look-up yet.</div>`}
+              </div>
+              <div class="chatkb-card">
+                <div class="chatkb-card-h">🎯 Goals it works toward</div>
+                ${kbInfo.outcomes && kbInfo.outcomes.length
+                  ? html`<div class="chatkb-tags">${kbInfo.outcomes.map((o, i) => html`<span key=${i} class="chatkb-tag">${String(o).replace(/_/g, " ")}</span>`)}</div>`
+                  : html`<div class="chatkb-empty">—</div>`}
+              </div>
+              <div class="chatkb-card">
+                <div class="chatkb-card-h">📝 Info it captures</div>
+                ${kbInfo.captured_fields && kbInfo.captured_fields.length
+                  ? html`<div class="chatkb-tags">${kbInfo.captured_fields.slice(0, 20).map((f, i) => html`<span key=${i} class="chatkb-tag">${f.label || f.field}</span>`)}</div>`
+                  : html`<div class="chatkb-empty">—</div>`}
+              </div>
+              <div class="chatkb-card">
+                <div class="chatkb-card-h">🗣 Language</div>
+                <div class="chatkb-line">${kbInfo.language}</div>
+              </div>
+              ${(kbInfo.guardrails && kbInfo.guardrails.length) || (kbInfo.donts && kbInfo.donts.length) ? html`
+              <div class="chatkb-card">
+                <div class="chatkb-card-h">🚧 Guardrails</div>
+                <ul class="chatkb-list">${[...(kbInfo.guardrails || []), ...((kbInfo.donts || []).map((d) => /^don'?t/i.test(String(d).trim()) ? d : "Don't " + d))].slice(0, 6).map((g, i) => html`<li key=${i}>${g}</li>`)}</ul>
+              </div>` : ""}
+            </div>
+          </div>` : ""}
         </div>
         </div>
         <aside class="chatcfg-preview-col">
@@ -11389,6 +11448,24 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
     </div>
     ${liveSid ? html`<${LiveChatModal} agent=${agent} sid=${liveSid} onClose=${() => { setLiveSid(null); loadChatLogs(); }} />` : ""}
     ${detailId ? html`<${CallDetailModal} loading=${detailLoading} data=${detail} agent=${agent} onClose=${() => { setDetailId(null); setDetail(null); }} />` : ""}
+    ${instrFull ? html`
+      <div class="db-modal-backdrop" onClick=${() => setInstrFull(false)}>
+        <div class="db-modal chatinstr-modal" onClick=${(e) => e.stopPropagation()}>
+          <header class="db-modal-head">
+            <h2>Chat instructions</h2>
+            <button class="db-modal-close" onClick=${() => setInstrFull(false)} aria-label="Close">×</button>
+          </header>
+          <p class="db-form-help" style=${{ margin: "0 0 8px" }}>Tone + rules layered on the shared brief. ${(chatCfg.instructions || "").length} characters.</p>
+          <textarea class="db-input chatinstr-modal-ta" autoFocus
+                    placeholder="e.g. Be a touch more playful than the phone line. Always mention free home delivery. Offer a brochure link before booking."
+                    value=${chatCfg.instructions}
+                    onInput=${(e) => setChatField("instructions", e.target.value)}></textarea>
+          <div class="db-modal-actions">
+            <button type="button" class="db-btn-ghost db-btn-sm" onClick=${suggestInstructions} disabled=${suggesting}>${suggesting ? "✨ Drafting…" : "✨ Regenerate"}</button>
+            <button type="button" class="db-btn-primary db-btn-sm" onClick=${async () => { await saveChatCfg(); setInstrFull(false); }} disabled=${chatCfgSaving}>${chatCfgSaving ? "Saving…" : "Save & close"}</button>
+          </div>
+        </div>
+      </div>` : ""}
   `;
 
   return html`

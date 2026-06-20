@@ -118,7 +118,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 291
+APP_BUILD = 292
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1611,6 +1611,70 @@ async def agent_live_chats(agent_id: int, request: Request) -> dict:
     await _require_agent_owned(agent_id, await current_user(request))
     from . import chat_bridge
     return {"live": chat_bridge.live_chats_for_agent(agent_id)}
+
+
+_CONNECTOR_LABELS = {
+    "calendar_check": "Check calendar availability",
+    "calendar_book": "Book appointments",
+    "sms_send": "Send SMS",
+    "email_send": "Send email",
+    "knowledge_base_search": "Search the knowledge base",
+    "http_webhook": "Post to your webhook / system",
+    "order_status": "Look up order status",
+    "crm_lookup": "Look up a CRM contact",
+    "crm_create_lead": "Create a CRM lead",
+    "payment_link": "Send a payment link",
+    "end_call": "Wrap up + log the conversation",
+}
+
+
+@app.get("/api/agents/{agent_id}/chat/knowledge")
+async def agent_chat_knowledge(agent_id: int, request: Request) -> dict:
+    """Disclose EXACTLY what the chat brain draws on (Build 292) so the creator
+    can see, in one place, what knowledge/data/tools the chat is using — the
+    same surface `chat_bridge._agent_chat_system_prompt` feeds the model."""
+    await _require_agent_owned(agent_id, await current_user(request))
+    agent = await db.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="agent not found")
+    from . import gemini_bridge as _gb, chip_schema as _cs, chat_bridge as _cb
+
+    groups = agent.get("info_groups") or []
+    knowledge_groups = [
+        {"label": g.get("label") or "", "emoji": g.get("emoji") or "📋", "desc": g.get("desc") or ""}
+        for g in groups if isinstance(g, dict)
+    ]
+    try:
+        captured = [{"label": f.get("label"), "field": f.get("field"), "category": f.get("category")}
+                    for f in _cs.effective_schema(agent)]
+    except Exception:  # noqa: BLE001
+        captured = []
+    tools = [{"id": c, "label": _CONNECTOR_LABELS.get(c, c.replace("_", " ").title())}
+             for c in (agent.get("connectors") or []) if c]
+    try:
+        dos, donts = _gb._format_policy_for_prompt(agent)
+    except Exception:  # noqa: BLE001
+        dos, donts = [], []
+    cs = agent.get("chat_settings") if isinstance(agent.get("chat_settings"), dict) else {}
+    resolved_lang = _cb._resolve_chat_language(cs)
+    business = (_gb._format_business_facts_for_prompt(agent) or "").strip()
+
+    return {
+        "agent_name": agent.get("name"),
+        "persona": (agent.get("persona") or agent.get("name") or "")[:400],
+        "sector": agent.get("sector"),
+        "language": resolved_lang or "Auto — matches the visitor's language",
+        "language_is_auto": resolved_lang is None,
+        "knowledge_groups": knowledge_groups,
+        "business_facts_present": bool(business),
+        "captured_fields": captured,
+        "tools": tools,
+        "outcomes": agent.get("outcomes") or [],
+        "dos": dos,
+        "donts": donts,
+        "guardrails": agent.get("guardrails") or [],
+        "instructions_set": bool((cs.get("instructions") or "").strip()),
+    }
 
 
 @app.get("/api/agents/{agent_id}/calls/{call_id}")
