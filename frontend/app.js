@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 284;
+const SXAI_BUILD = 285;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1620,7 +1620,7 @@ function EmbedView({ slug, blobSize, blobMode, engineRef, onPressStart, onPressE
 // (the paid chat add-on). Self-contained: its own WS to /ws/session?mode=chat,
 // streaming model tokens into bubbles. No mic, no AudioEngine. Shares the
 // agent's brain (persona/knowledge/connectors) with the voice + phone channels.
-function AgentChatEmbed({ slug }) {
+function AgentChatEmbed({ slug, contained }) {
   const [agent, setAgent] = useState(null);
   const [err, setErr] = useState(null);
   const [status, setStatus] = useState("connecting"); // connecting | ready | ended | error
@@ -1656,7 +1656,8 @@ function AgentChatEmbed({ slug }) {
     const kickoff = welcome ? "&kickoff=0" : "";
     const host = (() => { try { return new URLSearchParams(location.search).get("host") || ""; } catch { return ""; } })();
     const hostQ = host ? `&host=${encodeURIComponent(host)}` : "";
-    const ws = new WebSocket(`${proto}://${location.host}/ws/session?mode=chat&agent_id=${agent.id}&sid=${sid}&locale=${encodeURIComponent(locale)}${kickoff}${hostQ}`);
+    const previewQ = contained ? "&preview=1" : "";   // operator preview — don't log it
+    const ws = new WebSocket(`${proto}://${location.host}/ws/session?mode=chat&agent_id=${agent.id}&sid=${sid}&locale=${encodeURIComponent(locale)}${kickoff}${hostQ}${previewQ}`);
     wsRef.current = ws;
     ws.onmessage = (ev) => {
       let m; try { m = JSON.parse(ev.data); } catch { return; }
@@ -1736,7 +1737,7 @@ function AgentChatEmbed({ slug }) {
   const rootStyle = accent ? { "--chat-accent": accent } : {};
 
   return html`
-    <div class="chatembed" style=${rootStyle}>
+    <div class=${"chatembed" + (contained ? " chatembed-contained" : "")} style=${rootStyle}>
       <header class="chatembed-head">
         ${avatarUrl
           ? html`<img class="chatembed-avatar chatembed-avatar-img" src=${avatarUrl} alt=${agent.name} />`
@@ -10947,9 +10948,12 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ chat_settings: payload }),
       });
-      if (r.ok) { setChatCfgSaved(true); setTimeout(() => setChatCfgSaved(false), 2200); refreshAgent && refreshAgent(); }
+      if (r.ok) { setChatCfgSaved(true); setTimeout(() => setChatCfgSaved(false), 2200); refreshAgent && refreshAgent(); setPreviewKey((k) => k + 1); }
     } finally { setChatCfgSaving(false); }
   };
+  // Live preview is a real embedded chat session; remount it after Save so it
+  // picks up the new appearance/behaviour. Also lets the operator restart it.
+  const [previewKey, setPreviewKey] = useState(0);
 
   // Chat instructions auto-draft from industry × context × the agent's
   // knowledge schema. Auto-runs once when the field is empty; regenerate on
@@ -11077,32 +11081,14 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
         </div>
         </div>
         <aside class="chatcfg-preview-col">
-          <div class="chatcfg-preview-label">Live preview</div>
-          <div class="chatprev" style=${{ "--chat-accent": prevAccent }}>
-            <div class="chatprev-head">
-              ${prevAvatar
-                ? html`<img class="chatprev-avatar chatprev-avatar-img" src=${prevAvatar} alt=${agent.name} />`
-                : html`<div class="chatprev-avatar">${(agent.name || "?").trim()[0]}</div>`}
-              <div class="chatprev-headmeta">
-                <div class="chatprev-name">${agent.name}</div>
-                <div class="chatprev-status">online</div>
-              </div>
-            </div>
-            <div class="chatprev-log">
-              <div class="chatprev-msg chatprev-msg-model"><div class="chatprev-bubble">${prevWelcome}</div></div>
-              <div class="chatprev-msg chatprev-msg-user"><div class="chatprev-bubble">What are your hours?</div></div>
-              <div class="chatprev-msg chatprev-msg-model"><div class="chatprev-bubble">We're open 9 AM–7 PM, Mon–Sat. Anything I can help you with?</div></div>
-            </div>
-            <div class="chatprev-chips">
-              <span class="chatprev-chip">Book a visit</span>
-              <span class="chatprev-chip">See pricing</span>
-            </div>
-            <div class="chatprev-input">
-              <div class="chatprev-field">Message ${agent.name}…</div>
-              <div class="chatprev-send"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></div>
-            </div>
+          <div class="chatcfg-preview-label">
+            <span>Live preview — chat for real</span>
+            <button type="button" class="db-btn-ghost db-btn-sm" onClick=${() => setPreviewKey((k) => k + 1)} title="Restart preview">↻ Restart</button>
           </div>
-          <div class="chatcfg-preview-note">Live preview — changes here apply once you Save.</div>
+          <div class="chatcfg-preview-box">
+            <${AgentChatEmbed} key=${previewKey} slug=${agent.slug || agent.id} contained=${true} />
+          </div>
+          <div class="chatcfg-preview-note">A real chat with ${agent.name}. Saved appearance + behaviour apply on Save; ↻ to restart.</div>
         </aside>
         </div>
       ` : html`

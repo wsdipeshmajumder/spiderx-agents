@@ -1727,6 +1727,7 @@ async def run_agent_chat_session(
     user_id: Optional[int] = None,
     sid: Optional[str] = None,
     send_kickoff: bool = True,
+    preview: bool = False,
 ) -> None:
     from datetime import datetime, timezone
     from . import connectors as _conn
@@ -1766,6 +1767,10 @@ async def run_agent_chat_session(
     def _make_handler(name: str):
         async def _h(args: dict[str, Any]) -> dict[str, Any]:
             if name == "end_call":
+                if preview:
+                    # Preview: end the chat with no DB write / webhook.
+                    persisted["done"] = True
+                    return {"ok": True, "preview": True}
                 agent["_transcript"] = list(memory)   # freshest transcript before persist
                 agent["_tokens_in"] = usage["in"]     # so end_call's insert computes cost
                 agent["_tokens_out"] = usage["out"]
@@ -2023,7 +2028,8 @@ async def run_agent_chat_session(
     finally:
         # Fallback: visitor closed the tab without the model wrapping up via
         # end_call. Persist a transcript-derived row so the chat still logs.
-        if not persisted["done"]:
+        # Skip entirely for the operator's in-dashboard preview.
+        if not persisted["done"] and not preview:
             await _persist_agent_chat(agent, memory, started_at, usage)
 
 

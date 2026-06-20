@@ -1215,6 +1215,8 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   background: var(--bg-0);
   font-size: 14px;
 }
+/* Contained mode — embedded inside the Chat page preview, not full-screen. */
+.chatembed-contained { position: relative; inset: auto; height: 100%; width: 100%; border-radius: 14px; }
 .chatembed-head {
   display: flex; align-items: center; gap: 10px;
   padding: 12px 14px; border-bottom: 1px solid var(--border, #e6e8ef);
@@ -11503,7 +11505,11 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
 .chatcfg .chatcfg-head:first-child { margin-top: 0; }
 .chatcfg-main .chatcfg { margin-top: 18px; }
 .chatcfg-preview-col { position: sticky; top: 16px; }
-.chatcfg-preview-label { font-size: 12px; font-weight: 700; color: var(--fg-mute, #6b7080); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 10px; }
+.chatcfg-preview-label { font-size: 12px; font-weight: 700; color: var(--fg-mute, #6b7080); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.chatcfg-preview-box {
+  height: 460px; border: 1px solid var(--border, #e6e8ef); border-radius: 14px;
+  overflow: hidden; box-shadow: 0 10px 30px rgba(20, 20, 50, 0.08); background: var(--bg-0, #fff);
+}
 .chatcfg-preview-note { font-size: 11px; color: var(--fg-dim, #9aa0ad); margin-top: 8px; text-align: center; }
 @media (max-width: 760px) { .chatcfg-layout { grid-template-columns: 1fr; } .chatcfg-preview-col { position: static; } }
 

@@ -118,7 +118,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 284
+APP_BUILD = 285
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -2342,10 +2342,11 @@ async def ws_session(ws: WebSocket) -> None:
                     }))
                 except Exception:  # noqa: BLE001
                     pass
-            elif not _host_allowed(qp.get("host"), (_cs or {}).get("allowed_domains")):
+            elif (qp.get("preview") != "1") and not _host_allowed(qp.get("host"), (_cs or {}).get("allowed_domains")):
                 # Best-effort abuse control: if the operator set an allowlist,
                 # only serve the chat on those domains (the embed reports the
-                # host page). Empty allowlist → any domain.
+                # host page). Empty allowlist → any domain. The in-dashboard
+                # preview (preview=1) is exempt.
                 try:
                     await ws.send_text(json.dumps({
                         "type": "error", "code": "domain_not_allowed",
@@ -2359,6 +2360,7 @@ async def ws_session(ws: WebSocket) -> None:
                     client_locale=client_locale, client_tz=client_tz,
                     user_id=user_id, sid=sid,
                     send_kickoff=(qp.get("kickoff") != "0"),
+                    preview=(qp.get("preview") == "1"),
                 )
         elif text_only:
             from . import chat_bridge
