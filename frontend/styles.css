@@ -1254,6 +1254,51 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   70% { box-shadow: 0 0 0 7px rgba(245,158,11,0); }
   100% { box-shadow: 0 0 0 0 rgba(245,158,11,0); }
 }
+
+/* Live human takeover — visitor side (Build 290) */
+.chatembed-livebar { background: rgba(16,185,129,0.10); color: #047857; font-size: 12px;
+  font-weight: 600; text-align: center; padding: 6px 12px; border-bottom: 1px solid rgba(16,185,129,0.25); }
+.chatembed-sysnote { text-align: center; font-size: 11.5px; color: var(--fg-dim, #9aa0ad);
+  margin: 6px 0; font-style: italic; }
+.chatembed-human-tag { font-size: 10.5px; font-weight: 700; color: #047857; margin: 0 0 2px 2px; }
+.chatembed-bubble-human { background: #ecfdf5 !important; border: 1px solid rgba(16,185,129,0.3); color: #064e3b !important; }
+:root[data-theme="dark"] .chatembed-livebar { background: rgba(16,185,129,0.14); color: #6ee7b7; }
+:root[data-theme="dark"] .chatembed-bubble-human { background: #0c2a22 !important; color: #a7f3d0 !important; }
+
+/* Chat-widget page tabs + conversations + live chat modal (Build 290) */
+.db-tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--border, #e6e8ef); }
+.db-tab { background: none; border: none; border-bottom: 2px solid transparent; padding: 8px 14px;
+  font: inherit; font-size: 14px; font-weight: 600; color: var(--fg-dim, #6b7280); cursor: pointer; margin-bottom: -1px; }
+.db-tab:hover { color: var(--fg, #1a1c25); }
+.db-tab.is-active { color: var(--db-accent, #4f46e5); border-bottom-color: var(--db-accent, #4f46e5); }
+.db-pill-live { display: inline-block; font-size: 11px; font-weight: 700; color: #047857;
+  background: rgba(16,185,129,0.12); border-radius: 999px; padding: 1px 8px; vertical-align: middle; }
+.call-row-clickable, .livechat-live-row { cursor: pointer; transition: background .12s; }
+.call-row-clickable:hover, .livechat-live-row:hover { background: var(--bg-1, #f7f8fa); }
+.livechat-live-row { border-left: 3px solid #10b981; }
+.livechat-row-cta { font-size: 12px; font-weight: 600; color: var(--db-accent, #4f46e5); margin-top: 4px; }
+.livechat-pill-join { background: rgba(79,70,229,0.12) !important; color: #4338ca !important; }
+
+.livechat-modal { width: min(560px, 94vw); display: flex; flex-direction: column; max-height: 86vh; }
+.livechat-log { flex: 1; overflow-y: auto; padding: 14px 4px; min-height: 220px; max-height: 52vh;
+  display: flex; flex-direction: column; gap: 10px; }
+.livechat-sys { text-align: center; font-size: 12px; color: var(--fg-dim, #9aa0ad); font-style: italic; }
+.livechat-msg { max-width: 82%; display: flex; flex-direction: column; gap: 2px; }
+.livechat-user { align-self: flex-start; }
+.livechat-model { align-self: flex-end; align-items: flex-end; }
+.livechat-human { align-self: flex-end; align-items: flex-end; }
+.livechat-who { font-size: 10.5px; font-weight: 700; color: var(--fg-dim, #9aa0ad); padding: 0 4px; }
+.livechat-bubble { padding: 8px 12px; border-radius: 12px; font-size: 14px; line-height: 1.4; white-space: pre-wrap; }
+.livechat-user .livechat-bubble { background: var(--bg-1, #f1f2f7); color: var(--fg, #1a1c25); border-bottom-left-radius: 4px; }
+.livechat-model .livechat-bubble { background: #ede9fe; color: #312e81; border-bottom-right-radius: 4px; }
+.livechat-human .livechat-bubble { background: #d1fae5; color: #064e3b; border-bottom-right-radius: 4px; }
+.livechat-controls { display: flex; align-items: center; gap: 10px; padding: 10px 2px 6px; border-top: 1px solid var(--border, #e6e8ef); }
+.livechat-input { display: flex; gap: 8px; padding-top: 8px; }
+.livechat-input .db-input { flex: 1; }
+.livechat-ended { text-align: center; color: var(--fg-dim, #9aa0ad); padding: 14px; font-size: 13px; }
+:root[data-theme="dark"] .livechat-model .livechat-bubble { background: #2a2550; color: #ddd6fe; }
+:root[data-theme="dark"] .livechat-human .livechat-bubble { background: #0c2a22; color: #a7f3d0; }
+:root[data-theme="dark"] .call-row-clickable:hover, :root[data-theme="dark"] .livechat-live-row:hover { background: #1a1e2b; }
 .chatembed-name { font-weight: 700; font-size: 14px; color: var(--fg, #1a1c25); }
 .chatembed-status { font-size: 11px; color: var(--fg-dim, #9aa0ad); }
 .chatembed-status::before {

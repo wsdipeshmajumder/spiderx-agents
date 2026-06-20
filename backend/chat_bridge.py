@@ -75,6 +75,76 @@ _CHAT_MAX_TURNS = 60              # user turns per session
 _CHAT_MAX_SESSION_S = 1200        # 20 min wall-clock
 _CHAT_MIN_MSG_INTERVAL_S = 0.4    # drop messages arriving faster than this
 
+
+# ── Live chat registry (Build 290) ───────────────────────────────────────
+# In-memory map of currently-active visitor chat sessions so an operator can
+# (a) WATCH the AI conversation stream in real time and (b) JOIN it as a human
+# (pausing the AI and typing directly to the visitor). In-process only — fine
+# for the single Railway instance today; a multi-replica deploy would need a
+# Redis fan-out. Everything here is BEST-EFFORT: a registry/broadcast failure
+# must never break the visitor's chat (hard rule).
+class _LiveChat:
+    __slots__ = ("sid", "agent_id", "org_id", "agent_name", "started_at",
+                 "transcript", "observers", "human_control", "operator_name",
+                 "inject", "last_visitor_text", "turns")
+
+    def __init__(self, sid, agent_id, org_id, agent_name, started_at):
+        self.sid = sid
+        self.agent_id = agent_id
+        self.org_id = org_id
+        self.agent_name = agent_name
+        self.started_at = started_at          # iso string
+        self.transcript: list[dict[str, Any]] = []   # [{role, text}] mirror for late joiners
+        self.observers: set[asyncio.Queue] = set()    # operator feed queues
+        self.human_control = False            # operator took over → AI paused
+        self.operator_name: Optional[str] = None
+        self.inject: asyncio.Queue = asyncio.Queue()  # operator → visitor frames
+        self.last_visitor_text: Optional[str] = None
+        self.turns = 0
+
+    def mirror(self, role: str, text: str) -> None:
+        """Record a message + fan it out to every attached operator."""
+        entry = {"role": role, "text": text}
+        self.transcript.append(entry)
+        if role == "user":
+            self.last_visitor_text = text
+            self.turns += 1
+        self.broadcast({"type": "msg", "role": role, "text": text})
+
+    def broadcast(self, frame: dict[str, Any]) -> None:
+        for q in list(self.observers):
+            try:
+                q.put_nowait(frame)
+            except Exception:  # noqa: BLE001
+                pass
+
+
+_LIVE_CHATS: dict[str, _LiveChat] = {}
+
+
+def live_chats_for_agent(agent_id: int) -> list[dict[str, Any]]:
+    """Snapshot of active sessions for an agent (for the operator's list)."""
+    out = []
+    for lc in list(_LIVE_CHATS.values()):
+        if lc.agent_id != agent_id:
+            continue
+        out.append({
+            "sid": lc.sid,
+            "agent_id": lc.agent_id,
+            "started_at": lc.started_at,
+            "turns": lc.turns,
+            "last_visitor_text": (lc.last_visitor_text or "")[:160],
+            "human_control": lc.human_control,
+            "operator_name": lc.operator_name,
+            "watchers": len(lc.observers),
+        })
+    out.sort(key=lambda r: r["started_at"], reverse=True)
+    return out
+
+
+def get_live_chat(sid: str) -> Optional["_LiveChat"]:
+    return _LIVE_CHATS.get(sid)
+
 # "Best" model for the catch-all (Any-industry) path — used to compose a
 # bespoke agent for any use case imaginable. Falls back to CHAT_MODEL if the
 # pro model isn't available to this key. Override via env.
@@ -1867,6 +1937,44 @@ async def run_agent_chat_session(
     persisted = {"done": False}
     recall = {"done": False}                     # cross-session recall fired once
 
+    # Live-session registry — lets an operator watch / join this chat (Build 290).
+    # Skipped for the operator's own dashboard preview. Best-effort throughout.
+    live: Optional[_LiveChat] = None
+    inject_task = None
+    if not preview and sid:
+        try:
+            live = _LiveChat(sid=sid, agent_id=agent_id, org_id=agent.get("org_id"),
+                             agent_name=agent.get("name") or "Assistant",
+                             started_at=started_at.isoformat())
+            _LIVE_CHATS[sid] = live
+        except Exception:  # noqa: BLE001
+            live = None
+
+    async def _inject_pump() -> None:
+        # Forwards operator (human) frames into the visitor's socket and records
+        # human messages in the transcript so they persist. Runs concurrently
+        # with the receive loop — Starlette allows independent send + receive.
+        while True:
+            frame = await live.inject.get()
+            try:
+                ftype = frame.get("type")
+                if ftype == "human_message":
+                    txt = str(frame.get("text") or "")
+                    if txt.strip():
+                        memory.append({"role": "model", "text": _mask_pii(txt)})
+                        live.transcript.append({"role": "human", "text": txt})
+                        await _send_json({"type": "human_message", "text": txt,
+                                          "operator": frame.get("operator")})
+                elif ftype == "human_joined":
+                    await _send_json({"type": "human_joined", "operator": frame.get("operator")})
+                elif ftype == "human_left":
+                    await _send_json({"type": "human_left"})
+            except Exception:  # noqa: BLE001
+                pass
+
+    if live is not None:
+        inject_task = asyncio.ensure_future(_inject_pump())
+
     def _make_handler(name: str):
         async def _h(args: dict[str, Any]) -> dict[str, Any]:
             if name == "end_call":
@@ -2026,6 +2134,8 @@ async def run_agent_chat_session(
                            "on-brand line and invite their question. Don't mention this note.]"))
             if greeting and greeting.strip():
                 memory.append({"role": "model", "text": _mask_pii(greeting.strip())})
+                if live is not None:
+                    live.mirror("model", greeting.strip())
         except Exception as e:  # noqa: BLE001
             log.warning("agent-chat[%s] kickoff failed: %s", agent_id, e)
 
@@ -2174,6 +2284,13 @@ async def run_agent_chat_session(
                 continue
             turns_used += 1
             memory.append({"role": "user", "text": _mask_pii(user_text)})
+            if live is not None:
+                live.mirror("user", user_text)
+            # Human takeover: a teammate has joined and is answering directly —
+            # pause the AI. The visitor's message was mirrored to the operator
+            # above; the human replies via the inject pump.
+            if live is not None and live.human_control:
+                continue
             try:
                 reply = await _run_model_turn(chat=chat, user_text=user_text,
                                               handlers=handlers, send_json=_send_json,
@@ -2184,6 +2301,8 @@ async def run_agent_chat_session(
                 break
             if reply and reply.strip():
                 memory.append({"role": "model", "text": _mask_pii(reply.strip())})
+                if live is not None:
+                    live.mirror("model", reply.strip())
             if persisted["done"]:
                 await _send_json({"type": "call_ended"})
                 break
@@ -2193,11 +2312,120 @@ async def run_agent_chat_session(
     except Exception as e:  # noqa: BLE001
         log.exception("agent-chat[%s]: loop crashed: %s", agent_id, e)
     finally:
+        # Tear down the live registry entry + inject pump (best-effort).
+        if live is not None:
+            try:
+                live.broadcast({"type": "ended"})
+            except Exception:  # noqa: BLE001
+                pass
+            _LIVE_CHATS.pop(sid, None)
+        if inject_task is not None:
+            inject_task.cancel()
         # Fallback: visitor closed the tab without the model wrapping up via
         # end_call. Persist a transcript-derived row so the chat still logs.
         # Skip entirely for the operator's in-dashboard preview.
         if not persisted["done"] and not preview:
             await _persist_agent_chat(agent, memory, started_at, usage)
+
+
+async def run_operator_observe(ws: WebSocket, sid: str, *, operator_name: str = "Teammate") -> None:
+    """Operator side of a live chat (Build 290): stream the conversation in
+    real time and, on request, take over as a human (pausing the AI). Talks to
+    the visitor session purely through the registry — it can never break that
+    session, only push the documented control/message frames."""
+    async def _send(payload: dict[str, Any]) -> None:
+        try:
+            await ws.send_text(json.dumps(payload, default=str))
+        except Exception:  # noqa: BLE001
+            pass
+
+    live = _LIVE_CHATS.get(sid)
+    if live is None:
+        await _send({"type": "error", "message": "This chat has ended or isn't live."})
+        try:
+            await ws.close()
+        except Exception:  # noqa: BLE001
+            pass
+        return
+
+    q: asyncio.Queue = asyncio.Queue()
+    live.observers.add(q)
+    had_control = False
+    await _send({"type": "hello", "sid": sid, "agent_name": live.agent_name,
+                 "started_at": live.started_at, "human_control": live.human_control,
+                 "operator_name": live.operator_name,
+                 "transcript": list(live.transcript)})
+
+    def _take_control() -> None:
+        nonlocal had_control
+        live.human_control = True
+        live.operator_name = operator_name
+        had_control = True
+        try:
+            live.inject.put_nowait({"type": "human_joined", "operator": operator_name})
+        except Exception:  # noqa: BLE001
+            pass
+        live.broadcast({"type": "control", "human_control": True, "operator_name": operator_name})
+
+    async def _forward() -> None:
+        while True:
+            frame = await q.get()
+            await _send(frame)
+
+    fwd = asyncio.ensure_future(_forward())
+    try:
+        while True:
+            msg = await ws.receive()
+            if msg.get("type") == "websocket.disconnect":
+                break
+            if "text" not in msg or msg["text"] is None:
+                continue
+            try:
+                data = json.loads(msg["text"])
+            except json.JSONDecodeError:
+                continue
+            kind = data.get("type")
+            if kind == "join":
+                _take_control()
+            elif kind == "leave":
+                live.human_control = False
+                live.operator_name = None
+                had_control = False
+                try:
+                    live.inject.put_nowait({"type": "human_left"})
+                except Exception:  # noqa: BLE001
+                    pass
+                live.broadcast({"type": "control", "human_control": False, "operator_name": None})
+            elif kind == "message":
+                text = str(data.get("text") or "").strip()[:_CHAT_MAX_MSG_LEN]
+                if not text:
+                    continue
+                if not live.human_control:
+                    _take_control()       # auto-join on first message
+                try:
+                    live.inject.put_nowait({"type": "human_message", "text": text, "operator": operator_name})
+                except Exception:  # noqa: BLE001
+                    pass
+                live.broadcast({"type": "msg", "role": "human", "text": text})
+            elif kind == "stop":
+                break
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:  # noqa: BLE001
+        log.warning("operator-observe[%s] loop error: %s", sid, e)
+    finally:
+        fwd.cancel()
+        live.observers.discard(q)
+        # If this operator held control and dropped, hand back to the AI so the
+        # visitor isn't left talking to a paused bot.
+        if had_control and live.human_control and live.operator_name == operator_name:
+            live.human_control = False
+            live.operator_name = None
+            try:
+                live.inject.put_nowait({"type": "human_left"})
+                live.broadcast({"type": "control", "human_control": False, "operator_name": None})
+            except Exception:  # noqa: BLE001
+                pass
 
 
 async def _persist_agent_chat(agent: dict[str, Any], memory: list[dict[str, str]],

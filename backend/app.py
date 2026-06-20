@@ -118,7 +118,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 289
+APP_BUILD = 290
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1604,6 +1604,15 @@ async def agent_calls(agent_id: int, limit: int = 50, channel: Optional[str] = N
     return await db.list_calls_for_agent(agent_id, limit=limit, channel=channel)
 
 
+@app.get("/api/agents/{agent_id}/chat/live")
+async def agent_live_chats(agent_id: int, request: Request) -> dict:
+    """Currently-active web-chat sessions for this agent (Build 290) — powers
+    the operator's live watch/join list on the Chat-widget page."""
+    await _require_agent_owned(agent_id, await current_user(request))
+    from . import chat_bridge
+    return {"live": chat_bridge.live_chats_for_agent(agent_id)}
+
+
 @app.get("/api/agents/{agent_id}/calls/{call_id}")
 async def agent_call_detail(agent_id: int, call_id: int, request: Request) -> dict:
     """Full call detail for the dashboard's Call Details modal (build 188).
@@ -2308,6 +2317,41 @@ async def ws_session(ws: WebSocket) -> None:
     # `mode=chat&agent_id=<id>` → customer-facing AGENT chat (paid add-on).
     # Gated on the agent's org holding the `chat_channel` entitlement.
     agent_chat = _mode == "chat" and initial_agent_id is not None
+
+    # `mode=chat_observe&sid=<sid>` → OPERATOR side of a live chat (Build 290).
+    # Watch the AI conversation in real time and optionally join as a human.
+    # Requires org membership on the live chat's agent.
+    if _mode == "chat_observe":
+        from . import chat_bridge as _cb
+        from . import auth as _auth
+        observe_sid = (qp.get("sid") or "").strip()
+        live = _cb.get_live_chat(observe_sid) if observe_sid else None
+        if not live:
+            try:
+                await ws.send_text(json.dumps({"type": "error", "message": "Chat not live."}))
+                await ws.close()
+            except Exception:  # noqa: BLE001
+                pass
+            return
+        try:
+            member = await _auth.require_agent_member(user_id, live.agent_id)
+        except Exception:  # noqa: BLE001
+            try:
+                await ws.send_text(json.dumps({"type": "error", "message": "Not authorised."}))
+                await ws.close()
+            except Exception:  # noqa: BLE001
+                pass
+            return
+        op_user = await db.get_user(user_id)
+        op_name = ((op_user or {}).get("name") or (op_user or {}).get("email") or "Teammate").split("@")[0]
+        try:
+            await _cb.run_operator_observe(ws, observe_sid, operator_name=op_name)
+        finally:
+            try:
+                await ws.close()
+            except Exception:  # noqa: BLE001
+                pass
+        return
     # Build 267 — publish gate. Live embed sessions (the third-party web
     # widget, marked embed=1) only serve a PUBLISHED agent. Dashboard test
     # calls don't set embed=1, so building/editing/testing stays free — it's

@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 289;
+const SXAI_BUILD = 290;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1631,6 +1631,7 @@ function AgentChatEmbed({ slug, contained }) {
   const [formValues, setFormValues] = useState({});
   const [activeCards, setActiveCards] = useState([]);   // rich media cards
   const [handoff, setHandoff] = useState(null);         // {reason} once a human is requested
+  const [humanAgent, setHumanAgent] = useState(null);   // operator name once a human takes over
   const wsRef = useRef(null);
   const streamingRef = useRef(false);                  // mid model-turn → append tokens
   const logRef = useRef(null);
@@ -1683,6 +1684,17 @@ function AgentChatEmbed({ slug, contained }) {
         setQuickReplies([]); setActiveForm(null); setActiveCards(m.cards.slice(0, 6));
       } else if (m.type === "handoff") {
         setHandoff({ reason: m.reason || "" });
+      } else if (m.type === "human_joined") {
+        streamingRef.current = false;
+        setHumanAgent(m.operator || "a team member");
+        setMessages((prev) => [...prev, { role: "system", text: `${m.operator || "A team member"} has joined the chat.` }]);
+      } else if (m.type === "human_left") {
+        streamingRef.current = false;
+        setHumanAgent(null);
+        setMessages((prev) => [...prev, { role: "system", text: "You're back with the assistant." }]);
+      } else if (m.type === "human_message" && m.text) {
+        streamingRef.current = false;
+        setMessages((prev) => [...prev, { role: "human", text: m.text, operator: m.operator }]);
       } else if (m.type === "turn_complete") {
         streamingRef.current = false;
       } else if (m.type === "call_ended") {
@@ -1766,10 +1778,16 @@ function AgentChatEmbed({ slug, contained }) {
             title="Talk to a human">Talk to a human</button>
         ` : ""}
       </header>
+      ${humanAgent ? html`
+        <div class="chatembed-livebar">🟢 You're chatting with ${humanAgent}</div>
+      ` : ""}
       <div class="chatembed-log" ref=${logRef}>
-        ${messages.map((m, i) => html`
-          <div key=${i} class=${"chatembed-msg chatembed-msg-" + m.role}>
-            <div class="chatembed-bubble">${m.text}</div>
+        ${messages.map((m, i) => m.role === "system"
+          ? html`<div key=${i} class="chatembed-sysnote">${m.text}</div>`
+          : html`
+          <div key=${i} class=${"chatembed-msg chatembed-msg-" + (m.role === "user" ? "user" : "model")}>
+            ${m.role === "human" ? html`<div class="chatembed-human-tag">${m.operator || "Team"}</div>` : ""}
+            <div class=${"chatembed-bubble" + (m.role === "human" ? " chatembed-bubble-human" : "")}>${m.text}</div>
           </div>
         `)}
         ${status === "connecting" && messages.length === 0
@@ -10937,6 +10955,90 @@ function TelephonyPanel({ agent, refreshAgent }) {
 // AgentChatPage — dedicated page for the chat widget (its own menu item),
 // split out of Go-live. Snippet + appearance/behaviour/trust settings on the
 // left, a live preview on the right; paywall when the add-on isn't active.
+// LiveChatModal — operator watches a live visitor chat in real time and can
+// JOIN as a human (pausing the AI) via /ws/session?mode=chat_observe (Build 290).
+function LiveChatModal({ agent, sid, onClose }) {
+  const [msgs, setMsgs] = useState([]);
+  const [status, setStatus] = useState("connecting");  // connecting | live | ended | error
+  const [joined, setJoined] = useState(false);
+  const [input, setInput] = useState("");
+  const [agentName, setAgentName] = useState(agent?.name || "AI");
+  const wsRef = useRef(null);
+  const logRef = useRef(null);
+
+  useEffect(() => {
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const ws = new WebSocket(`${proto}://${location.host}/ws/session?mode=chat_observe&sid=${encodeURIComponent(sid)}`);
+    wsRef.current = ws;
+    ws.onmessage = (ev) => {
+      let m; try { m = JSON.parse(ev.data); } catch { return; }
+      if (m.type === "hello") {
+        setStatus("live");
+        if (m.agent_name) setAgentName(m.agent_name);
+        setJoined(!!m.human_control);
+        setMsgs((m.transcript || []).map((t) => ({ role: t.role, text: t.text })));
+      } else if (m.type === "msg") {
+        setMsgs((p) => [...p, { role: m.role, text: m.text }]);
+      } else if (m.type === "control") {
+        setJoined(!!m.human_control);
+        setMsgs((p) => [...p, { role: "system", text: m.human_control ? `${m.operator_name || "A teammate"} is now in control.` : "Handed back to the AI." }]);
+      } else if (m.type === "ended") {
+        setStatus("ended");
+        setMsgs((p) => [...p, { role: "system", text: "The visitor ended the chat." }]);
+      } else if (m.type === "error") {
+        setStatus("error");
+        setMsgs((p) => [...p, { role: "system", text: m.message || "Chat is not available." }]);
+      }
+    };
+    ws.onclose = () => setStatus((s) => (s === "error" || s === "ended") ? s : "ended");
+    ws.onerror = () => setStatus((s) => s === "live" ? s : "error");
+    return () => { try { ws.close(); } catch {} };
+  }, [sid]);
+
+  useEffect(() => { try { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; } catch {} }, [msgs]);
+
+  const send = (cmd) => { const ws = wsRef.current; if (ws && ws.readyState === 1) { try { ws.send(JSON.stringify(cmd)); } catch {} } };
+  const sendMsg = (e) => { e?.preventDefault(); const t = input.trim(); if (!t) return; send({ type: "message", text: t }); setInput(""); };
+
+  const live = status === "live";
+  return html`
+    <div class="db-modal-backdrop" onClick=${onClose}>
+      <div class="db-modal livechat-modal" onClick=${(e) => e.stopPropagation()}>
+        <header class="db-modal-head">
+          <h2>Live chat ${live ? html`<span class=${"db-pill-soft " + (joined ? "livechat-pill-join" : "")}>${joined ? "you're in control" : "watching"}</span>` : ""}</h2>
+          <button class="db-modal-close" onClick=${onClose}>×</button>
+        </header>
+        <div class="livechat-log" ref=${logRef}>
+          ${msgs.length === 0 && status === "connecting" ? html`<div class="livechat-sys">Connecting to the live chat…</div>` : ""}
+          ${msgs.map((m, i) => m.role === "system"
+            ? html`<div key=${i} class="livechat-sys">${m.text}</div>`
+            : html`<div key=${i} class=${"livechat-msg livechat-" + m.role}>
+                 <span class="livechat-who">${m.role === "user" ? "Visitor" : m.role === "human" ? "You" : agentName}</span>
+                 <div class="livechat-bubble">${m.text}</div>
+               </div>`)}
+        </div>
+        ${status === "ended" ? html`<div class="livechat-ended">This chat has ended.</div>`
+          : status === "error" ? html`<div class="livechat-ended">Couldn't attach to this chat.</div>`
+          : html`
+          <div class="livechat-controls">
+            ${joined
+              ? html`<button class="db-btn-ghost db-btn-sm" onClick=${() => send({ type: "leave" })}>↩ Hand back to AI</button>
+                     <span class="db-form-help">The AI is paused — you're replying to the visitor.</span>`
+              : html`<button class="db-btn-primary db-btn-sm" onClick=${() => send({ type: "join" })}>Join as human</button>
+                     <span class="db-form-help">Watching live. Join to pause the AI and reply yourself.</span>`}
+          </div>
+          <form class="livechat-input" onSubmit=${sendMsg}>
+            <input class="db-input" type="text" autocomplete="off"
+                   placeholder=${joined ? "Type to the visitor…" : "Type a message (joins automatically)…"}
+                   value=${input} onInput=${(e) => setInput(e.target.value)} disabled=${!live} />
+            <button class="db-btn-primary db-btn-sm" type="submit" disabled=${!input.trim() || !live}>Send</button>
+          </form>
+        `}
+      </div>
+    </div>
+  `;
+}
+
 function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   const embedOrigin = (typeof window !== "undefined") ? window.location.origin : "https://app.spiderx.ai";
   const embedPosition = "bottom-right";
@@ -10981,14 +11083,44 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   // Live preview is a real embedded chat session; remount it after Save so it
   // picks up the new appearance/behaviour. Also lets the operator restart it.
   const [previewKey, setPreviewKey] = useState(0);
+  // Settings | Conversations tabs (Build 290).
+  const [chatTab, setChatTab] = useState("settings");
   // Chat conversation logs live here (separate from voice/phone Call logs).
   const [chatLogs, setChatLogs] = useState(null);
-  useEffect(() => {
-    if (!hasChat) return;
+  const loadChatLogs = () => {
     fetch(`/api/agents/${agent.id}/calls?channel=web_chat&limit=25`)
       .then((r) => r.json()).then((d) => setChatLogs(Array.isArray(d) ? d : []))
       .catch(() => setChatLogs([]));
-  }, [hasChat]);
+  };
+  useEffect(() => { if (hasChat) loadChatLogs(); }, [hasChat]);
+
+  // Open a past chat's full transcript (reuses the Call Details modal).
+  const [detailId, setDetailId] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  useEffect(() => {
+    if (!detailId) { setDetail(null); return; }
+    setDetailLoading(true);
+    fetch(`/api/agents/${agent.id}/calls/${detailId}`)
+      .then((r) => r.json()).then((d) => setDetail(d))
+      .catch(() => setDetail({ _err: true })).finally(() => setDetailLoading(false));
+  }, [detailId]);
+
+  // Live chats — poll while the Conversations tab is open; join/watch in a modal.
+  const [liveChats, setLiveChats] = useState([]);
+  const [liveSid, setLiveSid] = useState(null);
+  useEffect(() => {
+    if (!hasChat || chatTab !== "conversations") return;
+    let stop = false;
+    const tick = () => {
+      fetch(`/api/agents/${agent.id}/chat/live`).then((r) => r.json())
+        .then((d) => { if (!stop) setLiveChats(Array.isArray(d.live) ? d.live : []); })
+        .catch(() => {});
+    };
+    tick();
+    const iv = setInterval(tick, 4000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [hasChat, chatTab]);
 
   // Chat instructions auto-draft from industry × context × the agent's
   // knowledge schema. Auto-runs once when the field is empty; regenerate on
@@ -11119,7 +11251,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
               </label>
             ` : ""}
           </div>
-          <div class="chatcfg-head" style=${{ marginTop: "16px" }}>Trust &amp; privacy</div>
+          <div class="chatcfg-head" style=${{ marginTop: "16px" }}>Trust & privacy</div>
           <div class="chatcfg-grid">
             <label class="db-form-field">
               <span class="db-form-label">Allowed domains <span class="db-form-opt">(comma-separated)</span></span>
@@ -11166,19 +11298,43 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
     </section>
   `;
 
-  const chatLogsPanel = hasChat ? html`
-    <section class="db-panel" style=${{ marginTop: "18px" }}>
-      <div class="db-panel-head">
+  const conversationsPanel = hasChat ? html`
+    <section class="db-panel">
+      ${liveChats.length > 0 ? html`
+        <div class="db-panel-head">
+          <div>
+            <h3 class="db-panel-title">Live now <span class="db-pill-live">🟢 ${liveChats.length}</span></h3>
+            <p class="db-panel-sub">Visitors chatting right now — watch in real time or join as a human.</p>
+          </div>
+        </div>
+        <ul class="call-log livechat-list">
+          ${liveChats.map((lc) => html`
+            <li key=${lc.sid} class="call-row livechat-live-row" onClick=${() => setLiveSid(lc.sid)}>
+              <div class="call-row-head">
+                <span class="call-channel call-channel-web_chat">💬 Live</span>
+                ${lc.human_control ? html`<span class="db-pill-soft livechat-pill-join">${lc.operator_name || "human"} in control</span>` : ""}
+                <span class="call-time">started ${fmtTime(lc.started_at)}</span>
+                <span class="call-dur">${lc.turns} turns</span>
+                ${lc.watchers > 0 ? html`<span class="call-dur">👁 ${lc.watchers}</span>` : ""}
+              </div>
+              ${lc.last_visitor_text ? html`<div class="call-summary">“${lc.last_visitor_text}”</div>` : html`<div class="call-summary db-muted">No visitor message yet…</div>`}
+              <div class="livechat-row-cta">${lc.human_control ? "Open →" : "Watch / join →"}</div>
+            </li>
+          `)}
+        </ul>
+      ` : ""}
+      <div class="db-panel-head" style=${liveChats.length > 0 ? { marginTop: "18px" } : {}}>
         <div>
           <h3 class="db-panel-title">Recent chats</h3>
-          <p class="db-panel-sub">Web-chat conversations log here — separate from voice &amp; phone Call logs.</p>
+          <p class="db-panel-sub">Web-chat conversations — click any chat to read the full transcript. Separate from voice & phone Call logs.</p>
         </div>
+        <button class="db-btn-ghost db-btn-sm" onClick=${loadChatLogs}>↻ Refresh</button>
       </div>
       ${chatLogs === null ? html`<div class="db-loading-sm">Loading…</div>`
         : chatLogs.length === 0 ? html`<div class="db-form-help" style=${{ padding: "10px 0" }}>No chats yet — conversations appear here once visitors start chatting.</div>`
         : html`<ul class="call-log">
             ${chatLogs.map((c) => html`
-              <li key=${c.id} class="call-row">
+              <li key=${c.id} class="call-row call-row-clickable" onClick=${() => setDetailId(c.id)}>
                 <div class="call-row-head">
                   <span class=${"call-outcome call-outcome-" + (c.outcome || "unknown")}>${(c.outcome || "unknown").replace(/_/g, " ")}</span>
                   <span class="call-channel call-channel-web_chat">💬 Chat</span>
@@ -11192,6 +11348,26 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
     </section>
   ` : "";
 
+  const chatTabs = hasChat ? html`
+    <div class="db-tabs chatpage-tabs">
+      <button class=${"db-tab" + (chatTab === "settings" ? " is-active" : "")} onClick=${() => setChatTab("settings")}>Settings</button>
+      <button class=${"db-tab" + (chatTab === "conversations" ? " is-active" : "")} onClick=${() => setChatTab("conversations")}>
+        Conversations${liveChats.length > 0 ? html` <span class="db-pill-live">🟢 ${liveChats.length}</span>` : ""}
+      </button>
+    </div>
+  ` : "";
+
+  const body = html`
+    <div class="db-overview chatpage">
+      <div class="golive-focus golive-focus-wide">
+        ${chatTabs}
+        ${chatTab === "conversations" && hasChat ? conversationsPanel : chatPanel}
+      </div>
+    </div>
+    ${liveSid ? html`<${LiveChatModal} agent=${agent} sid=${liveSid} onClose=${() => { setLiveSid(null); loadChatLogs(); }} />` : ""}
+    ${detailId ? html`<${CallDetailModal} loading=${detailLoading} data=${detail} agent=${agent} onClose=${() => { setDetailId(null); setDetail(null); }} />` : ""}
+  `;
+
   return html`
     <${DashboardShell}
       activeKey="chat"
@@ -11201,7 +11377,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
       title="Chat widget"
       subtitle=${`A text version of ${agent.name} for your website — same brain, knowledge and lead capture, no mic.`}
       onNav=${onNav}
-      body=${html`<div class="db-overview chatpage"><div class="golive-focus golive-focus-wide">${chatPanel}${chatLogsPanel}</div></div>`}
+      body=${body}
     />
   `;
 }
