@@ -1523,8 +1523,9 @@ def _show_form_decl():
         description=(
             "Render an inline form to collect structured details in one go (e.g. a booking "
             "or lead-capture form) instead of asking field-by-field. Prefer this when you "
-            "need 2+ specifics. Reuse the extraction-schema field keys where they fit. Max "
-            "6 fields. Write a one-line lead-in too. Text chat only."
+            "need 2+ specifics. Include ONLY fields you don't already have — never re-ask "
+            "details the visitor already gave. Reuse the extraction-schema field keys where "
+            "they fit. Max 6 fields. Write a one-line lead-in too. Text chat only."
         ),
         parameters=types.Schema(
             type=types.Type.OBJECT,
@@ -1633,8 +1634,14 @@ def _agent_chat_system_prompt(agent: dict[str, Any]) -> str:
         "the visitor typing.\n"
         "• You may share links. Use ONLY the business info + knowledge below — never invent "
         "prices, stock, availability or facts. If unsure, say so and offer to take details.\n"
-        "• Acknowledge briefly, answer, then move the visitor toward the goal (book / capture "
-        "the lead / resolve the query).",
+        "• GUIDE THE VISITOR: after every answer, take them ONE step closer to the goal "
+        "(book / capture the lead / resolve the query). End with a focused follow-up question "
+        "or the obvious next step — offer quick_replies for choices. Never leave the chat on a "
+        "dead stop; always give a clear way forward. (Once the goal is met, wrap up with end_call.)\n"
+        "• REMEMBER WHAT THEY'VE TOLD YOU: track everything the visitor has already shared in "
+        "this chat (name, phone, email, dates, vehicle, party size, preferences, …). NEVER ask "
+        "for the same detail twice or re-confirm what you already have. When you show a form, "
+        "include ONLY the fields you don't already know — drop the ones already answered.",
         f"\n━━━ WHO YOU ARE ━━━\n{persona}",
     ]
     if agent_prompt.strip():
