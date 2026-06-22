@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 296;
+const SXAI_BUILD = 297;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -11040,6 +11040,72 @@ function TelephonyPanel({ agent, refreshAgent }) {
 // AgentChatPage — dedicated page for the chat widget (its own menu item),
 // split out of Go-live. Snippet + appearance/behaviour/trust settings on the
 // left, a live preview on the right; paywall when the add-on isn't active.
+// ChatDetailDrawer — slide-in panel showing a past chat's full transcript +
+// captured info + CSAT (Build 297). Replaces the centered modal for the
+// Conversations tab.
+function ChatDetailDrawer({ loading, data, agent, onClose }) {
+  const ex = (data && !data._err && data.extracted && typeof data.extracted === "object") ? data.extracted : {};
+  const csat = ex.csat;
+  const fields = Object.entries(ex).filter(([k]) => k !== "csat" && k !== "csat_comment" && k !== "handoff_requested" && k !== "handoff_reason");
+  const fmtWhen = (ts) => { try { return new Date(ts).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
+  return html`
+    <div class="chatdrawer-backdrop" onClick=${onClose}>
+      <aside class="chatdrawer" onClick=${(e) => e.stopPropagation()}>
+        <header class="chatdrawer-head">
+          <div class="chatdrawer-head-meta">
+            <div class="chatdrawer-title">Chat details</div>
+            ${data && !data._err && !loading ? html`
+              <div class="chatdrawer-headrow">
+                <span class=${"call-outcome call-outcome-" + (data.outcome || "unknown")}>${(data.outcome || "unknown").replace(/_/g, " ")}</span>
+                <span class="chatdrawer-when">${fmtWhen(data.started_at)}${data.duration_s ? ` · ${Math.round(data.duration_s)}s` : ""}</span>
+              </div>` : ""}
+          </div>
+          <button class="db-modal-close" type="button" aria-label="Close" onClick=${onClose}>×</button>
+        </header>
+        <div class="chatdrawer-body">
+          ${loading ? html`<div class="db-loading-sm" style=${{ padding: "20px 0" }}>Loading…</div>`
+            : data?._err ? html`<div class="db-form-help" style=${{ padding: "20px 0" }}>Couldn't load this chat.</div>`
+            : data ? html`
+              ${csat ? html`
+                <div class=${"chatdrawer-csat chatdrawer-csat-" + csat}>
+                  ${csat === "up" ? "👍 Visitor rated this Good" : "👎 Visitor said it could be better"}
+                  ${ex.csat_comment ? html`<span class="chatdrawer-csat-note">“${ex.csat_comment}”</span>` : ""}
+                </div>` : ""}
+              ${ex.handoff_requested ? html`<div class="chatdrawer-handoff">🙋 Human handoff was requested${ex.handoff_reason ? html` — ${ex.handoff_reason}` : ""}</div>` : ""}
+              ${data.summary ? html`<div class="chatdrawer-section"><div class="chatdrawer-label">Summary</div><p class="chatdrawer-summary">${data.summary}</p></div>` : ""}
+              ${fields.length ? html`
+                <div class="chatdrawer-section">
+                  <div class="chatdrawer-label">Captured info</div>
+                  <div class="chatdrawer-fields">
+                    ${fields.map(([k, v], i) => html`
+                      <div key=${i} class="chatdrawer-field">
+                        <span class="chatdrawer-field-k">${String(k).replace(/_/g, " ")}</span>
+                        <span class="chatdrawer-field-v">${v && typeof v === "object" ? JSON.stringify(v) : String(v)}</span>
+                      </div>`)}
+                  </div>
+                </div>` : ""}
+              <div class="chatdrawer-section">
+                <div class="chatdrawer-label">Transcript</div>
+                ${(data.transcript_turns || []).length === 0
+                  ? html`<div class="db-form-help">No transcript was captured for this chat.</div>`
+                  : html`<div class="chatdrawer-tx">
+                      ${(data.transcript_turns || []).map((t, i) => {
+                        const isUser = /^(user|caller|human)/i.test(t.role || "");
+                        return html`
+                          <div key=${i} class=${"chatdrawer-msg " + (isUser ? "is-user" : "is-agent")}>
+                            <span class="chatdrawer-who">${isUser ? "Visitor" : (agent?.name || "AI")}</span>
+                            <div class="chatdrawer-bubble">${t.text}</div>
+                          </div>`;
+                      })}
+                    </div>`}
+              </div>
+            ` : ""}
+        </div>
+      </aside>
+    </div>
+  `;
+}
+
 // LiveChatModal — operator watches a live visitor chat in real time and can
 // JOIN as a human (pausing the AI) via /ws/session?mode=chat_observe (Build 290).
 function LiveChatModal({ agent, sid, onClose }) {
@@ -11587,7 +11653,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
       </div>
     </div>
     ${liveSid ? html`<${LiveChatModal} agent=${agent} sid=${liveSid} onClose=${() => { setLiveSid(null); loadChatLogs(); }} />` : ""}
-    ${detailId ? html`<${CallDetailModal} loading=${detailLoading} data=${detail} agent=${agent} onClose=${() => { setDetailId(null); setDetail(null); }} />` : ""}
+    ${detailId ? html`<${ChatDetailDrawer} loading=${detailLoading} data=${detail} agent=${agent} onClose=${() => { setDetailId(null); setDetail(null); }} />` : ""}
     ${instrFull ? html`
       <div class="db-modal-backdrop" onClick=${() => setInstrFull(false)}>
         <div class="db-modal chatinstr-modal" onClick=${(e) => e.stopPropagation()}>
