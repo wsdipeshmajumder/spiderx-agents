@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 294;
+const SXAI_BUILD = 295;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -11542,26 +11542,29 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   `;
 
   const chatTabs = hasChat ? html`
-    <div class="chatpage-tabbar">
-      <div class="db-tabs chatpage-tabs">
-        <button class=${"db-tab" + (chatTab === "settings" ? " is-active" : "")} onClick=${() => setChatTab("settings")}>Settings</button>
-        <button class=${"db-tab" + (chatTab === "conversations" ? " is-active" : "")} onClick=${() => setChatTab("conversations")}>
-          Conversations${liveChats.length > 0 ? html` <span class="db-pill-live">🟢 ${liveChats.length}</span>` : ""}
-        </button>
-      </div>
-      <div class="chatembed-codeanchor">
-        <button type="button" class=${"db-btn-primary db-btn-sm chatembed-codebtn" + (embedOpen ? " is-open" : "")}
-                onClick=${() => setEmbedOpen((o) => !o)}>
-          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-          <span>Embed code</span>
-        </button>
-        ${embedOpen ? html`
-          <div class="chatembed-codebackdrop" onClick=${() => setEmbedOpen(false)}></div>
-          ${embedFlyout}
-        ` : ""}
-      </div>
+    <div class="db-tabs chatpage-tabs">
+      <button class=${"db-tab" + (chatTab === "settings" ? " is-active" : "")} onClick=${() => setChatTab("settings")}>Settings</button>
+      <button class=${"db-tab" + (chatTab === "conversations" ? " is-active" : "")} onClick=${() => setChatTab("conversations")}>
+        Conversations${liveChats.length > 0 ? html` <span class="db-pill-live">🟢 ${liveChats.length}</span>` : ""}
+      </button>
     </div>
   ` : "";
+
+  // "Embed code" button + flyout — rendered in the page header (top-right, level
+  // with the headline) via DashboardShell's actions slot.
+  const embedAction = hasChat ? html`
+    <div class="chatembed-codeanchor">
+      <button type="button" class=${"db-btn-primary db-btn-sm chatembed-codebtn" + (embedOpen ? " is-open" : "")}
+              onClick=${() => setEmbedOpen((o) => !o)}>
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        <span>Embed code</span>
+      </button>
+      ${embedOpen ? html`
+        <div class="chatembed-codebackdrop" onClick=${() => setEmbedOpen(false)}></div>
+        ${embedFlyout}
+      ` : ""}
+    </div>
+  ` : null;
 
   const body = html`
     <div class="db-overview chatpage">
@@ -11600,6 +11603,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
       plan=${plan}
       title="Chat widget"
       subtitle=${`A text version of ${agent.name} for your website — same brain, knowledge and lead capture, no mic.`}
+      actions=${embedAction}
       onNav=${onNav}
       body=${body}
     />

@@ -1287,10 +1287,7 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   background: rgba(16,185,129,0.12); border-radius: 999px; padding: 1px 8px; vertical-align: middle; }
 
 /* Tab bar with a top-right "Embed code" flyout (Build 291) */
-.chatpage-tabbar { display: flex; align-items: flex-end; justify-content: space-between;
-  gap: 12px; margin-bottom: 16px; border-bottom: 1px solid var(--border, #e6e8ef); }
-.chatpage-tabbar .db-tabs { margin-bottom: 0; border-bottom: none; }
-.chatembed-codeanchor { position: relative; padding-bottom: 6px; }
+.chatembed-codeanchor { position: relative; }
 .chatembed-codebtn { display: inline-flex; align-items: center; gap: 6px; }
 .chatembed-codebtn.is-open { box-shadow: 0 0 0 3px rgba(79,70,229,0.18); }
 .chatembed-codebackdrop { position: fixed; inset: 0; z-index: 55; }
