@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 295;
+const SXAI_BUILD = 296;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -11404,47 +11404,6 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
             </button>
             <span class="db-form-help">Card numbers are auto-masked in stored transcripts. Leave domains blank to allow any site. Behaviour is shared across channels — only the look is chat-specific.</span>
           </div>
-          ${kbInfo ? html`
-          <div class="chatkb">
-            <div class="chatcfg-head" style=${{ marginTop: "20px" }}>What this chat knows <span class="db-form-opt">(shared brain — same as the phone line)</span></div>
-            <p class="db-form-help" style=${{ marginTop: "-4px" }}>Exactly what ${agent.name} draws on to answer in chat. Edit these on the Knowledge, Outcomes and Voice & behaviour pages — changes apply to every channel.</p>
-            <div class="chatkb-grid">
-              <div class="chatkb-card">
-                <div class="chatkb-card-h">📚 Knowledge topics</div>
-                ${kbInfo.knowledge_groups && kbInfo.knowledge_groups.length
-                  ? html`<ul class="chatkb-list">${kbInfo.knowledge_groups.map((g, i) => html`<li key=${i}>${g.emoji} ${g.label}</li>`)}</ul>`
-                  : html`<div class="chatkb-empty">No reference knowledge groups yet — add them on the Knowledge page so the chat can answer from your content.</div>`}
-                ${kbInfo.business_facts_present ? html`<div class="chatkb-foot">✓ Business facts filled in</div>` : ""}
-              </div>
-              <div class="chatkb-card">
-                <div class="chatkb-card-h">🛠 Actions it can take</div>
-                ${kbInfo.tools && kbInfo.tools.length
-                  ? html`<ul class="chatkb-list">${kbInfo.tools.map((t, i) => html`<li key=${i}>${t.label}</li>`)}</ul>`
-                  : html`<div class="chatkb-empty">No tools connected — it can answer + capture leads, but can't book/look-up yet.</div>`}
-              </div>
-              <div class="chatkb-card">
-                <div class="chatkb-card-h">🎯 Goals it works toward</div>
-                ${kbInfo.outcomes && kbInfo.outcomes.length
-                  ? html`<div class="chatkb-tags">${kbInfo.outcomes.map((o, i) => html`<span key=${i} class="chatkb-tag">${String(o).replace(/_/g, " ")}</span>`)}</div>`
-                  : html`<div class="chatkb-empty">—</div>`}
-              </div>
-              <div class="chatkb-card">
-                <div class="chatkb-card-h">📝 Info it captures</div>
-                ${kbInfo.captured_fields && kbInfo.captured_fields.length
-                  ? html`<div class="chatkb-tags">${kbInfo.captured_fields.slice(0, 20).map((f, i) => html`<span key=${i} class="chatkb-tag">${f.label || f.field}</span>`)}</div>`
-                  : html`<div class="chatkb-empty">—</div>`}
-              </div>
-              <div class="chatkb-card">
-                <div class="chatkb-card-h">🗣 Language</div>
-                <div class="chatkb-line">${kbInfo.language}</div>
-              </div>
-              ${(kbInfo.guardrails && kbInfo.guardrails.length) || (kbInfo.donts && kbInfo.donts.length) ? html`
-              <div class="chatkb-card">
-                <div class="chatkb-card-h">🚧 Guardrails</div>
-                <ul class="chatkb-list">${[...(kbInfo.guardrails || []), ...((kbInfo.donts || []).map((d) => /^don'?t/i.test(String(d).trim()) ? d : "Don't " + d))].slice(0, 6).map((g, i) => html`<li key=${i}>${g}</li>`)}</ul>
-              </div>` : ""}
-            </div>
-          </div>` : ""}
         </div>
         </div>
         <aside class="chatcfg-preview-col">
@@ -11544,10 +11503,61 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   const chatTabs = hasChat ? html`
     <div class="db-tabs chatpage-tabs">
       <button class=${"db-tab" + (chatTab === "settings" ? " is-active" : "")} onClick=${() => setChatTab("settings")}>Settings</button>
+      <button class=${"db-tab" + (chatTab === "knowledge" ? " is-active" : "")} onClick=${() => setChatTab("knowledge")}>What it knows</button>
       <button class=${"db-tab" + (chatTab === "conversations" ? " is-active" : "")} onClick=${() => setChatTab("conversations")}>
         Conversations${liveChats.length > 0 ? html` <span class="db-pill-live">🟢 ${liveChats.length}</span>` : ""}
       </button>
     </div>
+  ` : "";
+
+  // Read-only disclosure of the shared brain the chat draws on — its own tab.
+  const knowledgePanel = hasChat ? html`
+    <section class="db-panel">
+      <div class="db-panel-head">
+        <div>
+          <h3 class="db-panel-title">What this chat knows</h3>
+          <p class="db-panel-sub">Exactly what ${agent.name} draws on to answer in chat — the same brain as the phone line. Edit these on the Knowledge, Outcomes and Voice & behaviour pages; changes apply to every channel.</p>
+        </div>
+      </div>
+      ${kbInfo === null ? html`<div class="db-loading-sm">Loading…</div>` : html`
+        <div class="chatkb-grid">
+          <div class="chatkb-card">
+            <div class="chatkb-card-h">📚 Knowledge topics</div>
+            ${kbInfo.knowledge_groups && kbInfo.knowledge_groups.length
+              ? html`<ul class="chatkb-list">${kbInfo.knowledge_groups.map((g, i) => html`<li key=${i}>${g.emoji} ${g.label}</li>`)}</ul>`
+              : html`<div class="chatkb-empty">No reference knowledge groups yet — add them on the Knowledge page so the chat can answer from your content.</div>`}
+            ${kbInfo.business_facts_present ? html`<div class="chatkb-foot">✓ Business facts filled in</div>` : ""}
+          </div>
+          <div class="chatkb-card">
+            <div class="chatkb-card-h">🛠 Actions it can take</div>
+            ${kbInfo.tools && kbInfo.tools.length
+              ? html`<ul class="chatkb-list">${kbInfo.tools.map((t, i) => html`<li key=${i}>${t.label}</li>`)}</ul>`
+              : html`<div class="chatkb-empty">No tools connected — it can answer + capture leads, but can't book/look-up yet.</div>`}
+          </div>
+          <div class="chatkb-card">
+            <div class="chatkb-card-h">🎯 Goals it works toward</div>
+            ${kbInfo.outcomes && kbInfo.outcomes.length
+              ? html`<div class="chatkb-tags">${kbInfo.outcomes.map((o, i) => html`<span key=${i} class="chatkb-tag">${String(o).replace(/_/g, " ")}</span>`)}</div>`
+              : html`<div class="chatkb-empty">—</div>`}
+          </div>
+          <div class="chatkb-card">
+            <div class="chatkb-card-h">📝 Info it captures</div>
+            ${kbInfo.captured_fields && kbInfo.captured_fields.length
+              ? html`<div class="chatkb-tags">${kbInfo.captured_fields.slice(0, 20).map((f, i) => html`<span key=${i} class="chatkb-tag">${f.label || f.field}</span>`)}</div>`
+              : html`<div class="chatkb-empty">—</div>`}
+          </div>
+          <div class="chatkb-card">
+            <div class="chatkb-card-h">🗣 Language</div>
+            <div class="chatkb-line">${kbInfo.language}</div>
+          </div>
+          ${(kbInfo.guardrails && kbInfo.guardrails.length) || (kbInfo.donts && kbInfo.donts.length) ? html`
+          <div class="chatkb-card">
+            <div class="chatkb-card-h">🚧 Guardrails</div>
+            <ul class="chatkb-list">${[...(kbInfo.guardrails || []), ...((kbInfo.donts || []).map((d) => /^don'?t/i.test(String(d).trim()) ? d : "Don't " + d))].slice(0, 6).map((g, i) => html`<li key=${i}>${g}</li>`)}</ul>
+          </div>` : ""}
+        </div>
+      `}
+    </section>
   ` : "";
 
   // "Embed code" button + flyout — rendered in the page header (top-right, level
@@ -11570,7 +11580,10 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
     <div class="db-overview chatpage">
       <div class="golive-focus golive-focus-wide">
         ${chatTabs}
-        ${chatTab === "conversations" && hasChat ? conversationsPanel : chatPanel}
+        ${!hasChat ? chatPanel
+          : chatTab === "conversations" ? conversationsPanel
+          : chatTab === "knowledge" ? knowledgePanel
+          : chatPanel}
       </div>
     </div>
     ${liveSid ? html`<${LiveChatModal} agent=${agent} sid=${liveSid} onClose=${() => { setLiveSid(null); loadChatLogs(); }} />` : ""}
