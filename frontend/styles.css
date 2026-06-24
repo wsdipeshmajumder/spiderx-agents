@@ -2510,6 +2510,14 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 .wiz-altbtn:hover { background: #eef0f5; border-color: #c8cdda; color: #1f2937; }
+/* Armed mode-switch confirm (Build 268). */
+.wiz-switch-note { font-size: 12px; color: #6b7080; margin-right: 4px; }
+.wiz-altbtn-go {
+  background: #4f46e5; border-color: #4f46e5; color: #fff;
+}
+.wiz-altbtn-go:hover { background: #4338ca; border-color: #4338ca; color: #fff; }
+:root[data-theme="dark"] .wiz-switch-note { color: #99a0b3; }
+:root[data-theme="dark"] .wiz-altbtn-go { background: #6366f1; border-color: #6366f1; color: #fff; }
 .wiz-close {
   display: inline-flex; align-items: center; justify-content: center;
   width: 30px; height: 30px; border-radius: 8px; color: #6a6f7e; cursor: pointer;
@@ -2546,6 +2554,35 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   box-shadow: 0 3px 10px rgba(30, 27, 75, 0.22);
 }
 .wiz-suggests { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+
+/* Per-day business-hours editor (Build 299) */
+.wiz-hours { display: flex; flex-direction: column; gap: 6px;
+  border: 1px solid #d8dae3; border-radius: 12px; padding: 10px 12px; background: #fafbfc; }
+.wiz-hours-row { display: flex; align-items: center; gap: 10px; min-height: 34px; }
+.wiz-hours-row.is-closed { opacity: 0.72; }
+.wiz-hours-day { width: 42px; flex-shrink: 0; font-size: 13.5px; font-weight: 700; color: #1f2937; }
+.wiz-hours-toggle { width: 78px; flex-shrink: 0; font: inherit; font-size: 12.5px; font-weight: 600;
+  color: #6b7280; background: #fff; border: 1px solid #d8dae3; border-radius: 8px; padding: 5px 0; cursor: pointer;
+  transition: background .12s, border-color .12s, color .12s; }
+.wiz-hours-toggle:hover { border-color: #b9bed0; }
+.wiz-hours-toggle.is-open { background: #ecfdf5; border-color: #6ee7b7; color: #047857; }
+.wiz-hours-time { font: inherit; font-size: 13px; color: #1f2937; background: #fff;
+  border: 1px solid #d8dae3; border-radius: 8px; padding: 5px 8px; }
+.wiz-hours-time:focus { outline: none; border-color: #818cf8; box-shadow: 0 0 0 3px rgba(129,140,248,.18); }
+.wiz-hours-dash { color: #9aa0ad; }
+.wiz-hours-closedlabel { font-size: 13px; color: #9aa0ad; font-style: italic; }
+.wiz-hours-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  flex-wrap: wrap; margin-top: 6px; padding-top: 8px; border-top: 1px solid #e9ebf0; }
+.wiz-hours-copy { font: inherit; font-size: 12.5px; font-weight: 600; color: #4f46e5;
+  background: none; border: 0; padding: 0; cursor: pointer; }
+.wiz-hours-copy:hover { text-decoration: underline; }
+.wiz-hours-preview { font-size: 12px; color: #6b7280; }
+.wiz-hours-preview strong { color: #1f2937; font-weight: 600; }
+:root[data-theme="dark"] .wiz-hours { background: #161a26; border-color: #2a2e44; }
+:root[data-theme="dark"] .wiz-hours-day { color: #e6e8f2; }
+:root[data-theme="dark"] .wiz-hours-toggle, :root[data-theme="dark"] .wiz-hours-time { background: #1b1f33; border-color: #3a3f52; color: #cbd2e0; }
+:root[data-theme="dark"] .wiz-hours-toggle.is-open { background: #0c2a22; border-color: #134e3a; color: #6ee7b7; }
+:root[data-theme="dark"] .wiz-hours-foot { border-top-color: #2a2e44; }
 .wiz-suggest {
   font: inherit; font-size: 12px; font-weight: 600; color: #6366f1;
   background: #eef2ff; border: 1px solid #e0e7ff; border-radius: 999px;

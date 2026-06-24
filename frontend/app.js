@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 298;
+const SXAI_BUILD = 299;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -3336,11 +3336,126 @@ function _mapYamlToAnswers(parsed, questions) {
 // Data: GET /api/build/template?industry=&locale= → { questions[], persona,
 // sector, intro }. On finish: POST /api/build/wizard → { agent } → same reveal
 // path as chat/voice.
+// ─────────────────────────────────────────────────────────────────────────
+// WizardHoursEditor (Build 299) — per-day business-hours editor for the
+// wizard's "Hours" field. Different days can have different timings (tester
+// feedback). Named distinctly from the settings-page `HoursEditor` (a separate
+// machine-format editor) — they must not collide.
+// Edits a 7-day open/closed + from/to model and SERIALISES back to the compact
+// human string the rest of the pipeline already consumes (e.g. the agent
+// prompt) — "Mon–Sat 9:30 AM–8:00 PM, Sun closed" — so nothing downstream
+// changes. Best-effort PARSES an existing/AI-prefilled string on load.
+// ─────────────────────────────────────────────────────────────────────────
+const _HRS_DAYS = [["mon", "Mon"], ["tue", "Tue"], ["wed", "Wed"], ["thu", "Thu"], ["fri", "Fri"], ["sat", "Sat"], ["sun", "Sun"]];
+
+function _hhmmTo12(t) {
+  if (!t || !/^\d{1,2}:\d{2}$/.test(t)) return t || "";
+  let [h, m] = t.split(":").map(Number);
+  const ap = h >= 12 ? "PM" : "AM";
+  let hh = h % 12; if (hh === 0) hh = 12;
+  return `${hh}:${String(m).padStart(2, "0")} ${ap}`;
+}
+
+function _serializeHours(state) {
+  const sig = (k) => state[k].open ? `${state[k].from}|${state[k].to}` : "closed";
+  const out = [];
+  let i = 0;
+  while (i < _HRS_DAYS.length) {
+    const s = sig(_HRS_DAYS[i][0]);
+    let j = i;
+    while (j + 1 < _HRS_DAYS.length && sig(_HRS_DAYS[j + 1][0]) === s) j++;
+    const lbl = i === j ? _HRS_DAYS[i][1] : `${_HRS_DAYS[i][1]}–${_HRS_DAYS[j][1]}`;
+    const d = state[_HRS_DAYS[i][0]];
+    out.push(d.open ? `${lbl} ${_hhmmTo12(d.from)}–${_hhmmTo12(d.to)}` : `${lbl} closed`);
+    i = j + 1;
+  }
+  return out.join(", ");
+}
+
+function _parseHours(text) {
+  const keys = _HRS_DAYS.map((d) => d[0]);
+  const idx = {}; keys.forEach((k, i) => { idx[k] = i; });
+  const state = {}; keys.forEach((k) => { state[k] = { open: false, from: "09:00", to: "18:00" }; });
+  const fallbackOpen = () => keys.forEach((k) => { state[k].open = (k !== "sun"); });
+  if (!text || typeof text !== "string" || !text.trim()) { fallbackOpen(); return state; }
+  const norm = String(text).toLowerCase().replace(/[–—]/g, "-").replace(/[  ]/g, " ");
+  const dayRe = /\b(mon|tue|wed|thu|fri|sat|sun)[a-z]*\b(?:\s*(?:-|to|through|thru)\s*\b(mon|tue|wed|thu|fri|sat|sun)[a-z]*\b)?/;
+  const timeRe = /(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|to)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/;
+  const to24 = (h, m, ap) => { h = +h; m = m ? +m : 0; if (ap === "pm" && h < 12) h += 12; if (ap === "am" && h === 12) h = 0; return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`; };
+  let any = false;
+  norm.split(/[,;]+/).forEach((part) => {
+    const dm = part.match(dayRe);
+    if (!dm) return;
+    const a = idx[dm[1].slice(0, 3)];
+    const b = dm[2] != null ? idx[dm[2].slice(0, 3)] : a;
+    const range = [];
+    if (a <= b) { for (let i = a; i <= b; i++) range.push(keys[i]); }
+    else { for (let i = a; i < 7; i++) range.push(keys[i]); for (let i = 0; i <= b; i++) range.push(keys[i]); }
+    if (/clos|off|shut/.test(part)) { range.forEach((k) => { state[k].open = false; }); any = true; return; }
+    const tm = part.match(timeRe);
+    if (tm) {
+      let oap = tm[3], cap = tm[6];
+      if (!cap && oap) cap = oap;
+      if (!oap && cap) oap = (+tm[1] < +tm[4]) ? "am" : cap;   // "9-5pm" → 9am
+      const from = to24(tm[1], tm[2], oap || "am");
+      const to = to24(tm[4], tm[5], cap || "pm");
+      range.forEach((k) => { state[k] = { open: true, from, to }; });
+      any = true;
+    } else {
+      range.forEach((k) => { state[k].open = true; });
+      any = true;
+    }
+  });
+  if (!any) fallbackOpen();
+  return state;
+}
+
+function WizardHoursEditor({ value, onChange }) {
+  const [days, setDays] = useState(() => _parseHours(value));
+  const touched = useRef(false);
+  // If the field was empty, seed the answer with the shown default so the
+  // (required) field validates against what the operator actually sees.
+  useEffect(() => {
+    if (!value || !String(value).trim()) onChange(_serializeHours(_parseHours("")));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Re-parse a later (async) prefill, unless the operator already edited.
+  useEffect(() => { if (!touched.current) setDays(_parseHours(value)); }, [value]);
+
+  const commit = (next) => { touched.current = true; setDays(next); onChange(_serializeHours(next)); };
+  const update = (k, patch) => commit({ ...days, [k]: { ...days[k], ...patch } });
+  const copyMonToAll = () => { const m = days.mon; const next = {}; _HRS_DAYS.forEach(([k]) => { next[k] = { ...m }; }); commit(next); };
+
+  return html`
+    <div class="wiz-hours">
+      ${_HRS_DAYS.map(([k, lbl]) => html`
+        <div class=${"wiz-hours-row" + (days[k].open ? "" : " is-closed")} key=${k}>
+          <span class="wiz-hours-day">${lbl}</span>
+          <button type="button" class=${"wiz-hours-toggle" + (days[k].open ? " is-open" : "")}
+                  onClick=${() => update(k, { open: !days[k].open })}>
+            ${days[k].open ? "Open" : "Closed"}
+          </button>
+          ${days[k].open ? html`
+            <input type="time" class="wiz-hours-time" value=${days[k].from} onInput=${(e) => update(k, { from: e.target.value })} />
+            <span class="wiz-hours-dash">–</span>
+            <input type="time" class="wiz-hours-time" value=${days[k].to} onInput=${(e) => update(k, { to: e.target.value })} />
+          ` : html`<span class="wiz-hours-closedlabel">Closed all day</span>`}
+        </div>
+      `)}
+      <div class="wiz-hours-foot">
+        <button type="button" class="wiz-hours-copy" onClick=${copyMonToAll}>Copy Monday to all days</button>
+        <span class="wiz-hours-preview">Saved as: <strong>${_serializeHours(days)}</strong></span>
+      </div>
+    </div>
+  `;
+}
+
 function WizardView({ industry, locale, initialText, presets, onClose, onSwitchToChat, onSwitchToVoice, onAgentSaved }) {
   const [tpl, setTpl] = useState(null);
   const [loadErr, setLoadErr] = useState("");
   const [answers, setAnswers] = useState({});
   const [step, setStep] = useState(0);
+  const [pendingSwitch, setPendingSwitch] = useState(null);  // null | "chat" | "voice" — armed mode switch
   const [submitting, setSubmitting] = useState(false);
   const [submitErr, setSubmitErr] = useState("");
   const [fieldErrs, setFieldErrs] = useState({});
@@ -3625,6 +3740,12 @@ function WizardView({ industry, locale, initialText, presets, onClose, onSwitchT
         <button type="button" class=${"wiz-chip" + (v === true ? " wiz-chip-on" : "")} onClick=${() => setAnswer(q.id, true)}>Yes</button>
         <button type="button" class=${"wiz-chip" + (v === false ? " wiz-chip-on" : "")} onClick=${() => setAnswer(q.id, false)}>No</button>
       </div>`;
+    } else if (q.type === "hours" || /(^|_)hours$/i.test(q.id || "") || /\bhours\b/i.test(q.label || "")) {
+      // Per-day business-hours editor (Build 299) — serialises to the readable
+      // string the field already stored, so downstream stays unchanged.
+      control = html`<${WizardHoursEditor}
+        value=${Array.isArray(v) ? v.join(", ") : (v == null ? "" : String(v))}
+        onChange=${(s) => setAnswer(q.id, s)} />`;
     } else {
       const inputType = q.type === "email" ? "email" : q.type === "phone" ? "tel" : "text";
       const shown = Array.isArray(v) ? v.join(", ") : (v == null ? "" : v);
@@ -3683,6 +3804,22 @@ function WizardView({ industry, locale, initialText, presets, onClose, onSwitchT
   // For template builds the parent syncs answers to the build_session; for
   // dynamic (catch-all) builds it folds the use case + answers into a single
   // opening message (there's no static template for the chat to resume).
+  // Build 268 — switching build mode (form → chat/voice) is a deliberate,
+  // two-step action when the operator has already filled something, so a
+  // stray click never tears down their work. With an empty form it's a
+  // direct switch (no friction). `pendingSwitch` holds the armed target.
+  const hasAnswers = !!answers && Object.values(answers).some(
+    (v) => Array.isArray(v) ? v.length > 0 : (v != null && String(v).trim() !== "")
+  );
+  const doSwitch = (mode) => {
+    if (mode === "voice") onSwitchToVoice && onSwitchToVoice(answers, switchMeta());
+    else onSwitchToChat && onSwitchToChat(answers, switchMeta());
+  };
+  const requestSwitch = (mode) => {
+    if (!hasAnswers) { doSwitch(mode); return; }   // nothing to lose → just go
+    setPendingSwitch(mode);                          // arm the inline confirm
+  };
+
   const switchMeta = () => {
     const dynamic = !!(tpl && tpl.dynamic);
     const labelById = {};
@@ -3703,15 +3840,26 @@ function WizardView({ industry, locale, initialText, presets, onClose, onSwitchT
     <div class="wiz-head">
       <span class="wiz-pill">${tpl ? `${step + 1} of ${totalSteps}` : "…"}</span>
       <div class="wiz-head-alts">
-        <span class="wiz-head-altlabel">Prefer to</span>
-        <button class="wiz-altbtn" type="button" onClick=${() => onSwitchToChat && onSwitchToChat(answers, switchMeta())} title="Build by chatting instead — keeps what you've filled">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.5 7.2L4 20l1-4.8A8 8 0 1 1 21 12z"/></svg>
-          <span>Chat</span>
-        </button>
-        <button class="wiz-altbtn" type="button" onClick=${() => onSwitchToVoice && onSwitchToVoice(answers, switchMeta())} title="Build by talking instead — keeps what you've filled">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
-          <span>Voice</span>
-        </button>
+        ${pendingSwitch ? html`
+          <!-- Armed switch — confirm so a stray click never drops the form. -->
+          <span class="wiz-switch-note">Switch to ${pendingSwitch === "voice" ? "voice" : "chat"}? Your answers carry over.</span>
+          <button class="wiz-altbtn wiz-altbtn-go" type="button" onClick=${() => { const m = pendingSwitch; setPendingSwitch(null); doSwitch(m); }}>
+            <span>Switch to ${pendingSwitch === "voice" ? "voice" : "chat"}</span>
+          </button>
+          <button class="wiz-altbtn" type="button" onClick=${() => setPendingSwitch(null)}>
+            <span>Stay</span>
+          </button>
+        ` : html`
+          <span class="wiz-head-altlabel">Switch to</span>
+          <button class="wiz-altbtn" type="button" onClick=${() => requestSwitch("chat")} title="Build by chatting instead — keeps what you've filled">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.5 7.2L4 20l1-4.8A8 8 0 1 1 21 12z"/></svg>
+            <span>Chat</span>
+          </button>
+          <button class="wiz-altbtn" type="button" onClick=${() => requestSwitch("voice")} title="Build by talking instead — keeps what you've filled">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+            <span>Voice</span>
+          </button>
+        `}
         <button class="wiz-close" type="button" onClick=${onClose} aria-label="Close">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
         </button>
@@ -18076,6 +18224,10 @@ function App() {
   // flips to the chosen surface.
   const syncWizardThenSwitch = useCallback(async (answers, mode, meta) => {
     const loc = (locale && locale.bcp47) || navigator.language || "en-IN";
+    // Reassure the operator their form work wasn't lost in the handoff.
+    if (answers && Object.keys(answers).length) {
+      flashHint("Answers carried over — Eva won't re-ask them.", 4000);
+    }
     if (meta && meta.dynamic) {
       // Catch-all builds have no static template for the chat to resume, so
       // we fold the use case + everything filled into ONE opening message —
@@ -18106,7 +18258,7 @@ function App() {
     } else {
       setView("chat");
     }
-  }, [chatIndustry, locale, openSession]);
+  }, [chatIndustry, locale, openSession, flashHint]);
 
   // press — long-press is only meaningful in a call (hang-up gesture). On
   // the landing the blob acts like a regular button: any tap, no matter how
