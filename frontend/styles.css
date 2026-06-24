@@ -3825,6 +3825,32 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 
 /* ── call chrome ─────────────────────────────────────────────────────── */
 
+/* In-call failure overlay (Build 300) — persistent, retryable; replaces the
+   confusing "open call view then bounce to dashboard" on mic/connection fail. */
+.callerr-overlay {
+  position: fixed; inset: 0; z-index: 9;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(8, 10, 20, 0.55); backdrop-filter: blur(6px);
+  animation: rise 0.25s ease;
+}
+.callerr-card {
+  width: min(380px, 88vw);
+  background: var(--bg-0, #fff); color: var(--fg, #1f2430);
+  border-radius: 18px; padding: 26px 24px; text-align: center;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+}
+.callerr-icon {
+  width: 52px; height: 52px; margin: 0 auto 14px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; background: #fef2f2; color: #ef4444;
+}
+.callerr-title { font-size: 17px; font-weight: 700; margin-bottom: 6px; }
+.callerr-msg { font-size: 13.5px; color: var(--fg-mute, #6b7080); line-height: 1.5; margin-bottom: 18px; }
+.callerr-actions { display: flex; gap: 10px; justify-content: center; }
+.callerr-actions .db-btn-primary, .callerr-actions .db-btn-ghost { padding: 9px 18px; }
+:root[data-theme="dark"] .callerr-card { background: #14172a; color: #e6e8f0; }
+:root[data-theme="dark"] .callerr-icon { background: #2a1416; }
+
 .callchrome-top {
   position: fixed;
   top: 28px; left: 50%; transform: translateX(-50%);
