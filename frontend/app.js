@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 299;
+const SXAI_BUILD = 300;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -8803,7 +8803,7 @@ function AgentKnowledgePage({ agent, agents, presets, plan, onNav, refreshAgent 
           <div>
             <div class="db-publish-status">Closed-source knowledge</div>
             <div class="db-publish-copy">
-              ${agent.name || "Your agent"} answers <strong>only</strong> from this page and the business profile — no browsing, no Google, no Wikipedia mid-call. That means: no hallucinated prices, no invented hours, no "let me check online for you". If a fact isn't here, ${pronouns(agent).subj} politely says so or hands the caller off.
+              ${agent.name || "Your agent"} answers <strong>only</strong> from what you give ${pronouns(agent).obj} — the knowledge on this page (notes, URL imports, uploaded files) plus your business details — never the open web. No browsing, no Google, no Wikipedia mid-call. That means: no hallucinated prices, no invented hours, no "let me check online for you". If a fact isn't here, ${pronouns(agent).subj} politely says so or hands the caller off.
             </div>
           </div>
         </div>
@@ -17343,6 +17343,11 @@ function App() {
   const [splashGone, setSplashGone] = useState(true);
   const [hint, setHint] = useState(null);
   const [callState, setCallState] = useState("idle");
+  // Build 300 — persistent in-call failure (mic blocked / connection dropped
+  // before ready). Replaces the old "flash a toast then bounce back to the
+  // dashboard" path, which testers read as "Test just goes to a page and
+  // returns." We keep the call surface and show an actionable retry instead.
+  const [callError, setCallError] = useState(null);   // null | { msg, retry }
   const [agent, setAgent] = useState(null);
   const [muted, setMuted] = useState(false);
   const [timer, setTimer] = useState(0);
@@ -17817,6 +17822,7 @@ function App() {
     const startMuted  = !!(opts && opts.startMuted);
     const presetIndustry = (opts && opts.industry) || null;
     setEmbedError("");
+    setCallError(null);
     setView("call");
     // Reset the "did this session commit a new agent?" flag. closeSession
     // reads it to decide whether to surface the recovery banner.
@@ -17883,10 +17889,11 @@ function App() {
       } else {
         hint = msg.slice(0, 80) || "Couldn't start — refresh and try again.";
       }
-      flashHint(hint, 4000);
       setBlobMode("error");
-      // Shorter dismissal so the user can re-tap without waiting.
-      setTimeout(closeSession, 600);
+      // Keep the call surface and show a persistent, actionable error instead
+      // of bouncing back to the dashboard (testers read the bounce as "Test
+      // does nothing"). Retry re-runs this same session.
+      setCallError({ msg: hint, retry: () => openSessionRef.current && openSessionRef.current(testAgentId, opts) });
       return;
     }
 
@@ -17941,17 +17948,28 @@ function App() {
     };
     ws.onclose = (e) => {
       // Distinguish a clean handoff close (code 1000 / 1005) from a
-      // pre-ready failure (anything else). The pre-ready failures
-      // surface as a hint; clean closes just unwind quietly.
+      // pre-ready failure (anything else). A pre-ready failure keeps the
+      // call surface with a persistent, retryable error (so the user isn't
+      // bounced back to the dashboard wondering what happened); clean closes
+      // just unwind quietly.
       if (engineRef.current) {
         if (e && e.code && e.code !== 1000 && e.code !== 1005 && !callStartRef.current) {
           console.error("[openSession] WS closed before ready:", e.code, e.reason);
-          flashHint(
-            e.reason
-              ? `Connection dropped: ${e.reason.slice(0, 70)}`
-              : "Connection dropped before Eva picked up. Try again in a moment.",
-            3500,
-          );
+          setBlobMode("error");
+          setCallError({
+            msg: e.reason
+              ? `Connection dropped: ${e.reason.slice(0, 80)}`
+              : "Connection dropped before Eva picked up. Try again.",
+            retry: () => openSessionRef.current && openSessionRef.current(testAgentId, opts),
+          });
+          // Stop the mic/WS but DON'T tear down the call view — the error
+          // card lives there until the user retries or closes.
+          try { engineRef.current?.stop(); } catch {}
+          engineRef.current = null;
+          try { wsRef.current?.close(); } catch {}
+          wsRef.current = null;
+          setCallState("idle");
+          return;
         }
         closeSession();
       }
@@ -18714,9 +18732,24 @@ function App() {
             <div class="callchrome-top">
               <span class=${"pulse " + pulseClass}></span>
               <span class="who">${agent ? agent.name : "Eva"}</span>
-              <span class="state">${stateLabel}</span>
+              <span class="state">${callError ? "couldn't start" : stateLabel}</span>
               ${callState === "connected" ? html`<span class="timer">${fmtTimer(timer)}</span>` : ""}
             </div>
+            ${callError ? html`
+              <div class="callerr-overlay">
+                <div class="callerr-card">
+                  <div class="callerr-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 3h6v8a3 3 0 0 1-6 0V3z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/><path d="M3 3l18 18"/></svg>
+                  </div>
+                  <div class="callerr-title">Couldn't start the call</div>
+                  <div class="callerr-msg">${callError.msg}</div>
+                  <div class="callerr-actions">
+                    <button class="db-btn-primary" type="button" onClick=${() => { const r = callError.retry; setCallError(null); r && r(); }}>Try again</button>
+                    <button class="db-btn-ghost" type="button" onClick=${() => { setCallError(null); closeSession(); }}>Close</button>
+                  </div>
+                </div>
+              </div>
+            ` : ""}
             <${CaptionRail}
               userLine=${userCaption}
               agentLine=${agentCaption}
