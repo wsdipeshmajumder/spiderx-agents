@@ -90,7 +90,7 @@ Items 1–4 deliver the most checkbox movement per hour.
 `backend/app.py:APP_BUILD` and `frontend/app.js:SXAI_BUILD` must stay
 in lockstep. Bump on EVERY frontend change. `index.html` substitutes
 `{BUILD}` at request time so the `?v=` cache pin can never drift.
-Current build: **301**.
+Current build: **302**.
 
 ## Environment
 

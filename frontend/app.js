@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 301;
+const SXAI_BUILD = 302;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -3383,7 +3383,12 @@ function _parseHours(text) {
   const timeRe = /(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|to)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/;
   const to24 = (h, m, ap) => { h = +h; m = m ? +m : 0; if (ap === "pm" && h < 12) h += 12; if (ap === "am" && h === 12) h = 0; return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`; };
   let any = false;
-  norm.split(/[,;]+/).forEach((part) => {
+  // Split on newlines too (Build 302) — the settings HoursEditor serialises to
+  // a newline-joined machine form ("mon: 09:00-18:00\ntue: …\nsun: closed").
+  // Without \n each line wasn't its own clause, so a string containing any
+  // "closed" day collapsed every day to closed on reload. Splitting on \n as
+  // well makes both the comma human form and the newline machine form parse.
+  norm.split(/[,;\n]+/).forEach((part) => {
     const dm = part.match(dayRe);
     if (!dm) return;
     const a = idx[dm[1].slice(0, 3)];
