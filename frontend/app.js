@@ -43,7 +43,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 300;
+const SXAI_BUILD = 301;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -5848,7 +5848,12 @@ function AgentOverviewPage({ agent, agents, presets, plan, stats, onTest, onGoLi
         </div>
         ${recentCalls.length === 0 ? html`
           <div class="db-recent-empty">
-            <div class="db-recent-empty-sub">Nothing here yet — once ${agent.name} starts taking calls, you'll see the latest three at a glance.</div>
+            <div class="db-recent-empty-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.89.33 1.77.62 2.61a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.47-1.18a2 2 0 0 1 2.11-.45c.84.29 1.72.5 2.61.62A2 2 0 0 1 22 16.92z"/></svg>
+            </div>
+            <div class="db-recent-empty-title">No calls yet</div>
+            <div class="db-recent-empty-sub">Once ${agent.name} takes ${pronouns(agent).poss} first call, the latest three land here — outcome, summary, and duration at a glance.</div>
+            <button class="db-btn-ghost db-btn-sm" type="button" onClick=${() => onNav && onNav(`/agent/${agent.slug || agent.id}/test-call`)}>Send a test call →</button>
           </div>
         ` : html`
           <ul class="db-recent-list">
@@ -8358,10 +8363,21 @@ function detectLocale() {
 }
 
 // Save state pill shown next to the Save button.
+// Save feedback. Rendered as a FIXED toast (bottom-center) rather than an
+// inline header pill so the confirmation is visible no matter how far the
+// operator has scrolled a long settings form (tester #6 — "no way to know
+// if it saved"). Used across every settings page that threads `state`.
 function SaveStatePill({ state }) {
   if (!state) return null;
-  const cls = state.cls === "ok" ? "db-save-ok" : state.cls === "err" ? "db-save-err" : "db-save-dim";
-  return html`<span class=${"db-save-pill " + cls}>${state.msg}</span>`;
+  const cls = state.cls === "ok" ? "db-savetoast-ok" : state.cls === "err" ? "db-savetoast-err" : "db-savetoast-dim";
+  return html`<div class=${"db-savetoast " + cls} role="status" aria-live="polite">
+    ${state.cls === "ok"
+      ? html`<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.6" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg>`
+      : state.cls === "err"
+        ? html`<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M12 8v5M12 16v.5M12 3l9 16H3z"/></svg>`
+        : ""}
+    <span>${state.msg}</span>
+  </div>`;
 }
 
 // Persona & tone — name + persona one-liner + greeting + free-form prompt.
@@ -8803,7 +8819,7 @@ function AgentKnowledgePage({ agent, agents, presets, plan, onNav, refreshAgent 
           <div>
             <div class="db-publish-status">Closed-source knowledge</div>
             <div class="db-publish-copy">
-              ${agent.name || "Your agent"} answers <strong>only</strong> from what you give ${pronouns(agent).obj} — the knowledge on this page (notes, URL imports, uploaded files) plus your business details — never the open web. No browsing, no Google, no Wikipedia mid-call. That means: no hallucinated prices, no invented hours, no "let me check online for you". If a fact isn't here, ${pronouns(agent).subj} politely says so or hands the caller off.
+              ${agent.name || "Your agent"} answers <strong>only</strong> from what you give ${pronouns(agent).obj} across three places — this <strong>Knowledge</strong> page (notes, URL imports, uploaded files), your <strong>Business profile</strong>, and <strong>Additional Info</strong> — never the open web. No browsing, no Google, no Wikipedia mid-call. That means: no hallucinated prices, no invented hours, no "let me check online for you". If a fact isn't in any of those, ${pronouns(agent).subj} politely says so or hands the caller off.
             </div>
           </div>
         </div>
@@ -9241,6 +9257,13 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
           </label>
         </div>
 
+        <!-- Accent expectation (tester #9): previews are neutral; the live
+             accent follows the selected Language + a Hindi/regional system
+             prompt, so a real call sounds closer to the locale than the clip. -->
+        <p class="vs-accent-note">
+          <strong>${currentLocaleLabel}</strong> sets the language and code-switching. These previews use the voice's neutral accent — on a live call ${agent.name} leans toward your selected language. For the truest sense of the accent, use <button type="button" class="db-link-btn" onClick=${() => onNav && onNav(`/agent/${agent.slug || agent.id}/test-call`)}>a test call</button>.
+        </p>
+
         <div class="vs-card">
           <div class="vs-card-left">
             <div class="vs-avatar" style=${{ background: avatarColor(draft.voice) }}>
@@ -9677,22 +9700,22 @@ function AgentGuardrailsPage({ agent, agents, presets, plan, onNav, refreshAgent
 // (so the agent's system prompt can read it like "Mon–Fri 9 AM – 6 PM,
 // closed Sun"). Internally we keep a richer JSON-ish state on each row.
 function HoursEditor({ value, onChange }) {
-  // Parse the existing string back into structured rows if we recognise it,
-  // otherwise initialise with a sensible Mon–Sat 9–18 default. We never throw
-  // on parse — fall back gracefully so we don't strand a user with bad input.
+  // Parse the existing string back into structured rows. We reuse the build
+  // wizard's ROBUST parser (_parseHours) so hours captured during onboarding —
+  // stored in the readable "Mon–Sat 9 AM–8 PM, Sun closed" form — are read
+  // here too, not just the machine "mon: 09:00-18:00" form. Previously this
+  // editor had its own strict line-parser that only matched the machine form,
+  // so build-time hours silently fell back to the 9–18 default (tester #8).
+  // Never throws — _parseHours falls back gracefully on unrecognised input.
   const parse = (str) => {
+    const p = _parseHours(str);   // { mon: { open, from, to }, … }
     const rows = {};
-    DAYS.forEach((d) => { rows[d.id] = { closed: false, open: "09:00", close: "18:00" }; });
-    if (typeof str === "string") {
-      for (const line of str.split(/\n+/)) {
-        const m = line.match(/^\s*(mon|tue|wed|thu|fri|sat|sun)\s*[:=]\s*(closed|(\d{2}:\d{2})\s*[-–]\s*(\d{2}:\d{2}))\s*$/i);
-        if (m) {
-          const id = m[1].toLowerCase();
-          if (m[2].toLowerCase() === "closed") rows[id] = { closed: true, open: "", close: "" };
-          else rows[id] = { closed: false, open: m[3], close: m[4] };
-        }
-      }
-    }
+    DAYS.forEach((d) => {
+      const r = p[d.id] || { open: true, from: "09:00", to: "18:00" };
+      rows[d.id] = r.open
+        ? { closed: false, open: r.from || "09:00", close: r.to || "18:00" }
+        : { closed: true, open: "", close: "" };
+    });
     return rows;
   };
   const [rows, setRows] = useState(() => parse(value));
@@ -9740,6 +9763,34 @@ function HoursEditor({ value, onChange }) {
 // restaurant, neighborhoods for real-estate), and a current-offers section
 // with sector-aware placeholders. Replaces the old "Business profile"
 // section that lived inside the Overview edit drawer.
+// IANA timezone list for the Business-profile dropdown (tester #7 — free-text
+// "Asia/Kolkata" was error-prone). Prefer the browser's complete supported set
+// (modern browsers), with a curated fallback for older engines.
+const TZ_LIST = (() => {
+  try {
+    if (typeof Intl !== "undefined" && Intl.supportedValuesOf) {
+      const all = Intl.supportedValuesOf("timeZone");
+      if (Array.isArray(all) && all.length) return all;
+    }
+  } catch { /* fall through */ }
+  return [
+    "UTC",
+    "Asia/Kolkata", "Asia/Karachi", "Asia/Dhaka", "Asia/Dubai", "Asia/Riyadh",
+    "Asia/Singapore", "Asia/Bangkok", "Asia/Jakarta", "Asia/Hong_Kong",
+    "Asia/Shanghai", "Asia/Tokyo", "Asia/Manila",
+    "Europe/London", "Europe/Paris", "Europe/Berlin", "Europe/Madrid",
+    "Europe/Rome", "Europe/Amsterdam", "Europe/Moscow",
+    "America/New_York", "America/Chicago", "America/Denver",
+    "America/Los_Angeles", "America/Toronto", "America/Mexico_City",
+    "America/Sao_Paulo",
+    "Australia/Sydney", "Australia/Perth", "Pacific/Auckland",
+    "Africa/Johannesburg", "Africa/Cairo", "Africa/Lagos",
+  ];
+})();
+const _BROWSER_TZ = (() => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { return ""; }
+})();
+
 function AgentProfilePage({ agent, agents, presets, plan, onNav, refreshAgent, org }) {
   const [vars, setVars] = useState(() => ({ ...(agent.variables || {}) }));
   const [sector, setSector] = useState(agent.sector || "");
@@ -9878,9 +9929,13 @@ function AgentProfilePage({ agent, agents, presets, plan, onNav, refreshAgent, o
         </label>
         <label class="db-form-field">
           <span class="db-form-label">Timezone</span>
-          <input class="db-input" type="text" value=${vars.timezone || ""}
-                 placeholder="e.g. Asia/Kolkata"
-                 onInput=${(e) => setVar("timezone", e.target.value)} />
+          <select class="db-input" value=${vars.timezone || ""}
+                  onChange=${(e) => setVar("timezone", e.target.value)}>
+            <option value="">${_BROWSER_TZ ? `— Select (detected: ${_BROWSER_TZ}) —` : "— Select —"}</option>
+            ${/* Surface any saved value that isn't in the standard list so it's never silently dropped. */ ""}
+            ${vars.timezone && !TZ_LIST.includes(vars.timezone) ? html`<option value=${vars.timezone}>${vars.timezone}</option>` : ""}
+            ${TZ_LIST.map((tz) => html`<option key=${tz} value=${tz}>${tz}</option>`)}
+          </select>
         </label>
       </div>
       <div class="db-form-field" style=${{ marginTop: 16 }}>
@@ -18411,7 +18466,10 @@ function App() {
             onPointerCancel=${onPressCancel}
             aria-label="Tap to mute, hold to end call"
           >
-            <${VoiceBlob} engineRef=${engineRef} mode=${blobMode} size=${blobSize} />
+            <!-- Cap the blob in the embed (tester #10): the widget iframe is
+                 small, so the full-app call blobSize would crowd out the
+                 status + End-call chrome and overflow a short popover. -->
+            <${VoiceBlob} engineRef=${engineRef} mode=${blobMode} size=${Math.min(blobSize, 168)} />
           </button>
           <button class="embed-endcall" type="button"
                   onClick=${() => closeSession()}

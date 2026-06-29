@@ -1129,11 +1129,20 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 }
 :root[data-theme="dark"] .embed-err-inline { color: #f0c674; background: #2a2410; }
 
-/* Embed in-call surface (Build 263): progress status + explicit End call. */
+/* Embed in-call surface (Build 263): progress status + explicit End call.
+   Fill + clip the iframe itself (Build 301, tester #10) so the call view
+   never depends on the full-screen .stage sizing and never overflows a short
+   popover — the blob + chrome stay centered and contained. */
 .embed-call {
+  position: fixed; inset: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 20px; padding: 22px 18px;
+  gap: 18px; padding: 20px 16px;
+  box-sizing: border-box; overflow: hidden;
+  background:
+    radial-gradient(75% 60% at 50% 30%, rgba(196, 181, 253, 0.16) 0%, transparent 65%),
+    var(--bg-0);
 }
+.embed-call .blob-tap { flex-shrink: 0; max-width: 100%; }
 .embed-call-status {
   display: inline-flex; align-items: center; gap: 8px;
   font-size: 13px; font-weight: 600; color: var(--fg-mute);
@@ -2146,16 +2155,24 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   color: #6a6f7e;
   font-variant-numeric: tabular-nums;
 }
+/* Polished empty state (tester #11) — centered icon + title + sub + CTA. */
 .db-recent-empty {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 16px;
-  padding: 14px 16px;
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: 10px;
+  padding: 30px 20px;
   background: #fafbfd;
   border: 1px dashed #d8dae3;
-  border-radius: 10px;
-  flex-wrap: wrap;
+  border-radius: 12px;
 }
-.db-recent-empty-sub { font-size: 13px; color: #4a4a4a; flex: 1; min-width: 0; }
+.db-recent-empty-icon {
+  width: 52px; height: 52px; display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; background: #eef0ff; color: #6366f1; margin-bottom: 2px;
+}
+.db-recent-empty-title { font-size: 15px; font-weight: 700; color: #1f2430; }
+.db-recent-empty-sub { font-size: 13px; color: #6b7080; max-width: 360px; line-height: 1.5; }
+.db-recent-empty .db-btn-ghost { margin-top: 4px; }
+:root[data-theme="dark"] .db-recent-empty-icon { background: #1e2233; color: #c7d2fe; }
+:root[data-theme="dark"] .db-recent-empty-title { color: #e6e8f0; }
 
 :root[data-theme="dark"] .db-recent-item {
   background: #0f1119;
@@ -7465,6 +7482,21 @@ button.db-stat:disabled { cursor: default; opacity: 0.7; }
 .db-save-ok { background: #d1fae5; color: #065f46; }
 .db-save-err { background: #fee2e2; color: #991b1b; }
 .db-save-dim { background: #f1f3f6; color: #4a4a4a; }
+
+/* Fixed save toast (tester #6) — visible regardless of scroll position. */
+.db-savetoast {
+  position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+  z-index: 60;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 11px 18px; border-radius: 999px;
+  font-size: 13.5px; font-weight: 600;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+  animation: db-savetoast-in 0.22s ease;
+}
+@keyframes db-savetoast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+.db-savetoast-ok  { background: #059669; color: #fff; }
+.db-savetoast-err { background: #dc2626; color: #fff; }
+.db-savetoast-dim { background: #2c2f3a; color: #f1f3f6; }
 
 .db-panel-pill {
   display: inline-flex; align-items: center;
@@ -13482,6 +13514,10 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
   grid-template-columns: 1fr 1fr;
   gap: 18px;
   margin-bottom: 18px;
+}
+.vs-accent-note {
+  font-size: 12.5px; color: var(--fg-mute, #6b7080); line-height: 1.55;
+  margin: -6px 0 16px;
 }
 .vs-select { width: 100%; }
 
