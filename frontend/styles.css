@@ -9162,8 +9162,12 @@ button.oc-kind:disabled { cursor: default; }
   display: flex; align-items: center; justify-content: center;
   background: #eef0ff; color: #6366f1; opacity: 1;
 }
+.db-empty-rich { padding: 44px 24px 48px; }
 .db-empty-rich .db-empty-sub { max-width: 380px; margin: 0 auto; line-height: 1.55; }
-.db-empty-rich .db-btn-primary { margin-top: 14px; }
+/* The CTA is its OWN centered block under the copy — never inline inside the
+   description paragraph (tester #11: the button used to wrap into the middle of
+   the sentence). */
+.db-empty-cta { display: inline-flex; margin-top: 20px; }
 :root[data-theme="dark"] .db-empty-icon-glyph { background: #1e2233; color: #c7d2fe; }
 .db-empty-title {
   font-size: 16px;

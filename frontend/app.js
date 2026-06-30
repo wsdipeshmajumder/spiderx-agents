@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 307;
+const SXAI_BUILD = 308;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -8229,10 +8229,11 @@ function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
               </div>
               <div class="db-empty-title">${filter ? "No calls match this filter" : "No calls yet"}</div>
               <div class="db-empty-sub">${filter
-                ? html`No calls in this window had outcome <b>${filterLabel}</b>. <button class="db-btn-ghost db-btn-sm" type="button" onClick=${clearFilter} style=${{ marginLeft: "8px" }}>Show all calls</button>`
-                : html`Once ${agent.name} answers ${pronouns(agent).poss} first call, every call lands here with full transcript, outcome and summary.`}
-              ${!filter ? html`<button class="db-btn-primary" onClick=${onEdit}>Send a test call →</button>` : ""}
-              </div>
+                ? html`No calls in this window had outcome <b>${filterLabel}</b>.`
+                : html`Once ${agent.name} answers ${pronouns(agent).poss} first call, every call lands here with full transcript, outcome and summary.`}</div>
+              ${filter
+                ? html`<button class="db-btn-ghost db-btn-sm db-empty-cta" type="button" onClick=${clearFilter}>Show all calls</button>`
+                : html`<button class="db-btn-primary db-empty-cta" type="button" onClick=${onEdit}>Send a test call →</button>`}
             </div>
           </div>
         ` : html`
@@ -9146,13 +9147,32 @@ const VOICE_TONES = {
   Zephyr: { tone: "Light & breezy",        vibe: "Casual, modern. Good for D2C, lifestyle, beauty." },
 };
 
-// Render a voice as "Tone (Name)" — the attribute leads, the Greek name
+// Indian persona names for the voice picker (tester #9). On an Indian locale the
+// prebuilt Gemini voice ids (Puck, Charon, Aoede…) read as foreign, so we surface
+// a gender-matched Indian name instead. Genders follow the same female/male split
+// the rest of the app uses (Aoede/Kore/Leda/Zephyr ↔ female; Charon/Fenrir/Puck/
+// Orus ↔ male). The underlying voice id sent to the TTS engine is UNCHANGED — this
+// is display only. Non-Indian locales (en-US, es-ES, ja-JP…) keep the original id.
+const INDIAN_VOICE_NAMES = {
+  Aoede: "Ananya", Kore: "Priya", Leda: "Meera", Zephyr: "Isha",     // female
+  Charon: "Vikram", Fenrir: "Rohan", Puck: "Arjun", Orus: "Aditya",  // male
+};
+const _isIndianLocale = (loc) => /-IN$|^(hi|bn|ta|te|kn|ml|mr|gu|pa)\b/i.test(String(loc || ""));
+// Display name for a voice given the agent's locale: Indian name on -IN locales,
+// the original Gemini id everywhere else (and as the fallback for unknown ids).
+function voiceDisplay(id, locale) {
+  if (!id) return "";
+  return (_isIndianLocale(locale) && INDIAN_VOICE_NAMES[id]) || id;
+}
+
+// Render a voice as "Tone (Name)" — the attribute leads, the persona name
 // trails in brackets. Falls back to "{name} voice" if we don't have a tone
 // entry yet (custom voices, unknown ids), so the UI never shows a bare ID.
-function voiceTag(id) {
+function voiceTag(id, locale) {
   if (!id) return "";
   const t = VOICE_TONES[id]?.tone;
-  return t ? `${t} (${id})` : `${id} voice`;
+  const name = voiceDisplay(id, locale);
+  return t ? `${t} (${name})` : `${name} voice`;
 }
 
 // Single restrained audio motif used in both the hero and the tone cards.
@@ -9311,7 +9331,7 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
                     onChange=${(e) => { stopPreview(); selectVoice(e.target.value); }}>
               ${voices.map((v) => {
                 const meta = VOICE_TONES[v.id] || {};
-                return html`<option key=${v.id} value=${v.id}>${v.id} — ${meta.tone || "neutral"}</option>`;
+                return html`<option key=${v.id} value=${v.id}>${voiceDisplay(v.id, draft.locale)} — ${meta.tone || "neutral"}</option>`;
               })}
             </select>
           </label>
@@ -9327,10 +9347,10 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
         <div class="vs-card">
           <div class="vs-card-left">
             <div class="vs-avatar" style=${{ background: avatarColor(draft.voice) }}>
-              ${(draft.voice || "?").charAt(0).toUpperCase()}
+              ${(voiceDisplay(draft.voice, draft.locale) || "?").charAt(0).toUpperCase()}
             </div>
             <div class="vs-info">
-              <div class="vs-name">${draft.voice}</div>
+              <div class="vs-name">${voiceDisplay(draft.voice, draft.locale)}</div>
               <div class="vs-meta">${voiceGender(draft.voice)} · ${selectedTone}</div>
               <div class="vs-tags">
                 ${currentVoiceTags.map((t, i) => html`<span key=${i} class="vs-tag">${t}</span>`)}
@@ -9348,7 +9368,7 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
         ${draft.voice !== evaPick ? html`
           <button class="db-btn-ghost db-btn-sm vs-reset" type="button"
                   onClick=${() => { set("voice", evaPick); stopPreview(); }}>
-            Back to Eva's pick (${evaPick})
+            Back to Eva's pick (${voiceDisplay(evaPick, draft.locale)})
           </button>
         ` : ""}
 
