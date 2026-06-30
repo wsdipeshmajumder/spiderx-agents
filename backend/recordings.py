@@ -88,6 +88,18 @@ def _resolve_recording_root() -> Path:
         p.mkdir(parents=True, exist_ok=True)
     except Exception as e:  # noqa: BLE001
         log.warning("recordings.root_mkdir_failed path=%s err=%s", p, e)
+    # Loud misconfig signal (tester #13): if we're on Railway (any RAILWAY_* env
+    # is present) but landed on the ephemeral `data/recordings` fallback, every
+    # recording will be WIPED on the next redeploy and play back as a dead 0:00
+    # player. Surface it at boot so the volume mount can be fixed, rather than
+    # discovering it call-by-call. Set RECORDING_DIR (or mount a volume and let
+    # RAILWAY_VOLUME_MOUNT_PATH point at it) to a persistent path.
+    on_railway = any(k.startswith("RAILWAY_") for k in os.environ)
+    if on_railway and p == Path("data/recordings"):
+        log.warning(
+            "recordings.EPHEMERAL_STORAGE root=%s — on Railway with no persistent "
+            "volume; recordings will be LOST on redeploy. Set RECORDING_DIR or mount "
+            "a volume (RAILWAY_VOLUME_MOUNT_PATH).", p)
     log.info("recordings.root resolved to %s", p)
     return p
 
@@ -122,6 +134,28 @@ def relative_path_for(agent_id: int, call_id: int | str) -> str:
     across deploy environments (a dev dump on a different machine
     won't carry `/var/eva/...` paths)."""
     return f"{int(agent_id)}/{call_id}"
+
+
+def usable_capture_bytes(rel_path: str | None) -> int:
+    """Largest source/mixed WAV actually present on disk for a call, in bytes
+    (0 if the directory or files are gone). The DB's `recording_size_bytes` is
+    stamped at write time and SURVIVES the file — so on a deploy where the
+    recordings volume isn't persisted (the file is wiped but the row remains),
+    trusting the column alone renders a dead 0:00 player. Callers gate
+    `recording_available` on THIS instead, so a missing file shows an honest
+    status rather than an un-seekable player. (tester #13)"""
+    if not rel_path:
+        return 0
+    d = RECORDING_ROOT / str(rel_path)
+    best = 0
+    for name in ("mixed.wav", "agent.wav", "caller.wav"):
+        f = d / name
+        try:
+            if f.is_file():
+                best = max(best, f.stat().st_size)
+        except OSError:
+            continue
+    return best
 
 
 # ─── Writer ──────────────────────────────────────────────────────────────

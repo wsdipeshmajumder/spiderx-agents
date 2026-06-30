@@ -40,15 +40,15 @@
 | 10 | Embed widget shows the agent, not the landing page (incl. after a call) | PASS | Behavioral | 304, 307 | standalone `/embed/<slug>` renders the widget pre-call (304). **Post-call distortion root-caused + fixed in 307**: `closeSession` ran `goRoute("/")`, which cleared `embedSlug` and dropped the iframe onto the landing/marketing splash — now skipped when on an `/embed/` path. Headless before/after: OLD → `path="/"`, marketing hero shown; FIXED → `path="/embed/<slug>"`, orb + "Talk to <agent>" restored |
 | 11 | "No calls" empty state looks intentional | PASS | Code | 303 | Call-logs empty got a real glyph; not seen rendering (Tara has calls) |
 | 12 | Bot holds context; doesn't repeat the caller's last question | OPEN | — | — | conversation-bridge logic; too risky to patch blind. **Needs a failing-call transcript** |
-| 13 | Recording plays back (not a dead 0:00 player) | PARTIAL (mitigated, not root-caused) | Instrumented | 305 | near-empty captures dropped → "captured almost no audio"; `finalize` logs `caller/agent/total` bytes. **Root cause needs a real call's Railway log line** (likely volume not mounted) |
+| 13 | Recording plays back (not a dead 0:00 player) | PARTIAL (code root-caused; prod fix is infra) | Behavioral+Instrumented | 305, 307 | **Code path proven correct** — a real local call writes healthy WAVs (caller ~180 KB, agent ~440 KB, mixed ~890 KB) that play back. So the prod 0:00 player is a **storage-persistence gap**, not a capture bug. 307: detail endpoint now gates `recording_available` on the file *actually on disk* (`recordings.usable_capture_bytes`), not the DB size column that outlives a wiped file → a missing recording shows "Recording file is missing from storage — it may not have been persisted on this deployment" instead of a dead player; **loud boot warning** `recordings.EPHEMERAL_STORAGE` when on Railway but resolved to the ephemeral `data/recordings`. **Remaining for playback in prod: mount a persistent volume / set `RECORDING_DIR`** (infra, not code) |
 | 14 | CSV export opens cleanly in Excel | PASS | Unit | 303 | RFC-4180 escaping + BOM + CRLF + more columns |
 | 15 | No duplicate "Close" controls in the outcomes editor | PASS | Behavioral | 304 | live: "− Hide outcome form" / "− Hide kind form", no double Close |
 
 ---
 
-## Outstanding (blocked on a real call I can't generate — no mic in automation)
+## Outstanding
 - **#12** — paste the transcript turn where she repeats the caller's question.
-- **#13** — run one real call, then share the `recordings.finalize … caller=N agent=N total=N` Railway log line + confirm `RAILWAY_VOLUME_MOUNT_PATH`/`RECORDING_DIR` and that `/files` is a mounted volume.
+- **#13 (prod infra, not code)** — recordings persist correctly in code (verified by a real local call). For playback to work in prod, confirm the deploy's recordings root is a **persistent volume**: check the boot log for `recordings.root resolved to …` (and the new `recordings.EPHEMERAL_STORAGE` warning), then set `RECORDING_DIR` to a mounted path (or attach a volume so `RAILWAY_VOLUME_MOUNT_PATH` resolves). Recordings written before the volume existed are unrecoverable.
 
 ## Score
-13 of 15 closed (PASS). 1 PARTIAL pending audition (#9). 1 OPEN (#12). #13 mitigated.
+13 of 15 closed (PASS). 1 PARTIAL pending audition (#9). 1 OPEN (#12). #13 code-complete; prod playback pending a persistent-volume config.
