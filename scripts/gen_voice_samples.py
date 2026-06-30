@@ -54,8 +54,11 @@ VOICE_SAMPLES = [
      f"Say with bright, upbeat energy {_ACCENT}, like a cheerful Indian host: "
      "\"Hello ji! Bahut accha laga aapka call aaya. Tell me, how can I help you today?\""),
     ("Charon",
+     # Charon is a MALE voice — the Hindi must use masculine verb agreement
+     # ("sun raha hoon", not "rahi"). Tester #9 caught the male voice speaking
+     # the feminine form. The female voices below correctly use "sakti / rahi".
      f"Say calmly and slowly in a low, composed voice {_ACCENT}, reassuring a stressed caller: "
-     "\"Hello, aap sahi jagah pe call kiya hai. Take your time — main sun rahi hoon.\""),
+     "\"Hello, aap sahi jagah pe call kiya hai. Take your time — main sun raha hoon.\""),
     ("Kore",
      f"Say clearly and neutrally {_ACCENT}, like a crisp, professional Indian receptionist: "
      "\"Good afternoon. Main aapki kaise sahaayata kar sakti hoon?\""),
@@ -118,8 +121,15 @@ def main() -> int:
         return 1
 
     client = genai.Client(api_key=api_key)
-    print(f"writing samples to {OUT_DIR}")
+    # Optional positional args limit regeneration to named voices, e.g.
+    #   gen_voice_samples.py Charon   → re-record only Charon.wav
+    # No args regenerates all. Lets us fix one voice without re-recording (and
+    # slightly perturbing) the seven that were already approved.
+    only = {a for a in sys.argv[1:] if not a.startswith("-")}
+    print(f"writing samples to {OUT_DIR}" + (f" (only: {', '.join(sorted(only))})" if only else ""))
     for voice, prompt in VOICE_SAMPLES:
+        if only and voice not in only:
+            continue
         out = OUT_DIR / f"{voice}.wav"
         try:
             print(f"  · {voice} … ", end="", flush=True)

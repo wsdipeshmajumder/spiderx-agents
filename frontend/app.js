@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 308;
+const SXAI_BUILD = 309;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -569,7 +569,7 @@ function TheatricalUnveal({ agent, presets, onDone }) {
       <div class="unveal-tagline">
         ${sector ? html`<span>${sector}</span>` : ""}
         ${locale ? html`<span class="dot">·</span><span>${locale}</span>` : ""}
-        ${agent.voice ? html`<span class="dot">·</span><span>${voiceTag(agent.voice)}</span>` : ""}
+        ${agent.voice ? html`<span class="dot">·</span><span>${voiceTag(agent.voice, agent.locale)}</span>` : ""}
       </div>
       <button class="unveal-skip" onClick=${onDone}>Skip →</button>
     </div>
@@ -664,7 +664,7 @@ function AgentCockpit({ agent, presets, onTest, onEdit, onGoLive, onDismiss, onT
               <div class="cockpit-pills">
                 ${sectorLabel ? html`<span class="pill">${sectorLabel}</span>` : ""}
                 ${localeLabel ? html`<span class="pill">${localeLabel}</span>` : ""}
-                ${agent.voice ? html`<span class="pill accent">${voiceTag(agent.voice)}</span>` : ""}
+                ${agent.voice ? html`<span class="pill accent">${voiceTag(agent.voice, agent.locale)}</span>` : ""}
                 ${stats && stats.total > 0 ? html`<span class="pill">${stats.total} ${stats.total === 1 ? "call" : "calls"}</span>` : ""}
               </div>
             </div>
@@ -5712,7 +5712,7 @@ function AgentOverviewPage({ agent, agents, presets, plan, stats, onTest, onGoLi
             <div class="db-hero-pills">
               ${sectorLabel ? html`<span class="db-pill">${sectorLabel}</span>` : ""}
               ${localeLabel ? html`<span class="db-pill">${localeLabel}</span>` : ""}
-              ${agent.voice ? html`<span class="db-pill db-pill-accent">${voiceTag(agent.voice)}</span>` : ""}
+              ${agent.voice ? html`<span class="db-pill db-pill-accent">${voiceTag(agent.voice, agent.locale)}</span>` : ""}
             </div>
             ${greeting ? html`<div class="db-hero-greeting">"${greeting}"</div>` : ""}
             <div class="db-hero-cta">
@@ -6211,10 +6211,21 @@ function OutcomeCatalogueEditor({ agent, outcomes, onSaved }) {
       <div class="oc-drawer-head">
         <h3 class="db-panel-title">Customise outcomes <span class="db-panel-pill">${outcomes.length + unsavedAdds.length}</span></h3>
         <p class="db-panel-sub">
-          Rename what doesn't sound like how your staff talk, reclassify what counts
-          as a "win" for your business, add custom outcomes the catalogue missed,
-          or hide ones that don't apply. ${agent.sector || "This agent"} × ${agent.locale || "your locale"}.
+          At the end of every call, ${agent.name} tags it with <b>one outcome</b> — what the
+          caller wanted and whether it happened (e.g. “Test drive booked”). Outcomes are what
+          your Call log, success-rate and reports are built on. Each one has a <b>kind</b> that
+          decides how it’s counted — <b>Success</b> (a win), <b>Qualified</b> (a good lead),
+          or others like Follow-up / No outcome.
         </p>
+        <p class="db-panel-sub oc-edit-help">
+          This list is already set up for <b>${agent.sector || "your business"}</b>${agent.locale ? html` · ${agent.locale}` : ""} and works as-is —
+          you only need this section if you want to:
+        </p>
+        <ul class="oc-help-list">
+          <li><b>Rename</b> a label so it matches how your team actually talks</li>
+          <li><b>Change a kind</b> — e.g. make “Quote requested” count as a Success instead of just Qualified</li>
+          <li><b>Add</b> an outcome the list missed, or <b>hide</b> one that doesn’t apply to you</li>
+        </ul>
       </div>
 
       <!-- Build 209: action capsules moved UP from the bottom of the
@@ -9401,12 +9412,12 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
             return html`
               <div key=${v.id} class=${"db-tone-card" + (isActive ? " active" : "") + (isPlaying ? " playing" : "")}>
                 <div class="db-tone-body">
-                  <div class="db-tone-headline">${meta.tone || v.id}</div>
-                  <div class="db-tone-voice">${v.id}</div>
+                  <div class="db-tone-headline">${meta.tone || voiceDisplay(v.id, draft.locale)}</div>
+                  <div class="db-tone-voice">${voiceDisplay(v.id, draft.locale)}</div>
                   <div class="db-tone-vibe">${meta.vibe || ""}</div>
                 </div>
                 <div class="db-tone-actions">
-                  <button type="button" class="db-tone-listen" aria-label=${`Listen to ${v.id}`}
+                  <button type="button" class="db-tone-listen" aria-label=${`Listen to ${voiceDisplay(v.id, draft.locale)}`}
                           onClick=${(e) => { e.stopPropagation(); playPreview(v.id); }}>
                     ${isPlaying
                       ? html`<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg>`
@@ -9422,7 +9433,7 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
           })}
         </div>
         <p class="db-voice-hint">
-          Want to hear ${draft.voice} in a real conversation? <button class="db-link" type="button" onClick=${() => onNav && onNav(`/agent/${agent.slug || agent.id}/test-call`)}>Send yourself a test call →</button>
+          Want to hear ${voiceDisplay(draft.voice, draft.locale)} in a real conversation? <button class="db-link" type="button" onClick=${() => onNav && onNav(`/agent/${agent.slug || agent.id}/test-call`)}>Send yourself a test call →</button>
         </p>
       </details>
 
@@ -16576,7 +16587,7 @@ function DashboardAgentsList({ agents, presets, plan, onBuildNew, onOpen, onDele
                     <span class="db-card-agent-name">${a.name}</span>
                     ${business ? html`<span class="db-card-name-sep">·</span><span class="db-card-business">${business}</span>` : ""}
                   </div>
-                  <div class="db-card-sub">${sectorLabel} · ${localeLabel} · ${voiceTag(a.voice || "Aoede")}</div>
+                  <div class="db-card-sub">${sectorLabel} · ${localeLabel} · ${voiceTag(a.voice || "Aoede", a.locale)}</div>
                 </div>
                 <div class="db-card-pills">
                   ${isLive
