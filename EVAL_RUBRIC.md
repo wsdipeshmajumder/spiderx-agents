@@ -5,7 +5,7 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 306**
+**Last updated: build 307**
 
 **Evidence tiers**
 - **Behavioral** — observed live in a real browser session (prod or preview)
@@ -37,7 +37,7 @@
 |---|---|---|---|---|---|
 | 6 | Save shows a prominent, scroll-independent confirmation on every save surface | PASS | Behavioral | 303–304, 306 | portal toast (`parent: body`, `position:fixed`). **Core-purpose page was the last surface with NO toast** (form stays open on save, so the collapse-to-read confirmation never fired) — wired `SaveStatePill` into `PurposeBox` in **306**. Headless-verified: PATCH 200, toast sequence "Saving…" → "Saved ✓" |
 | 9 | en-IN voice previews sound Indian | PARTIAL (needs audition) | Asset | 305 | 8 samples re-recorded w/ Indian-accent instruction + Hinglish; `?v=BUILD` cache-bust. **Not auditioned — needs a human to listen** |
-| 10 | Embed widget shows the agent, not the landing page | PASS (pre-call) | Behavioral | 304 | standalone `/embed/<slug>` renders the widget correctly. **In-call distortion NOT re-tested** (publish gate blocks a draft-agent embed call) |
+| 10 | Embed widget shows the agent, not the landing page (incl. after a call) | PASS | Behavioral | 304, 307 | standalone `/embed/<slug>` renders the widget pre-call (304). **Post-call distortion root-caused + fixed in 307**: `closeSession` ran `goRoute("/")`, which cleared `embedSlug` and dropped the iframe onto the landing/marketing splash — now skipped when on an `/embed/` path. Headless before/after: OLD → `path="/"`, marketing hero shown; FIXED → `path="/embed/<slug>"`, orb + "Talk to <agent>" restored |
 | 11 | "No calls" empty state looks intentional | PASS | Code | 303 | Call-logs empty got a real glyph; not seen rendering (Tara has calls) |
 | 12 | Bot holds context; doesn't repeat the caller's last question | OPEN | — | — | conversation-bridge logic; too risky to patch blind. **Needs a failing-call transcript** |
 | 13 | Recording plays back (not a dead 0:00 player) | PARTIAL (mitigated, not root-caused) | Instrumented | 305 | near-empty captures dropped → "captured almost no audio"; `finalize` logs `caller/agent/total` bytes. **Root cause needs a real call's Railway log line** (likely volume not mounted) |

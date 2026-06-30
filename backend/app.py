@@ -118,7 +118,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 306
+APP_BUILD = 307
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1722,7 +1722,14 @@ async def agent_call_detail(agent_id: int, call_id: int, request: Request) -> di
     # status instead. New rows never set a path for near-empty captures.
     rec_size = int(row.get("recording_size_bytes") or 0)
     _REC_MIN_BYTES = 8000
-    rec_avail  = bool(rec_path) and not rec_purged and rec_size >= _REC_MIN_BYTES
+    # Trust the FILE, not just the DB column. recording_size_bytes is stamped at
+    # write time and outlives the file, so on a deploy where the recordings
+    # volume isn't persisted the row says "available" while the bytes are gone —
+    # which rendered a dead 0:00 player. Gate on what's actually on disk so a
+    # wiped/missing capture shows an honest, diagnostic status. (tester #13)
+    from . import recordings as _rec
+    disk_size  = _rec.usable_capture_bytes(rec_path)
+    rec_avail  = bool(rec_path) and not rec_purged and disk_size >= _REC_MIN_BYTES
     if rec_avail:
         rec_status = (
             f"Recording retained until {row['recording_expires_at']}"
@@ -1730,7 +1737,11 @@ async def agent_call_detail(agent_id: int, call_id: int, request: Request) -> di
         )
     elif rec_purged:
         rec_status = "Recording was purged at end of the 180-day retention window."
-    elif rec_path and rec_size < _REC_MIN_BYTES:
+    elif rec_path and disk_size == 0 and rec_size >= _REC_MIN_BYTES:
+        # DB shows a real capture but the file is gone — almost always a
+        # storage-persistence gap (recordings volume not mounted on this deploy).
+        rec_status = "Recording file is missing from storage — it may not have been persisted on this deployment."
+    elif rec_path and max(disk_size, rec_size) < _REC_MIN_BYTES:
         rec_status = "Recording captured almost no audio for this call."
     elif rec_path:
         rec_status = "Recording captured but file is missing on disk."
