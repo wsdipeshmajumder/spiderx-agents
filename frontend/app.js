@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 309;
+const SXAI_BUILD = 310;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -8167,12 +8167,13 @@ function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
     const cols = [
       ["id", "Call ID"],
       ["started_at", "Started"],
+      ["caller_number", "Phone"],   // was "phone_number" — a key that never existed, so Phone was always blank
       ["duration_s", "Duration (s)"],
+      ["cost_paise", "Cost (₹)"],
       ["outcome", "Outcome"],
       ["reason", "Reason"],
       ["lead_quality", "Lead"],
       ["sentiment", "Sentiment"],
-      ["phone_number", "Phone"],
       ["summary", "Summary"],
     ];
     const esc = (v) => {
@@ -8181,8 +8182,13 @@ function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
       return s;
     };
     const fmtStarted = (v) => { if (!v) return ""; const d = new Date(v); return isNaN(d) ? String(v) : d.toLocaleString(); };
+    const fmtCell = (k, v) => {
+      if (k === "started_at") return fmtStarted(v);
+      if (k === "cost_paise") return v != null ? (Number(v) / 100).toFixed(2) : "";  // paise → rupees
+      return v;
+    };
     const headerLine = cols.map((c) => esc(c[1])).join(",");
-    const rows = calls.map((c) => cols.map(([k]) => esc(k === "started_at" ? fmtStarted(c[k]) : c[k])).join(","));
+    const rows = calls.map((c) => cols.map(([k]) => esc(fmtCell(k, c[k]))).join(","));
     const csv = "﻿" + [headerLine, ...rows].join("\r\n");  // BOM → Excel reads UTF-8
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -8253,7 +8259,19 @@ function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
               <thead>
                 <tr>
                   <th>Date / Time</th>
+                  <th>
+                    Phone
+                    <${InfoDot}>
+                      The caller's number for inbound phone calls (carrier-reported). Web-widget and embed test calls have no phone number, so they show <b>—</b>.
+                    </${InfoDot}>
+                  </th>
                   <th>Duration</th>
+                  <th>
+                    Cost
+                    <${InfoDot}>
+                      What this call cost — computed from the AI tokens used and locked in per call. Abandoned and web test calls are ₹0.00.
+                    </${InfoDot}>
+                  </th>
                   <th>Outcome</th>
                   <th>
                     Lead
@@ -8291,7 +8309,13 @@ function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
                   return html`
                   <tr key=${c.id}>
                     <td>${fmtTime(c.started_at)}</td>
+                    <td>${c.caller_number
+                          ? html`<span class="db-mono">${c.caller_number}</span>`
+                          : html`<span class="db-muted">—</span>`}</td>
                     <td>${c.duration_s ? Number(c.duration_s).toFixed(1) + "s" : "—"}</td>
+                    <td>${c.cost_paise != null
+                          ? html`<span class="db-mono">₹${(Number(c.cost_paise) / 100).toFixed(2)}</span>`
+                          : html`<span class="db-muted">—</span>`}</td>
                     <td>
                       <span class=${"db-tag " + tagColor(c.outcome)}>${(c.outcome || "unknown").replace(/_/g, " ")}</span>
                       ${c.channel && c.channel !== "web_voice" ? html`<span class=${"call-channel call-channel-" + c.channel}>${c.channel === "web_chat" ? "💬 Chat" : c.channel === "phone" ? "📞 Phone" : "Web"}</span>` : ""}

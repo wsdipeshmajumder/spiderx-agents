@@ -535,6 +535,10 @@ async def handle(connector_id: str, args: dict[str, Any], agent: dict[str, Any])
                 "output_tokens": agent.get("_tokens_out"),
                 "cached_tokens": agent.get("_tokens_cached"),
                 "model_id":      agent.get("_model_id"),
+                # The other party's number, stashed by run_call from the Answer
+                # webhook (None for browser/web calls). Logged so the Call log
+                # can show who called. (build 309)
+                "caller_number": agent.get("_caller_number"),
                 "sentiment":     sentiment,
                 "lead_quality":  lead_quality,
                 "lead_signals":  lead_signals,

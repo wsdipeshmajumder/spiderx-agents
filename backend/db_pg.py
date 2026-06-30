@@ -737,7 +737,8 @@ async def insert_call(record: dict[str, Any]) -> int:
                     input_tokens, output_tokens, cached_tokens, model_id, cost_paise,
                     sentiment, lead_quality, lead_signals,
                     recording_path, recording_format, recording_size_bytes,
-                    recording_started_at, recording_expires_at, channel, visitor_key
+                    recording_started_at, recording_expires_at, channel, visitor_key,
+                    caller_number
                 ) VALUES (
                     $1, $2, COALESCE($3, now()), COALESCE($4, now()), $5,
                     $6, $7, $8, $9,
@@ -745,7 +746,8 @@ async def insert_call(record: dict[str, Any]) -> int:
                     $12, $13, $14, $15, $16,
                     $17, $18, $19,
                     $20, $21, $22,
-                    $23, $24, $25, $26
+                    $23, $24, $25, $26,
+                    $27
                 ) RETURNING id
                 """,
                 int(record["agent_id"]),
@@ -773,6 +775,7 @@ async def insert_call(record: dict[str, Any]) -> int:
                 rec_expires,
                 record.get("channel"),
                 record.get("visitor_key") or visitor_key_from_extracted(record.get("extracted")),
+                record.get("caller_number"),
             )
             # Phase 9b denormalisation — keep agents.last_call_at + calls_count
             # in lockstep with the calls table. `list_agents` reads these
@@ -1106,7 +1109,8 @@ async def list_calls_for_agent(agent_id: int, limit: int = 50,
     async with pool.acquire() as conn:
         rs = await conn.fetch(
             "SELECT id, agent_id, started_at, ended_at, duration_s, outcome, reason, summary, "
-            "       sentiment, lead_quality, lead_signals, extracted, channel "
+            "       sentiment, lead_quality, lead_signals, extracted, channel, "
+            "       cost_paise, caller_number "
             f"FROM calls WHERE agent_id = $1 {chf} ORDER BY id DESC LIMIT $2",
             agent_id, limit,
         )

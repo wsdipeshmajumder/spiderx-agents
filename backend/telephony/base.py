@@ -275,7 +275,8 @@ def _harvest_extracted(args: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-async def run_call(ws: WebSocket, provider: TelephonyProvider, agent_id: int) -> None:
+async def run_call(ws: WebSocket, provider: TelephonyProvider, agent_id: int,
+                   caller_number: Optional[str] = None) -> None:
     """Bridge a carrier's WebSocket call leg into Gemini Live for the
     given saved agent. Identical end-to-end behaviour as the in-browser
     voice tester — same connector tools, same model fallback chain, same
@@ -315,6 +316,10 @@ async def run_call(ws: WebSocket, provider: TelephonyProvider, agent_id: int) ->
     # (started_at for duration, transcript, model). Kept fresh in _bridge.
     agent["_call_started_iso"] = started_at.isoformat()
     agent["_call_started_at"] = time.monotonic()
+    # The other party's number (inbound: the caller), threaded from the Answer
+    # webhook via the WS query string. Both persist paths (end_call connector +
+    # the hangup fallback below) stamp it onto the call row. None for web calls.
+    agent["_caller_number"] = caller_number
     agent["_transcript"] = []
     # Structured fields harvested from connector calls (send_email metadata,
     # book_appointment args, …) — merged into `extracted` at persist time so
@@ -467,6 +472,7 @@ async def _persist_call(
             "extracted": dict(extra) if extra else {},
             "transcript": _json.dumps(turns, ensure_ascii=False) if turns else None,
             "model_id": model_id,
+            "caller_number": agent.get("_caller_number"),
             "recording_started_at": agent.get("_recording_started_iso"),
         }
         # Finalize the recording (if any) BEFORE insert so its path/size land
