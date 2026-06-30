@@ -8177,6 +8177,21 @@ button.oc-kind:disabled { cursor: default; }
 }
 .oc-drawer { margin-top: 8px; }
 .oc-drawer-head { margin-bottom: 10px; }
+/* "Customise outcomes" intro (tester: section purpose was unclear) — a lead
+   paragraph explaining what an outcome IS, then a scannable "you only need this
+   if…" list so the operator knows it's optional and what each action does. */
+.oc-edit-help { margin-top: 8px; }
+.oc-help-list {
+  margin: 8px 0 2px;
+  padding-left: 18px;
+  list-style: disc;
+  font-size: 13px;
+  color: var(--muted, #6a6a6a);
+  line-height: 1.6;
+}
+.oc-help-list li { margin: 2px 0; }
+.oc-help-list b { color: var(--text, #1a1a1a); font-weight: 600; }
+:root[data-theme="dark"] .oc-help-list b { color: #e8ebf2; }
 
 /* Tighten the existing weights grid */
 .oc-weight-card .oc-weight-default { font-size: 11px; }

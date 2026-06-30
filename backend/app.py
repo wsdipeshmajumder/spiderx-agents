@@ -2897,6 +2897,20 @@ async def telephony_answer(provider: str, agent_id: int, request: Request):
     # (e.g. agents.spiderx.ai) when PUBLIC_HOST isn't set — otherwise the
     # media WebSocket points at wss://YOUR-NGROK-HOST and the call has no audio.
     stream_url = f"{_public_wss_host(request)}/ws/{prov.name}/{agent_id}"
+    # Capture the caller's number (carrier `From`) here — the Answer webhook is
+    # the only request that carries it — and thread it onto the media WS URL so
+    # run_call can stamp it on the call row (Call log "Phone" column, build 309).
+    # Carriers send it as a query param (GET answer URL) or form field (POST).
+    caller = (request.query_params.get("From") or "").strip()
+    if not caller:
+        try:
+            form = await request.form()
+            caller = (form.get("From") or "").strip()
+        except Exception:  # noqa: BLE001
+            caller = ""
+    if caller:
+        from urllib.parse import quote
+        stream_url = f"{stream_url}?caller={quote(caller)}"
     body, content_type = prov.answer_xml(stream_url=stream_url, agent=a)
     return PlainTextResponse(content=body, media_type=content_type)
 
@@ -2982,8 +2996,10 @@ async def ws_telephony(ws: WebSocket, provider: str, agent_id: int) -> None:
         await ws.close(code=4004)
         return
     await ws.accept()
+    # The Answer webhook appended the caller's number to this WS URL (build 309).
+    caller_number = (ws.query_params.get("caller") or "").strip() or None
     try:
-        await run_call(ws, prov, agent_id)
+        await run_call(ws, prov, agent_id, caller_number=caller_number)
     finally:
         try:
             await ws.close()
