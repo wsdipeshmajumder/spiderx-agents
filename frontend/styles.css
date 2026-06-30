@@ -9155,6 +9155,16 @@ button.oc-kind:disabled { cursor: default; }
   background: radial-gradient(circle at 35% 30%, #fde7f3, #c4b5fd 55%, #a5f3fc 90%);
   opacity: 0.85;
 }
+/* Glyph variant (tester #11) — a real icon in a soft tinted circle instead of
+   a bare gradient blob, so the empty Call-logs page reads as intentional. */
+.db-empty-icon-glyph {
+  width: 54px; height: 54px;
+  display: flex; align-items: center; justify-content: center;
+  background: #eef0ff; color: #6366f1; opacity: 1;
+}
+.db-empty-rich .db-empty-sub { max-width: 380px; margin: 0 auto; line-height: 1.55; }
+.db-empty-rich .db-btn-primary { margin-top: 14px; }
+:root[data-theme="dark"] .db-empty-icon-glyph { background: #1e2233; color: #c7d2fe; }
 .db-empty-title {
   font-size: 16px;
   font-weight: 600;

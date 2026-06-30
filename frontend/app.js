@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { createRoot } from "react-dom/client";
+import { createPortal } from "react-dom";
 import htm from "htm";
 // marked is the markdown renderer powering MarkdownEditor's preview pane.
 // Pinned to v12 (the last commonjs-shim-free release before v13's ESM
@@ -43,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 302;
+const SXAI_BUILD = 303;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -8122,9 +8123,32 @@ function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
   };
 
   const exportCSV = () => {
-    const header = ["id", "started_at", "duration_s", "outcome", "reason", "summary"];
-    const rows = calls.map((c) => header.map((k) => JSON.stringify(c[k] ?? "")).join(","));
-    const blob = new Blob([header.join(",") + "\n" + rows.join("\n")], { type: "text/csv" });
+    // RFC-4180 CSV (Build 303, tester #14). The old export used
+    // JSON.stringify per field, which emits JSON \"-escapes — NOT the CSV
+    // ""-doubling Excel expects — so any summary with a comma/quote/newline
+    // shredded the columns. Now: quote only when needed, double inner quotes,
+    // CRLF rows, and a UTF-8 BOM so Excel renders ₹ / accented names.
+    const cols = [
+      ["id", "Call ID"],
+      ["started_at", "Started"],
+      ["duration_s", "Duration (s)"],
+      ["outcome", "Outcome"],
+      ["reason", "Reason"],
+      ["lead_quality", "Lead"],
+      ["sentiment", "Sentiment"],
+      ["phone_number", "Phone"],
+      ["summary", "Summary"],
+    ];
+    const esc = (v) => {
+      let s = v == null ? "" : String(v);
+      if (/[",\r\n]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    };
+    const fmtStarted = (v) => { if (!v) return ""; const d = new Date(v); return isNaN(d) ? String(v) : d.toLocaleString(); };
+    const headerLine = cols.map((c) => esc(c[1])).join(",");
+    const rows = calls.map((c) => cols.map(([k]) => esc(k === "started_at" ? fmtStarted(c[k]) : c[k])).join(","));
+    const csv = "﻿" + [headerLine, ...rows].join("\r\n");  // BOM → Excel reads UTF-8
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = `${agent.slug || agent.id}-calls.csv`;
@@ -8174,8 +8198,10 @@ function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
       ${loading ? html`<div class="db-empty"><div class="db-empty-sub">Loading…</div></div>` :
         calls.length === 0 ? html`
           <div class="db-panel">
-            <div class="db-empty" style=${{ margin: "16px auto" }}>
-              <div class="db-empty-icon"></div>
+            <div class="db-empty db-empty-rich" style=${{ margin: "16px auto" }}>
+              <div class="db-empty-icon db-empty-icon-glyph" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.89.33 1.77.62 2.61a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.47-1.18a2 2 0 0 1 2.11-.45c.84.29 1.72.5 2.61.62A2 2 0 0 1 22 16.92z"/></svg>
+              </div>
               <div class="db-empty-title">${filter ? "No calls match this filter" : "No calls yet"}</div>
               <div class="db-empty-sub">${filter
                 ? html`No calls in this window had outcome <b>${filterLabel}</b>. <button class="db-btn-ghost db-btn-sm" type="button" onClick=${clearFilter} style=${{ marginLeft: "8px" }}>Show all calls</button>`
@@ -8375,7 +8401,7 @@ function detectLocale() {
 function SaveStatePill({ state }) {
   if (!state) return null;
   const cls = state.cls === "ok" ? "db-savetoast-ok" : state.cls === "err" ? "db-savetoast-err" : "db-savetoast-dim";
-  return html`<div class=${"db-savetoast " + cls} role="status" aria-live="polite">
+  const toast = html`<div class=${"db-savetoast " + cls} role="status" aria-live="polite">
     ${state.cls === "ok"
       ? html`<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.6" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg>`
       : state.cls === "err"
@@ -8383,6 +8409,10 @@ function SaveStatePill({ state }) {
         : ""}
     <span>${state.msg}</span>
   </div>`;
+  // Portal to <body> so the fixed toast is positioned against the viewport,
+  // never trapped/clipped by a transformed or overflow:hidden ancestor in the
+  // page header where it's mounted (tester #6 — toast wasn't being noticed).
+  return (typeof document !== "undefined") ? createPortal(toast, document.body) : toast;
 }
 
 // Persona & tone — name + persona one-liner + greeting + free-form prompt.
