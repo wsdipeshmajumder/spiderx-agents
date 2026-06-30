@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 303;
+const SXAI_BUILD = 304;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -6207,13 +6207,13 @@ function OutcomeCatalogueEditor({ agent, outcomes, onSaved }) {
            the moment they open the editor, without scrolling past the
            full catalogue first. -->
       <div class="oc-edit-addrow oc-edit-addrow-top">
-        <button class="db-btn-ghost db-btn-sm oc-edit-add" type="button"
+        <button class=${"db-btn-ghost db-btn-sm oc-edit-add" + (adding ? " is-active" : "")} type="button"
                 onClick=${() => setAdding((v) => !v)}>
-          ${adding ? "Close" : "+ Add a custom outcome"}
+          ${adding ? "− Hide outcome form" : "+ Add a custom outcome"}
         </button>
-        <button class="db-btn-ghost db-btn-sm oc-edit-add" type="button"
+        <button class=${"db-btn-ghost db-btn-sm oc-edit-add" + (addingKind ? " is-active" : "")} type="button"
                 onClick=${() => setAddingKind((v) => !v)}>
-          ${addingKind ? "Close" : "+ Add a custom kind"}
+          ${addingKind ? "− Hide kind form" : "+ Add a custom kind"}
         </button>
         <button class="db-btn-ghost db-btn-sm oc-edit-reset" type="button"
                 onClick=${resetAll} disabled=${busy}>Reset all to defaults</button>
@@ -6315,6 +6315,11 @@ function OutcomeCatalogueEditor({ agent, outcomes, onSaved }) {
         </div>
       ` : ""}
 
+      ${/* tester #6 — fire the global save toast on a real save result (not the
+            "unsaved changes" hint); the inline footer message is easy to miss. */ ""}
+      ${msg && (msg.includes("✓") || msg.startsWith("Couldn't") || msg.startsWith("Need") || msg.includes("already"))
+        ? html`<${SaveStatePill} state=${{ msg, cls: (msg.startsWith("Couldn't") || msg.startsWith("Need") || msg.includes("already")) ? "err" : "ok" }} />`
+        : ""}
       ${dirty || msg ? html`
         <div class="oc-edit-footer">
           <div class=${"oc-edit-msg" + (msg.startsWith("Couldn't") || msg.startsWith("Need") || msg.includes("already") ? " is-err" : " is-ok")}>
@@ -6614,6 +6619,11 @@ function ChipSchemaEditor({ agent, onSaved }) {
         </div>
       `}
 
+      ${/* tester #6 — fire the global save toast on a real save result (not the
+            "unsaved changes" hint); the inline footer message is easy to miss. */ ""}
+      ${msg && (msg.includes("✓") || msg.startsWith("Couldn't") || msg.startsWith("Need") || msg.includes("already"))
+        ? html`<${SaveStatePill} state=${{ msg, cls: (msg.startsWith("Couldn't") || msg.startsWith("Need") || msg.includes("already")) ? "err" : "ok" }} />`
+        : ""}
       ${dirty || msg ? html`
         <div class="oc-edit-footer">
           <div class=${"oc-edit-msg" + (msg.startsWith("Couldn't") || msg.startsWith("Need") || msg.includes("already") ? " is-err" : " is-ok")}>
