@@ -226,9 +226,22 @@ class RecordingWriter:
             except Exception as e:  # noqa: BLE001
                 log.warning("recordings.rename_failed err=%s", e)
         total_bytes = self._caller_bytes + self._agent_bytes
-        # If nothing was written, drop the directory rather than leaving
-        # an empty pair of 44-byte WAV headers on disk forever.
-        if total_bytes == 0:
+        # Diagnostic (tester #13): log the per-channel byte breakdown so an
+        # empty / one-sided recording is debuggable from the logs — caller=0
+        # points at the inbound-mic tap, agent=0 at the TTS tap, both=0 at the
+        # writer never attaching or the volume not being writable.
+        log.info("recordings.finalize agent=%s call=%s caller=%dB agent=%dB total=%dB",
+                 self.agent_id, call_id if call_id is not None else self.call_id_token,
+                 self._caller_bytes, self._agent_bytes, total_bytes)
+        # Drop a capture with no USEFUL audio — not just 0 bytes, but anything
+        # below ~0.25s, which mixes down to a 0:00 file that renders as a
+        # broken player. Better to report "not available" than a dead control.
+        MIN_USEFUL_BYTES = 8000  # ≈ 0.25 s of 16 kHz mono int16
+        if total_bytes < MIN_USEFUL_BYTES:
+            if total_bytes > 0:
+                log.warning("recordings.finalize: near-empty capture (%dB, caller=%dB agent=%dB) "
+                            "— dropping. Check the recording volume mount + audio-pump wiring.",
+                            total_bytes, self._caller_bytes, self._agent_bytes)
             try:
                 for f in final_dir.glob("*.wav"):
                     f.unlink(missing_ok=True)
@@ -237,7 +250,7 @@ class RecordingWriter:
                 pass
             return {
                 "recording_path": None,
-                "recording_size_bytes": 0,
+                "recording_size_bytes": total_bytes,
                 "recording_format": None,
                 "recording_started_at": self._started_at,
             }

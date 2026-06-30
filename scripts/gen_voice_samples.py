@@ -37,35 +37,40 @@ OUT_DIR = ROOT / "frontend" / "voice-samples"
 # Each voice gets a line that shows it off + a style instruction prepended so
 # the TTS model leans into the tone. Lines are short (~5s) so the preview is
 # a snack, not a meal.
+#
+# Build 305 (tester #9): testers on the en-IN locale felt the old previews
+# didn't sound Indian. Gemini's prebuilt voices aren't region-locked, but the
+# accent the TTS renders follows the STYLE INSTRUCTION + the content. So every
+# line now (a) explicitly asks for a natural Indian-English accent and (b) uses
+# the lightly code-switched Hinglish an Indian front-desk actually speaks —
+# matching how the agent sounds on a real en-IN call. Re-run this script to
+# regenerate the committed .wav files after editing.
+_ACCENT = "in a natural Indian English accent"
 VOICE_SAMPLES = [
     ("Aoede",
-     "Say warmly and welcomingly, like a friendly receptionist greeting "
-     "someone they're glad to hear from: "
-     "\"Hi there — thanks for calling. How can I help you today?\""),
+     f"Say warmly and welcomingly {_ACCENT}, like a friendly Indian receptionist: "
+     "\"Namaste! Thanks for calling. Aap bataiye — main aapki kaise help kar sakti hoon?\""),
     ("Puck",
-     "Say with bright, upbeat energy, like a hospitality host happy to see you: "
-     "\"Hi! Lovely to hear from you. What can I do for you today?\""),
+     f"Say with bright, upbeat energy {_ACCENT}, like a cheerful Indian host: "
+     "\"Hello ji! Bahut accha laga aapka call aaya. Tell me, how can I help you today?\""),
     ("Charon",
-     "Say calmly and slowly in a low, composed voice, like reassuring someone "
-     "who's stressed: "
-     "\"Hello. You've reached our line. Take your time — I'm listening.\""),
+     f"Say calmly and slowly in a low, composed voice {_ACCENT}, reassuring a stressed caller: "
+     "\"Hello, aap sahi jagah pe call kiya hai. Take your time — main sun rahi hoon.\""),
     ("Kore",
-     "Say clearly and neutrally, like a professional receptionist with crisp "
-     "diction: "
-     "\"Good afternoon. How may I assist you?\""),
+     f"Say clearly and neutrally {_ACCENT}, like a crisp, professional Indian receptionist: "
+     "\"Good afternoon. Main aapki kaise sahaayata kar sakti hoon?\""),
     ("Fenrir",
-     "Say confidently and energetically, with a slight gruff edge, like a "
-     "tradesman happy to help: "
-     "\"Hey, thanks for calling — what do you need?\""),
+     f"Say confidently and energetically {_ACCENT}, with a slight gruff edge, like a helpful Indian shopkeeper: "
+     "\"Haan ji, thanks for calling. Tell me — what do you need today?\""),
     ("Leda",
-     "Say softly and conversationally, like a friend on the phone after dinner: "
-     "\"Hi, so glad you called. How can I help?\""),
+     f"Say softly and conversationally {_ACCENT}, like a warm Indian friend on the phone: "
+     "\"Hi, so glad you called. Boliye, main kya help kar sakti hoon?\""),
     ("Orus",
-     "Say in a measured, formal voice, polite and precise: "
-     "\"Good day. How may I be of service?\""),
+     f"Say in a measured, formal voice {_ACCENT}, polite and precise: "
+     "\"Good day. Kahiye, main aapki kaise seva kar sakta hoon?\""),
     ("Zephyr",
-     "Say lightly and breezily, casual and modern: "
-     "\"Hey there — how can I help out?\""),
+     f"Say lightly and breezily {_ACCENT}, casual and modern: "
+     "\"Hey, hi! Bolo na — how can I help out?\""),
 ]
 
 MODEL = "gemini-2.5-flash-preview-tts"

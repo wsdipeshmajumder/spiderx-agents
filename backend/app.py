@@ -118,7 +118,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 304
+APP_BUILD = 305
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1716,7 +1716,13 @@ async def agent_call_detail(agent_id: int, call_id: int, request: Request) -> di
     #   • otherwise → available for download via the per-call endpoint
     rec_path  = row.get("recording_path")
     rec_purged = row.get("recording_purged_at")
-    rec_avail  = bool(rec_path) and not rec_purged
+    # Build 305 (tester #13) — also require the capture to hold useful audio.
+    # Older rows stamped a recording_path for a near-empty capture, which
+    # served as a dead 0:00 player. Gate on size so those render a clear
+    # status instead. New rows never set a path for near-empty captures.
+    rec_size = int(row.get("recording_size_bytes") or 0)
+    _REC_MIN_BYTES = 8000
+    rec_avail  = bool(rec_path) and not rec_purged and rec_size >= _REC_MIN_BYTES
     if rec_avail:
         rec_status = (
             f"Recording retained until {row['recording_expires_at']}"
@@ -1724,6 +1730,8 @@ async def agent_call_detail(agent_id: int, call_id: int, request: Request) -> di
         )
     elif rec_purged:
         rec_status = "Recording was purged at end of the 180-day retention window."
+    elif rec_path and rec_size < _REC_MIN_BYTES:
+        rec_status = "Recording captured almost no audio for this call."
     elif rec_path:
         rec_status = "Recording captured but file is missing on disk."
     else:
