@@ -115,3 +115,9 @@ Current build: **305**.
   rate changes via the Pricing tab.
 - One canonical event-write path (`events.emit`), one canonical read path
   (`/api/admin/events`).
+- **Update `EVAL_RUBRIC.md` on EVERY push.** Whenever you `git push`, the same
+  commit (or the one being pushed) must update `EVAL_RUBRIC.md` to reflect
+  what changed: per affected item — acceptance criterion, verdict
+  (PASS / PARTIAL / OPEN), evidence tier (Behavioral / Unit / Code / Asset /
+  Instrumented), and the build it shipped in. Never push a behavioural change
+  without updating the rubric. Bump the rubric's "Last updated: build N" line.
