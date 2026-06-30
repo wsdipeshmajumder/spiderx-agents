@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 305;
+const SXAI_BUILD = 306;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -4918,6 +4918,10 @@ function PurposeBox({ agent, plan, defaultEditing = false }) {
   const [draft, setDraft] = useState(initial);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(null);
+  // Save toast (tester #6). On the dedicated Core-purpose page the form stays
+  // open after save, so collapsing-to-read can't act as the confirmation — the
+  // operator was getting NO signal the PATCH succeeded. Drive a SaveStatePill.
+  const [saved, setSaved] = useState({ msg: "", cls: "" });
   const [chipInput, setChipInput] = useState("");
   // Reset draft when the agent changes (e.g. user navigates to another agent).
   // Reset the form (and edit-mode) whenever we navigate to a different
@@ -4950,7 +4954,7 @@ function PurposeBox({ agent, plan, defaultEditing = false }) {
     setDraft({ ...draft, post_call: { ...draft.post_call, [k]: v } });
 
   const save = async () => {
-    setSaving(true); setErr(null);
+    setSaving(true); setErr(null); setSaved({ msg: "Saving…", cls: "dim" });
     try {
       const payload = {
         summary:   draft.summary.trim(),
@@ -4969,6 +4973,8 @@ function PurposeBox({ agent, plan, defaultEditing = false }) {
       if (!r.ok) {
         const e = await r.json().catch(() => ({}));
         setErr(e.detail?.message || e.detail || `Failed (${r.status})`);
+        setSaved({ msg: "Couldn't save — try again", cls: "err" });
+        setTimeout(() => setSaved({ msg: "", cls: "" }), 3200);
         return;
       }
       // Mutate the agent dict in place so the read-mode picks up the new
@@ -4983,6 +4989,14 @@ function PurposeBox({ agent, plan, defaultEditing = false }) {
       // embed where PurposeBox is one card among many) we still collapse
       // to read-mode so the save acts as visual confirmation.
       setEditing(defaultEditing);
+      // The form stays open on the dedicated page, so there's no collapse to
+      // signal success — surface an explicit toast (tester #6).
+      setSaved({ msg: "Saved ✓", cls: "ok" });
+      setTimeout(() => setSaved({ msg: "", cls: "" }), 2400);
+    } catch (e) {
+      setErr("Couldn't save — try again");
+      setSaved({ msg: "Couldn't save — try again", cls: "err" });
+      setTimeout(() => setSaved({ msg: "", cls: "" }), 3200);
     } finally {
       setSaving(false);
     }
@@ -5059,6 +5073,7 @@ function PurposeBox({ agent, plan, defaultEditing = false }) {
           </label>
         </fieldset>
         ${err ? html`<div class="db-error">${err}</div>` : null}
+        <${SaveStatePill} state=${saved.msg ? saved : null} />
         <div class="db-purpose-actions-row">
           <button class="db-btn-ghost" onClick=${() => { setDraft(initial()); setEditing(false); }}>Cancel</button>
           <button class="db-btn-primary" disabled=${saving} onClick=${save}>
