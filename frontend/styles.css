@@ -1507,6 +1507,23 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 }
 .chatembed-send:hover:not(:disabled) { filter: brightness(1.07); }
 .chatembed-send:disabled { opacity: 0.5; cursor: default; }
+/* Voice input mic (Build 313) — sits left of the send button. */
+.chatembed-mic {
+  width: 40px; height: 40px; flex-shrink: 0; border: 0; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-1, #eef0f6); color: var(--fg, #4b5563); cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, transform 0.12s ease;
+}
+.chatembed-mic:hover:not(:disabled) { background: var(--chat-accent, #4f46e5); color: #fff; }
+.chatembed-mic:disabled { opacity: 0.5; cursor: default; }
+.chatembed-mic.listening {
+  background: #ef4444; color: #fff;
+  animation: chatembed-mic-pulse 1.3s ease-in-out infinite;
+}
+@keyframes chatembed-mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.45); }
+  50%      { box-shadow: 0 0 0 7px rgba(239,68,68,0); }
+}
 .chatembed .embed-brand { position: static; transform: none; padding: 6px 0 8px; text-align: center; }
 .chatembed-privacy { font-size: 10.5px; color: var(--fg-dim, #9aa0ad); text-align: center; padding: 4px 14px 0; line-height: 1.4; }
 :root[data-theme="dark"] .chatembed-msg-model .chatembed-bubble { background: #1b1f33; color: #e6e8f2; }

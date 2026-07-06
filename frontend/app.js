@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 312;
+const SXAI_BUILD = 313;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1627,6 +1627,8 @@ function AgentChatEmbed({ slug, contained }) {
   const [status, setStatus] = useState("connecting"); // connecting | ready | ended | error
   const [messages, setMessages] = useState([]);        // {role:'user'|'model', text}
   const [input, setInput] = useState("");
+  const [listening, setListening] = useState(false);   // voice-input (Web Speech) active
+  const recRef = useRef(null);                          // SpeechRecognition instance
   const [quickReplies, setQuickReplies] = useState([]); // generative-UI tappable buttons
   const [activeForm, setActiveForm] = useState(null);   // inline form spec {title, fields, submit_label}
   const [formValues, setFormValues] = useState({});
@@ -1770,6 +1772,39 @@ function AgentChatEmbed({ slug, contained }) {
     setInput("");
     if (!humanAgent) setThinking(true);   // show "typing…" until the AI responds
     setQuickReplies([]); setActiveForm(null); setActiveCards([]);  // widgets are one decision point — clear on send
+  };
+
+  // Voice mode (Web Speech API) — tap the mic, speak, the transcript fills the
+  // box live and auto-sends when you stop. Browser-native (Chrome/Edge/Safari);
+  // the mic is hidden where SpeechRecognition is unavailable (e.g. Firefox).
+  const voiceSupported = typeof window !== "undefined" && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  const toggleVoice = () => {
+    if (!voiceSupported || status !== "ready") return;
+    if (listening) { try { recRef.current && recRef.current.stop(); } catch {} return; }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let rec;
+    try { rec = new SR(); } catch { return; }
+    rec.lang = agent.locale || "en-US";     // agent locale is already BCP-47 (en-IN, hi-IN…)
+    rec.interimResults = true;
+    rec.continuous = false;
+    let finalText = "";
+    rec.onresult = (ev) => {
+      let interim = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const chunk = ev.results[i][0].transcript;
+        if (ev.results[i].isFinal) finalText += chunk; else interim += chunk;
+      }
+      setInput((finalText + interim).trim());
+    };
+    rec.onerror = () => setListening(false);
+    rec.onend = () => {
+      setListening(false);
+      const t = finalText.trim();
+      if (t) send(null, t);   // hands-free: ask as soon as they stop speaking
+    };
+    recRef.current = rec;
+    setListening(true);
+    try { rec.start(); } catch { setListening(false); }
   };
 
   const submitForm = (e) => {
@@ -1961,9 +1996,16 @@ function AgentChatEmbed({ slug, contained }) {
       ` : ""}
       <form class="chatembed-input" onSubmit=${send}>
         <input class="chatembed-field" type="text" autocomplete="off"
-               placeholder=${status === "ended" ? "Chat ended" : `Message ${agent.name}…`}
+               placeholder=${status === "ended" ? "Chat ended" : (listening ? "Listening…" : `Message ${agent.name}…`)}
                value=${input} onInput=${(e) => setInput(e.target.value)}
                disabled=${status !== "ready"} />
+        ${voiceSupported ? html`
+          <button class=${"chatembed-mic" + (listening ? " listening" : "")} type="button"
+                  onClick=${toggleVoice} disabled=${status !== "ready"}
+                  aria-label=${listening ? "Stop voice input" : "Ask by voice"}
+                  title=${listening ? "Listening…" : "Ask by voice"}>
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v4"/></svg>
+          </button>` : ""}
         <button class="chatembed-send" type="submit" disabled=${!input.trim() || status !== "ready"} aria-label="Send">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
         </button>
