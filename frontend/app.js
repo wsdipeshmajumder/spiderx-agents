@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 313;
+const SXAI_BUILD = 314;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1672,13 +1672,16 @@ function AgentChatEmbed({ slug, contained }) {
     }
     resumeKeyRef.current = contained ? null : resumeKey;
     if (restored) setMessages(restored.messages);
-    else if (welcome) setMessages([{ role: "model", text: welcome }]);
+    // A configured welcome is NOT seeded as a chat bubble — it becomes the
+    // bot-home hero (the opening "search home"). See showHome in the render.
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const sid = restored ? restored.sid : `chat-${Math.random().toString(36).slice(2)}`;
     sidRef.current = sid;
     const locale = (navigator.language || "en-US");
-    // Resume + configured-welcome both skip the model kickoff greeting.
-    const kickoff = (welcome || restored) ? "&kickoff=0" : "";
+    // A configured home (welcome or starter questions) IS the opening, so skip
+    // the model's kickoff greeting — it would compete with the home. Resume too.
+    const hasStarters = Array.isArray(cs.starters) && cs.starters.some((s) => typeof s === "string" && s.trim());
+    const kickoff = (welcome || restored || hasStarters) ? "&kickoff=0" : "";
     const resumeQ = restored ? "&resume=1" : "";
     const host = (() => { try { return new URLSearchParams(location.search).get("host") || ""; } catch { return ""; } })();
     const hostQ = host ? `&host=${encodeURIComponent(host)}` : "";
@@ -1873,10 +1876,12 @@ function AgentChatEmbed({ slug, contained }) {
   // Suggested starter chips — shown on open until the visitor sends anything.
   const starters = Array.isArray(cs.starters) ? cs.starters.filter((s) => typeof s === "string" && s.trim()).slice(0, 4) : [];
   const hasUserMsg = messages.some((m) => m.role === "user");
-  const showStarters = starters.length && status === "ready" && !hasUserMsg && !humanAgent && !csat && !activeForm && !quickReplies.length;
-  // Bot home — the "Ask me anything about <name>" hero + preset-question cards,
-  // shown on a fresh chat in the main area (replaces the old bottom chip row).
-  const showHome = showStarters;
+  const _welcomeText = (cs.welcome_message || "").trim();
+  // Bot home — the opening "search home": a hero (the operator's welcome, else
+  // "Ask me anything about <name>") + any preset-question cards. Shown on a
+  // fresh chat as the starting point whenever a welcome OR starters are set.
+  const showHome = (starters.length || _welcomeText) && status === "ready"
+    && !hasUserMsg && !humanAgent && !csat && !activeForm && !quickReplies.length;
 
   return html`
     <div class=${"chatembed" + (contained ? " chatembed-contained" : "")} style=${rootStyle}>
@@ -1915,7 +1920,7 @@ function AgentChatEmbed({ slug, contained }) {
           ? html`<div class="chatembed-empty">${err || "Chat is unavailable right now."}</div>` : ""}
         ${showHome ? html`
           <div class="chatembed-home">
-            <div class="chatembed-home-title">Ask me anything about ${agent.name}</div>
+            <div class="chatembed-home-title">${_welcomeText || `Ask me anything about ${agent.name}`}</div>
             ${starters.length ? html`
               <div class="chatembed-home-grid">
                 ${starters.map((q, i) => html`
