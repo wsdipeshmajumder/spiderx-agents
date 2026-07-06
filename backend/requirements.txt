@@ -1,4 +1,9 @@
 fastapi>=0.115
+# Starlette needs python-multipart to parse `multipart/form-data` bodies. Plain
+# `fastapi` (not fastapi[standard]) does NOT pull it in, so without this pin every
+# file upload — e.g. knowledge-base .txt/.docx upload — 500s with a bare
+# "Internal Server Error" (works locally only if the venv happens to have it).
+python-multipart>=0.0.9
 uvicorn[standard]>=0.30
 google-genai>=1.40
 python-dotenv>=1.0
