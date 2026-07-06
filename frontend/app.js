@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 310;
+const SXAI_BUILD = 311;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1818,9 +1818,22 @@ function AgentChatEmbed({ slug, contained }) {
     : status === "error" ? "connection issue" : "online";
 
   const cs = agent.chat_settings || {};
-  const accent = /^#[0-9a-fA-F]{3,8}$/.test(cs.accent_color || "") ? cs.accent_color : null;
+  // Embed-snippet look overrides (data-accent / data-radius / data-size on the
+  // <script>, forwarded by embed.js as URL params) win over the saved
+  // chat_settings, so an operator can restyle response boxes per-embed.
+  const _p = (() => { try { return new URLSearchParams(location.search); } catch { return new URLSearchParams(); } })();
+  const _rawAccent = (_p.get("accent") || "").trim();
+  const accentParam = /^#?[0-9a-fA-F]{3,8}$/.test(_rawAccent) ? (_rawAccent[0] === "#" ? _rawAccent : "#" + _rawAccent) : null;
+  const accent = accentParam || (/^#[0-9a-fA-F]{3,8}$/.test(cs.accent_color || "") ? cs.accent_color : null);
+  // radius/size: URL param (snippet override) wins; else the saved chat_settings value.
+  const _radius = parseInt(_p.get("radius") != null ? _p.get("radius") : (cs.bubble_radius != null ? String(cs.bubble_radius) : ""), 10);
+  const _size = (_p.get("size") || cs.bubble_size || "").toLowerCase();
+  const _sizePx = _size === "sm" ? "13px" : _size === "lg" ? "16.5px" : null;   // md = default, unset
   const avatarUrl = (cs.avatar_url || "").trim();
-  const rootStyle = accent ? { "--chat-accent": accent } : {};
+  const rootStyle = {};
+  if (accent) rootStyle["--chat-accent"] = accent;
+  if (!isNaN(_radius) && _radius >= 0 && _radius <= 40) rootStyle["--chat-radius"] = _radius + "px";
+  if (_sizePx) rootStyle["--chat-size"] = _sizePx;
 
   // Suggested starter chips — shown on open until the visitor sends anything.
   const starters = Array.isArray(cs.starters) ? cs.starters.filter((s) => typeof s === "string" && s.trim()).slice(0, 4) : [];
@@ -11527,6 +11540,9 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   const [chatCfg, setChatCfg] = useState({
     accent_color: _cs0.accent_color || "",
     avatar_url: _cs0.avatar_url || "",
+    mode: _cs0.mode || "popover",              // popover | fullscreen | drawer (bottom sheet)
+    bubble_radius: _cs0.bubble_radius != null ? _cs0.bubble_radius : "",
+    bubble_size: _cs0.bubble_size || "md",     // sm | md | lg — response text scale
     launcher_text: _cs0.launcher_text || "",
     welcome_message: _cs0.welcome_message || "",
     instructions: _cs0.instructions || "",
@@ -11548,6 +11564,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
         ...chatCfg,
         allowed_domains: chatCfg.allowed_domains.split(",").map((s) => s.trim()).filter(Boolean),
         starters: (chatCfg.starters || "").split("\n").map((s) => s.trim()).filter(Boolean).slice(0, 4),
+        bubble_radius: chatCfg.bubble_radius === "" || chatCfg.bubble_radius == null ? null : Number(chatCfg.bubble_radius),
       };
       const r = await fetch(`/api/agents/${agent.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -11638,6 +11655,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
 
   const chatAttrs = [`data-agent="${agent.slug || agent.id}"`, `data-channel="chat"`];
   if (embedPosition !== "bottom-right") chatAttrs.push(`data-position="${embedPosition}"`);
+  if (chatCfg.mode && chatCfg.mode !== "popover") chatAttrs.push(`data-mode="${chatCfg.mode}"`);
   if (chatCfg.accent_color) chatAttrs.push(`data-color="${chatCfg.accent_color}"`);
   if (chatCfg.launcher_text.trim()) chatAttrs.push(`data-label="${chatCfg.launcher_text.replace(/"/g, "'")}"`);
   if ((chatCfg.teaser || "").trim()) {
@@ -11682,6 +11700,33 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
                 <input type="color" value=${chatCfg.accent_color || "#4f46e5"} onInput=${(e) => setChatField("accent_color", e.target.value)} />
                 <input class="db-input" type="text" placeholder="#4f46e5" value=${chatCfg.accent_color}
                        onInput=${(e) => setChatField("accent_color", e.target.value)} />
+              </div>
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Open as</span>
+              <select class="db-input" value=${chatCfg.mode}
+                      onChange=${(e) => setChatField("mode", e.target.value)}>
+                <option value="popover">Popover — corner bubble</option>
+                <option value="drawer">Bottom drawer — slides up</option>
+                <option value="fullscreen">Fullscreen</option>
+              </select>
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Response box roundness</span>
+              <div style=${{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <input type="range" min="0" max="28" style=${{ flex: 1 }}
+                       value=${chatCfg.bubble_radius === "" ? 14 : chatCfg.bubble_radius}
+                       onInput=${(e) => setChatField("bubble_radius", Number(e.target.value))} />
+                <span class="db-form-help" style=${{ margin: 0, width: "42px", textAlign: "right" }}>${chatCfg.bubble_radius === "" ? 14 : chatCfg.bubble_radius}px</span>
+              </div>
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Response text size</span>
+              <div class="db-embed-seg">
+                ${["sm", "md", "lg"].map((s) => html`
+                  <button type="button" key=${s}
+                          class=${"db-embed-seg-btn" + ((chatCfg.bubble_size || "md") === s ? " active" : "")}
+                          onClick=${() => setChatField("bubble_size", s)}>${s === "sm" ? "Small" : s === "lg" ? "Large" : "Medium"}</button>`)}
               </div>
             </label>
             <label class="db-form-field">

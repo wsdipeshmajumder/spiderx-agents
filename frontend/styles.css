@@ -1392,7 +1392,8 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 .chatembed-msg-user { justify-content: flex-end; }
 .chatembed-msg-model { justify-content: flex-start; }
 .chatembed-bubble {
-  max-width: 80%; padding: 8px 12px; border-radius: 14px;
+  max-width: 80%; padding: 8px 12px; border-radius: var(--chat-radius, 14px);
+  font-size: var(--chat-size, 14.5px);
   line-height: 1.45; white-space: pre-wrap; word-wrap: break-word;
 }
 .chatembed-msg-user .chatembed-bubble {

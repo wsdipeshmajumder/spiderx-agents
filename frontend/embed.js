@@ -11,7 +11,10 @@
  *   data-position   — bottom-right (default) | bottom-left
  *   data-color      — primary button color (default: brand violet gradient)
  *   data-label      — tooltip on the bubble (default: "Talk to <Agent>")
- *   data-mode       — "popover" (default, ~360×600 panel) | "fullscreen"
+ *   data-mode       — "popover" (default, ~360×600 panel) | "fullscreen" | "drawer" (bottom sheet)
+ *   data-accent     — response/bubble color inside the chat (e.g. #7c3aed)
+ *   data-radius     — bubble corner radius in px (e.g. 18)
+ *   data-size       — chat text scale: "sm" | "md" (default) | "lg"
  *
  * The widget is namespaced under `__sxAI_embed` to avoid colliding with any
  * other globals on the host page. Mic permission is requested by the iframe.
@@ -49,6 +52,11 @@
   var label = scriptEl.getAttribute("data-label") || (defaultVerb + slug.replace(/-/g, " "));
   var mode = scriptEl.getAttribute("data-mode") || "popover";
   var color = scriptEl.getAttribute("data-color") || "";
+  // Response-box look, forwarded to the chat surface via the iframe URL so the
+  // operator can style bubbles from the embed snippet without a server save.
+  var accent = (scriptEl.getAttribute("data-accent") || "").trim();
+  var radius = (scriptEl.getAttribute("data-radius") || "").trim();
+  var size   = (scriptEl.getAttribute("data-size") || "").trim();
   // Proactive teaser (Build 293): show a small message bubble after a delay to
   // invite the visitor in. data-teaser="<msg>" enables it; data-teaser-delay in
   // seconds (default 8). Shown once per browser session (sessionStorage).
@@ -86,6 +94,11 @@
     ".sxai-panel.open{transform:scale(1) translateY(0);opacity:1;pointer-events:auto;}",
     // Fullscreen mode
     ".sxai-root[data-mode='fullscreen'] .sxai-panel{position:fixed;inset:24px;width:auto;height:auto;border-radius:20px;}",
+    // Bottom-drawer mode — a bottom sheet that slides up, full-width on mobile,
+    // centered with a max width on desktop. Rounded top corners only.
+    ".sxai-root[data-mode='drawer'] .sxai-panel{position:fixed;left:0;right:0;bottom:0;margin:0 auto;width:min(100%,540px);height:min(72vh,660px);border-radius:20px 20px 0 0;transform-origin:bottom center;transform:translateY(100%);}",
+    ".sxai-root[data-mode='drawer'] .sxai-panel.open{transform:translateY(0);}",
+    "@media (max-width:560px){.sxai-root[data-mode='drawer'] .sxai-panel{height:82vh;width:100%;border-radius:18px 18px 0 0;}}",
     ".sxai-panel iframe{width:100%;height:100%;border:0;display:block;background:#0f1119;}",
     // Close button overlay
     ".sxai-close{position:absolute;top:10px;right:10px;width:28px;height:28px;border-radius:50%;border:0;background:rgba(255,255,255,0.10);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);}",
@@ -129,6 +142,9 @@
   // allowlist (best-effort abuse control).
   var q = [];
   if (channel === "chat") q.push("channel=chat");
+  if (accent) q.push("accent=" + encodeURIComponent(accent));
+  if (radius) q.push("radius=" + encodeURIComponent(radius));
+  if (size)   q.push("size=" + encodeURIComponent(size));
   try { if (location.hostname) q.push("host=" + encodeURIComponent(location.hostname)); } catch (e) {}
   iframe.src = ourOrigin + "/embed/" + encodeURIComponent(slug) + (q.length ? "?" + q.join("&") : "");
   iframe.setAttribute("title", "SpiderX.AI — " + label);
