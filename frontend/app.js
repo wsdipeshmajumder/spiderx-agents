@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 311;
+const SXAI_BUILD = 312;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1839,6 +1839,9 @@ function AgentChatEmbed({ slug, contained }) {
   const starters = Array.isArray(cs.starters) ? cs.starters.filter((s) => typeof s === "string" && s.trim()).slice(0, 4) : [];
   const hasUserMsg = messages.some((m) => m.role === "user");
   const showStarters = starters.length && status === "ready" && !hasUserMsg && !humanAgent && !csat && !activeForm && !quickReplies.length;
+  // Bot home — the "Ask me anything about <name>" hero + preset-question cards,
+  // shown on a fresh chat in the main area (replaces the old bottom chip row).
+  const showHome = showStarters;
 
   return html`
     <div class=${"chatembed" + (contained ? " chatembed-contained" : "")} style=${rootStyle}>
@@ -1875,14 +1878,21 @@ function AgentChatEmbed({ slug, contained }) {
           ? html`<div class="chatembed-empty">Starting your chat with ${agent.name}…</div>` : ""}
         ${status === "error" && messages.length === 0
           ? html`<div class="chatembed-empty">${err || "Chat is unavailable right now."}</div>` : ""}
+        ${showHome ? html`
+          <div class="chatembed-home">
+            <div class="chatembed-home-title">Ask me anything about ${agent.name}</div>
+            ${starters.length ? html`
+              <div class="chatembed-home-grid">
+                ${starters.map((q, i) => html`
+                  <button key=${i} type="button" class="chatembed-home-card" onClick=${() => send(null, q)}>
+                    <span>${q}</span>
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+                  </button>
+                `)}
+              </div>` : ""}
+          </div>
+        ` : ""}
       </div>
-      ${showStarters ? html`
-        <div class="chatembed-chips chatembed-starters">
-          ${starters.map((q, i) => html`
-            <button key=${i} type="button" class="chatembed-chip" onClick=${() => send(null, q)}>${q}</button>
-          `)}
-        </div>
-      ` : ""}
       ${quickReplies.length && status === "ready" ? html`
         <div class="chatembed-chips">
           ${quickReplies.map((q, i) => html`

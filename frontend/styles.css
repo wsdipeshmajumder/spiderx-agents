@@ -1418,6 +1418,30 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   transition: background 0.12s ease, color 0.12s ease;
 }
 .chatembed-chip:hover { background: var(--chat-accent, #4f46e5); color: #fff; }
+/* Bot home — hero + preset-question cards on a fresh chat (Build 312). */
+.chatembed-home {
+  display: flex; flex-direction: column; justify-content: center;
+  min-height: 100%; gap: 16px; padding: 20px 10px; text-align: center;
+}
+.chatembed-home-title {
+  font-size: 20px; font-weight: 700; line-height: 1.25; color: var(--fg, #1a1c25);
+}
+.chatembed-home-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; text-align: left; }
+@media (max-width: 340px) { .chatembed-home-grid { grid-template-columns: 1fr; } }
+.chatembed-home-card {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 12px 14px; border-radius: var(--chat-radius, 14px);
+  border: 1px solid var(--border, #e6e8ef); background: var(--bg-1, #f1f2f7);
+  color: var(--fg, #1a1c25); font-size: 13.5px; font-weight: 600; line-height: 1.3;
+  text-align: left; cursor: pointer;
+  transition: border-color 0.14s ease, transform 0.14s ease, box-shadow 0.14s ease;
+}
+.chatembed-home-card svg { flex: none; color: var(--chat-accent, #4f46e5); opacity: 0.55; }
+.chatembed-home-card:hover {
+  border-color: var(--chat-accent, #4f46e5); transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.06);
+}
+.chatembed-home-card:hover svg { opacity: 1; }
 /* Rich media cards (generative UI, Build 277) — horizontal carousel. */
 .chatembed-cards {
   display: flex; gap: 10px; padding: 2px 14px 10px; overflow-x: auto;
