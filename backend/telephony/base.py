@@ -541,6 +541,23 @@ async def _bridge(
     new_handle: Optional[str] = None
     rec = agent.get("_recording_writer")   # may be None (recording off / failed)
 
+    # Reconnected session (Gemini ended it mid-call; the caller is still on the
+    # line). WsStart — where <call_start> is sent — only fires on the FIRST
+    # carrier stream, so a resume previously got NO signal: the new session
+    # replayed Gemini's restored context and sometimes RE-ANSWERED the caller's
+    # last question, which reads as "the bot repeats the question and loses
+    # context" (tester #12). Send an explicit <call_resumed> so the system
+    # prompt's resume handling kicks in (no greeting, no repeating/re-asking).
+    # Best-effort: a send failure must NEVER break the live call.
+    if not send_kickoff:
+        try:
+            await session.send_client_content(
+                turns=types.Content(role="user", parts=[types.Part(text="<call_resumed>")]),
+                turn_complete=True,
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning("telephony[%s] <call_resumed> send failed: %s", provider.name, e)
+
     async def carrier_to_gemini() -> None:
         nonlocal state_in, stream_id
         try:
