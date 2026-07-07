@@ -1507,8 +1507,10 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 }
 .chatembed-send:hover:not(:disabled) { filter: brightness(1.07); }
 .chatembed-send:disabled { opacity: 0.5; cursor: default; }
-/* Inline "Play recording" button in the call log (build 316). */
-.db-rec-play.is-playing { color: var(--green, #1c8f5a); border-color: var(--green, #1c8f5a); font-weight: 700; }
+/* Compact inline recording player in the call log (build 316) — native
+   <audio controls> with a seek bar + volume, sized to fit the table cell. */
+.db-rec-audio { width: 230px; height: 34px; vertical-align: middle; }
+@media (max-width: 1200px) { .db-rec-audio { width: 180px; } }
 /* Voice input mic (Build 313) — sits left of the send button. */
 .chatembed-mic {
   width: 40px; height: 40px; flex-shrink: 0; border: 0; border-radius: 50%;

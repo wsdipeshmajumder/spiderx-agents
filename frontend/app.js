@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 316;
+const SXAI_BUILD = 317;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -8108,21 +8108,9 @@ function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
   const [detailId, setDetailId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  // Inline recording playback straight from the log (build 316). `playingRec`
-  // holds the call.id currently playing; one shared <audio> so a new play stops
-  // the previous.
-  const [playingRec, setPlayingRec] = useState(null);
-  const recAudioRef = useRef(null);
-  const toggleRec = (c) => {
-    if (!c.recording_url) return;
-    let a = recAudioRef.current;
-    if (playingRec === c.id) { try { a && a.pause(); } catch {} setPlayingRec(null); return; }
-    if (a) { try { a.pause(); } catch {} }
-    a = recAudioRef.current = new Audio(c.recording_url);
-    a.onended = () => setPlayingRec(null);
-    a.onerror = () => setPlayingRec(null);
-    a.play().then(() => setPlayingRec(c.id)).catch(() => setPlayingRec(null));
-  };
+  // Inline recording playback straight from the log (build 316) — a compact
+  // native <audio controls> per row (seek bar + volume + time), rendered in the
+  // table cell. preload="none" so the WAV only loads when the operator hits play.
   useEffect(() => {
     if (!detailId || !agent?.id) { setDetail(null); return; }
     setDetailLoading(true);
@@ -8439,11 +8427,7 @@ function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
                     </td>
                     <td>
                       ${c.recording_available
-                        ? html`<button class=${"db-btn-ghost db-btn-sm db-rec-play" + (playingRec === c.id ? " is-playing" : "")}
-                                 type="button" onClick=${() => toggleRec(c)}
-                                 title=${playingRec === c.id ? "Pause recording" : "Play recording"}>
-                            ${playingRec === c.id ? "❚❚ Playing" : "▶ Play"}
-                          </button>`
+                        ? html`<audio class="db-rec-audio" controls preload="none" src=${c.recording_url}></audio>`
                         : html`<span class="db-muted" title="No audio saved for this call">—</span>`}
                     </td>
                     <td class="db-table-td-right">
