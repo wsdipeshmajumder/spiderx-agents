@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 315;
+const SXAI_BUILD = 316;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -8108,6 +8108,21 @@ function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
   const [detailId, setDetailId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  // Inline recording playback straight from the log (build 316). `playingRec`
+  // holds the call.id currently playing; one shared <audio> so a new play stops
+  // the previous.
+  const [playingRec, setPlayingRec] = useState(null);
+  const recAudioRef = useRef(null);
+  const toggleRec = (c) => {
+    if (!c.recording_url) return;
+    let a = recAudioRef.current;
+    if (playingRec === c.id) { try { a && a.pause(); } catch {} setPlayingRec(null); return; }
+    if (a) { try { a.pause(); } catch {} }
+    a = recAudioRef.current = new Audio(c.recording_url);
+    a.onended = () => setPlayingRec(null);
+    a.onerror = () => setPlayingRec(null);
+    a.play().then(() => setPlayingRec(c.id)).catch(() => setPlayingRec(null));
+  };
   useEffect(() => {
     if (!detailId || !agent?.id) { setDetail(null); return; }
     setDetailLoading(true);
@@ -8371,6 +8386,7 @@ function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
                       The key things ${agent.name} captured on this call — date, time, party size, dietary needs, etc. Tuned to your industry (<b>${agent.sector || "generic"}</b>). Hover a chip to see its raw field name; everything's in the call's Details modal too.
                     </${InfoDot}>
                   </th>
+                  <th>Recording</th>
                   <th class="db-table-th-right">Actions</th>
                 </tr>
               </thead>
@@ -8420,6 +8436,15 @@ function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
                                     style=${{ background: ch.bg, color: ch.fg }}>${ch.label}</span>
                             `)}
                           </div>`}
+                    </td>
+                    <td>
+                      ${c.recording_available
+                        ? html`<button class=${"db-btn-ghost db-btn-sm db-rec-play" + (playingRec === c.id ? " is-playing" : "")}
+                                 type="button" onClick=${() => toggleRec(c)}
+                                 title=${playingRec === c.id ? "Pause recording" : "Play recording"}>
+                            ${playingRec === c.id ? "❚❚ Playing" : "▶ Play"}
+                          </button>`
+                        : html`<span class="db-muted" title="No audio saved for this call">—</span>`}
                     </td>
                     <td class="db-table-td-right">
                       <button class="db-btn-ghost db-btn-sm" type="button"

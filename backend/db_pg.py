@@ -1110,7 +1110,8 @@ async def list_calls_for_agent(agent_id: int, limit: int = 50,
         rs = await conn.fetch(
             "SELECT id, agent_id, started_at, ended_at, duration_s, outcome, reason, summary, "
             "       sentiment, lead_quality, lead_signals, extracted, channel, "
-            "       cost_paise, caller_number "
+            "       cost_paise, caller_number, "
+            "       recording_path, recording_size_bytes, recording_purged_at "
             f"FROM calls WHERE agent_id = $1 {chf} ORDER BY id DESC LIMIT $2",
             agent_id, limit,
         )

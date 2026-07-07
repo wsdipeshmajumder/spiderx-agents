@@ -118,7 +118,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 315
+APP_BUILD = 316
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1601,7 +1601,18 @@ async def agent_calls(agent_id: int, limit: int = 50, channel: Optional[str] = N
     """Default: voice + phone (Call logs). `?channel=web_chat` → chat sessions
     (Chat-widget page)."""
     await _require_agent_owned(agent_id, await current_user(request))
-    return await db.list_calls_for_agent(agent_id, limit=limit, channel=channel)
+    rows = await db.list_calls_for_agent(agent_id, limit=limit, channel=channel)
+    # Surface recording playback in the LIST too (not just the detail modal) so an
+    # operator can spot + play a call's audio straight from the log. Gated on the
+    # file actually being on disk (same check as the detail view) so a wiped/absent
+    # recording doesn't show a dead play button.
+    from . import recordings as _rec
+    for r in rows:
+        rp = r.get("recording_path")
+        avail = bool(rp) and not r.get("recording_purged_at") and _rec.usable_capture_bytes(rp) >= 8000
+        r["recording_available"] = avail
+        r["recording_url"] = f"/api/agents/{agent_id}/calls/{r.get('id')}/recording.wav" if avail else None
+    return rows
 
 
 @app.get("/api/agents/{agent_id}/chat/live")
@@ -1782,6 +1793,43 @@ async def agent_call_detail(agent_id: int, call_id: int, request: Request) -> di
         "recording_caller_url": f"/api/agents/{row.get('agent_id')}/calls/{row.get('id')}/recording/caller.wav" if rec_avail else None,
         "recording_agent_url":  f"/api/agents/{row.get('agent_id')}/calls/{row.get('id')}/recording/agent.wav"  if rec_avail else None,
     }
+
+
+@app.get("/api/admin/storage-health")
+async def storage_health(request: Request) -> dict:
+    """Diagnostic (tester #13): WHERE call recordings are stored, and whether that
+    path is the persistent Railway volume + actually writable. If `ephemeral_fallback`
+    is true or `writable` is false, recordings won't survive/land — fix the volume
+    mount or set RECORDING_DIR. Any signed-in user can read it; paths only, no secrets."""
+    await current_user(request)
+    from . import recordings as _rec
+    root = _rec.RECORDING_ROOT
+    info: dict[str, Any] = {
+        "recording_root": str(root),
+        "root_exists": root.exists(),
+        "env_RECORDING_DIR": os.environ.get("RECORDING_DIR"),
+        "env_RAILWAY_VOLUME_MOUNT_PATH": os.environ.get("RAILWAY_VOLUME_MOUNT_PATH"),
+        "files_dir_exists": Path("/files").exists(),
+        "on_railway": any(k.startswith("RAILWAY_") for k in os.environ),
+        # data/recordings is the ephemeral, wiped-on-redeploy fallback — the bad case.
+        "ephemeral_fallback": str(root) == "data/recordings",
+    }
+    try:
+        probe = root / ".write_probe"
+        probe.write_text("ok")
+        probe.unlink()
+        info["writable"] = True
+    except Exception as e:  # noqa: BLE001
+        info["writable"] = False
+        info["write_error"] = str(e)
+    try:
+        wavs = list(root.rglob("*.wav"))
+        info["recordings_on_disk"] = len(wavs)
+        info["recordings_total_bytes"] = sum(f.stat().st_size for f in wavs)
+    except Exception as e:  # noqa: BLE001
+        info["recordings_on_disk"] = None
+        info["scan_error"] = str(e)
+    return info
 
 
 @app.get("/api/agents/{agent_id}/calls/{call_id}/recording.wav")
