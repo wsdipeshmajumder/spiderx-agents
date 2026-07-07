@@ -4973,7 +4973,24 @@ async def run_session(
                                 "stop talking and wait for the caller.]"
                             )
                         elif resume_handle:
-                            kickoff_text = None
+                            # Gemini restores full context via the handle — but left
+                            # to itself the model "acknowledges the drop" ("sorry, you
+                            # broke up — could you say that again?") or re-answers the
+                            # caller's last turn (tester #12). The handle means we don't
+                            # need to replay the transcript, but we DO need to steer it:
+                            # don't acknowledge, don't re-ask, answer the pending
+                            # question. Previously this sent nothing, so the model's own
+                            # prior took over.
+                            kickoff_text = (
+                                "[SYSTEM NOTICE: brief reconnect — the session resumed WITH "
+                                "full context. You and the caller are MID-CONVERSATION. " + NO_GREET
+                                + " Do NOT acknowledge the drop, do NOT say sorry, do NOT ask them "
+                                "to repeat, do NOT re-answer or re-ask anything already handled. If "
+                                "the caller's most recent question is still unanswered, answer it "
+                                "now, directly. Otherwise stay silent and wait for their next "
+                                "utterance.]"
+                            )
+                            log.info("reconnect: resume-handle steer (no-ack, answer-pending)")
                         elif memory.turns:
                             # Full-transcript replay — BOTH sides, so the new
                             # Gemini session sees not just what the user said

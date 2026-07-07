@@ -552,11 +552,18 @@ async def _bridge(
     if not send_kickoff:
         try:
             await session.send_client_content(
-                turns=types.Content(role="user", parts=[types.Part(text="<call_resumed>")]),
+                turns=types.Content(role="user", parts=[types.Part(text=(
+                    "[SYSTEM NOTICE: brief reconnect — the session resumed WITH full context. "
+                    "You and the caller are MID-CALL. Do NOT greet, do NOT acknowledge the drop, "
+                    "do NOT say sorry, do NOT ask them to repeat, do NOT re-answer or re-ask "
+                    "anything already handled. If the caller's most recent question is still "
+                    "unanswered, answer it now, directly. Otherwise stay silent and wait for "
+                    "their next utterance.]"
+                ))]),
                 turn_complete=True,
             )
         except Exception as e:  # noqa: BLE001
-            log.warning("telephony[%s] <call_resumed> send failed: %s", provider.name, e)
+            log.warning("telephony[%s] resume-steer send failed: %s", provider.name, e)
 
     async def carrier_to_gemini() -> None:
         nonlocal state_in, stream_id
