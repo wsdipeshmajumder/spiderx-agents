@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 314;
+const SXAI_BUILD = 315;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1621,7 +1621,7 @@ function EmbedView({ slug, blobSize, blobMode, engineRef, onPressStart, onPressE
 // (the paid chat add-on). Self-contained: its own WS to /ws/session?mode=chat,
 // streaming model tokens into bubbles. No mic, no AudioEngine. Shares the
 // agent's brain (persona/knowledge/connectors) with the voice + phone channels.
-function AgentChatEmbed({ slug, contained }) {
+function AgentChatEmbed({ slug, contained, override }) {
   const [agent, setAgent] = useState(null);
   const [err, setErr] = useState(null);
   const [status, setStatus] = useState("connecting"); // connecting | ready | ended | error
@@ -1855,7 +1855,10 @@ function AgentChatEmbed({ slug, contained }) {
     : status === "ended" ? "chat ended"
     : status === "error" ? "connection issue" : "online";
 
-  const cs = agent.chat_settings || {};
+  // `override` (the config page's LIVE PREVIEW) layers the operator's current,
+  // unsaved form values on top of the saved chat_settings — so editing starters /
+  // welcome / colours updates the preview instantly WITHOUT reconnecting the WS.
+  const cs = { ...(agent.chat_settings || {}), ...(override || {}) };
   // Embed-snippet look overrides (data-accent / data-radius / data-size on the
   // <script>, forwarded by embed.js as URL params) win over the saved
   // chat_settings, so an operator can restyle response boxes per-embed.
@@ -1874,7 +1877,14 @@ function AgentChatEmbed({ slug, contained }) {
   if (_sizePx) rootStyle["--chat-size"] = _sizePx;
 
   // Suggested starter chips — shown on open until the visitor sends anything.
-  const starters = Array.isArray(cs.starters) ? cs.starters.filter((s) => typeof s === "string" && s.trim()).slice(0, 4) : [];
+  let starters = Array.isArray(cs.starters) ? cs.starters.filter((s) => typeof s === "string" && s.trim()).slice(0, 4) : [];
+  // In the config LIVE PREVIEW, if the operator hasn't set questions yet, show a
+  // sample set of 4 so the home always demos the "Ask me anything…" card layout
+  // (like the reference design). Live embeds only ever show the operator's own.
+  if (!starters.length && contained) {
+    starters = ["What are your opening hours?", "Where are you located?",
+                "What services do you offer?", "How do I get in touch?"];
+  }
   const hasUserMsg = messages.some((m) => m.role === "user");
   const _welcomeText = (cs.welcome_message || "").trim();
   // Bot home — the opening "search home": a hero (the operator's welcome, else
@@ -11898,9 +11908,16 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
             <button type="button" class="db-btn-ghost db-btn-sm" onClick=${() => setPreviewKey((k) => k + 1)} title="Restart preview">↻ Restart</button>
           </div>
           <div class="chatcfg-preview-box">
-            <${AgentChatEmbed} key=${previewKey} slug=${agent.slug || agent.id} contained=${true} />
+            <${AgentChatEmbed} key=${previewKey} slug=${agent.slug || agent.id} contained=${true}
+              override=${{
+                starters: (chatCfg.starters || "").split("\n").map((s) => s.trim()).filter(Boolean).slice(0, 4),
+                welcome_message: chatCfg.welcome_message,
+                accent_color: chatCfg.accent_color,
+                bubble_radius: chatCfg.bubble_radius === "" ? null : Number(chatCfg.bubble_radius),
+                bubble_size: chatCfg.bubble_size,
+              }} />
           </div>
-          <div class="chatcfg-preview-note">A real chat with ${agent.name}. Saved appearance + behaviour apply on Save; ↻ to restart.</div>
+          <div class="chatcfg-preview-note">A real chat with ${agent.name}. Appearance + questions update live here; the AI's behaviour applies on Save. ↻ to restart.</div>
         </aside>
         </div>
       ` : html`
