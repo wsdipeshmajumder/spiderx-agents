@@ -554,3 +554,17 @@ async def async_get_or_build_mixed(rec_dir: Path) -> Optional[Path]:
             return out_path
         loop = _asyncio.get_event_loop()
         return await loop.run_in_executor(None, mix_to_stereo, rec_dir)
+
+
+async def prebuild_mixed(rel_path: str) -> None:
+    """Fire-and-forget: build the stereo mixdown right after a call ends so the
+    operator's FIRST play is instant, instead of waiting for the lazy on-demand
+    mix at play time. Best-effort — any failure is swallowed (the lazy path in
+    the serving endpoint still rebuilds it on demand)."""
+    try:
+        rec_dir = RECORDING_ROOT / str(rel_path)
+        if rec_dir.exists():
+            await async_get_or_build_mixed(rec_dir)
+            log.info("recordings.prebuild_mixed done rel=%s", rel_path)
+    except Exception as e:  # noqa: BLE001
+        log.warning("recordings.prebuild_mixed failed rel=%s err=%s", rel_path, e)

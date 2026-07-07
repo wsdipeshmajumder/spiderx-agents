@@ -594,6 +594,10 @@ async def handle(connector_id: str, args: dict[str, Any], agent: dict[str, Any])
                         # final path. The audio files are now under the
                         # canonical layout the daily purge job scans.
                         await db.update_call_recording_path(int(call_id), new_rel)
+                    # Pre-build the stereo mixdown in the background so the first
+                    # play is instant instead of a lazy on-demand mix.
+                    import asyncio as _asyncio
+                    _asyncio.create_task(_rec.prebuild_mixed(new_rel))
                 except Exception as e:  # noqa: BLE001
                     log.warning("end_call: recording rename failed: %s", e)
 

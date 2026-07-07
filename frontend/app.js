@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 318;
+const SXAI_BUILD = 319;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -127,6 +127,14 @@ function isSignedOut() {
 }
 function currentUserId() {
   return loadAuth()?.id;
+}
+// Append the current user id to a same-origin URL so NATIVE media requests
+// (an <audio>/<img> src, a download link) authenticate — they can't set the
+// X-User-Id header the SPA normally sends, so recording.wav 403s without this.
+function withUser(url) {
+  const uid = currentUserId();
+  if (!url || !uid) return url;
+  return url + (url.indexOf("?") === -1 ? "?" : "&") + "u=" + encodeURIComponent(uid);
 }
 // Stable per-build session id, shared across the wizard, chat, and voice
 // surfaces so a mid-build switch resumes the SAME server-side build_session
@@ -4742,7 +4750,7 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
         <a class="db-topbar-brand db-topbar-brand-link" href="/" onClick=${(e) => { e.preventDefault(); navTo("/agents"); }}
            aria-label="SpiderX.AI — back to all agents">
           <span class="db-topbar-logo">
-            <${SpiderXLogo} height=${29} />
+            <${SpiderXLogo} height=${44} />
           </span>
           <!-- Build 222 — "AI Agent Builder" tag retained on the homepage
                header but suppressed in the dashboard topbar so the
@@ -7538,6 +7546,10 @@ function AgentCallOutcomesPage({ agent, agents, presets, plan, onNav }) {
 // and this component renders an <audio controls /> against `data.recording_url`.
 // ─────────────────────────────────────────────────────────────────────────
 function CallDetailModal({ loading, data, agent, onClose }) {
+  // "Preparing recording…" progress — the stereo mixdown is normally pre-built at
+  // call end, but if it's still generating the first request buffers; show a
+  // spinner until the audio is playable.
+  const [recPreparing, setRecPreparing] = useState(false);
   const fmtDate = (iso) => {
     if (!iso) return "—";
     const d = new Date(iso);
@@ -7614,9 +7626,15 @@ function CallDetailModal({ loading, data, agent, onClose }) {
                   ${data.recording_available
                     ? html`
                       <audio controls preload="metadata"
-                             src=${data.recording_url}
+                             src=${withUser(data.recording_url)}
                              class="call-detail-audio call-detail-audio-wide"
-                             title="Caller on left, agent on right"></audio>
+                             title="Caller on left, agent on right"
+                             onLoadStart=${() => setRecPreparing(true)}
+                             onWaiting=${() => setRecPreparing(true)}
+                             onCanPlay=${() => setRecPreparing(false)}
+                             onPlaying=${() => setRecPreparing(false)}
+                             onError=${() => setRecPreparing(false)}></audio>
+                      ${recPreparing ? html`<div class="call-detail-recprep"><span class="db-spin" aria-hidden="true"></span> Preparing recording…</div>` : ""}
                     `
                     : html`
                       <button class="db-btn-primary call-detail-rec-btn" type="button" disabled
@@ -8427,7 +8445,7 @@ function AgentCallsPage({ agent, agents, presets, plan, onNav, onEdit }) {
                     </td>
                     <td>
                       ${c.recording_available
-                        ? html`<audio class="db-rec-audio" controls preload="none" src=${c.recording_url}></audio>`
+                        ? html`<audio class="db-rec-audio" controls preload="none" src=${withUser(c.recording_url)}></audio>`
                         : html`<span class="db-muted" title="No audio saved for this call">—</span>`}
                     </td>
                     <td class="db-table-td-right">

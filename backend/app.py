@@ -118,7 +118,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 318
+APP_BUILD = 319
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -134,6 +134,17 @@ async def current_user(request: Request) -> dict:
     Auth0 JWT validator. Falls back to founder so unauthed test calls keep
     working during development."""
     uid_raw = request.headers.get("X-User-Id")
+    # Native media requests (an <audio>/<img> src, a new-tab download) can't set
+    # the X-User-Id header, so also accept the id from a `?u=` / `?user_id=` query
+    # param — same client-provided-id trust model as the header (both become an
+    # Auth0-JWT check later). Without this, recording.wav 403s for any non-founder
+    # user because the header-less request falls through to the founder, who
+    # doesn't own their agent.
+    if not uid_raw:
+        try:
+            uid_raw = request.query_params.get("u") or request.query_params.get("user_id")
+        except Exception:  # noqa: BLE001
+            uid_raw = None
     if uid_raw:
         try:
             user = await db.get_user(int(uid_raw))

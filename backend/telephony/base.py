@@ -500,6 +500,9 @@ async def _persist_call(
                     new_abs.parent.mkdir(parents=True, exist_ok=True)
                     old_abs.rename(new_abs)
                     await db.update_call_recording_path(int(cid), new_rel)
+                # Pre-build the stereo mixdown in the background so the operator's
+                # first play is instant (not a lazy on-demand mix). Fire-and-forget.
+                asyncio.create_task(_rec.prebuild_mixed(new_rel))
             except Exception as e:  # noqa: BLE001
                 log.warning("telephony[%s] recording rename failed: %s", provider.name, e)
         log.info("telephony[%s]: persisted call id=%s turns=%d dur=%.1fs outcome=%s rec=%s",
