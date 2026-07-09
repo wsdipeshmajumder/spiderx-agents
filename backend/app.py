@@ -118,7 +118,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 319
+APP_BUILD = 320
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1573,10 +1573,20 @@ async def get_agent_by_slug(slug: str, request: Request) -> dict:
     user = await current_user(request)
     org_id = await auth.primary_org_id(user["id"])
     a = await db.get_agent_by_slug(slug, org_id=org_id)
-    if not a:
-        raise HTTPException(status_code=404, detail="agent not found")
-    await _require_agent_owned(a["id"], user)
-    return _public_agent(a)
+    if a:
+        await _require_agent_owned(a["id"], user)
+        return _public_agent(a)
+    # Public embed fallback. The chat/voice widget on a customer's own site loads
+    # UNAUTHENTICATED (a native <script>/iframe can't send X-User-Id), so the
+    # caller resolves as the founder and their org won't contain a non-founder's
+    # agent — the widget then 404s and "doesn't work". Resolve the slug GLOBALLY
+    # and return the PUBLIC shape only (name / persona / sector — never secrets,
+    # see _public_agent). Publish + chat-entitlement are still enforced when the
+    # chat/voice WS actually connects, so this only exposes public identity.
+    a = await db.get_agent_by_slug(slug, org_id=None)
+    if a:
+        return _public_agent(a)
+    raise HTTPException(status_code=404, detail="agent not found")
 
 
 @app.delete("/api/agents/{agent_id}")
