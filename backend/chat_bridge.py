@@ -1432,6 +1432,42 @@ async def run_chat_session(
         log.exception("chat[%s]: loop crashed: %s", build_sid[:18], e)
 
 
+# The chat model sometimes narrates its plan as TEXT — a `tool_code` block, a
+# raw `print(default_api.<tool>(…))`, or a `thought` trace — alongside the real
+# structured function_call. That scaffolding must NEVER reach the visitor (it
+# leaked into a bubble showing "tool_code print(default_api.request_human_handoff…"
+# + the model's chain-of-thought). This regex flags a text run as internal
+# scaffolding so we stop streaming it.
+_CHAT_SCAFFOLD_RE = _re.compile(
+    r"(?:^|\n)\s*(?:tool_code|tool_outputs?|thought)\b"   # marker lines
+    r"|print\(\s*default_api"                              # print(default_api.…)
+    r"|default_api\.\w+\s*\("                              # default_api.tool(
+    r"|```",                                               # fenced code block
+    _re.IGNORECASE,
+)
+
+
+def _strip_chat_scaffolding(s: str) -> str:
+    """Remove tool_code/thought scaffolding from a full turn's text before it's
+    persisted to the transcript. The live client stream is gated separately."""
+    if not s or not _CHAT_SCAFFOLD_RE.search(s):
+        return s
+    s = _re.sub(r"```(?:\w+)?\b.*?```", "", s, flags=_re.DOTALL)   # fenced blocks
+    out, skipping = [], False
+    for ln in s.split("\n"):
+        low = ln.strip().lower()
+        if low in ("tool_code", "thought", "tool_outputs", "tool_output") \
+                or low.startswith("print(default_api") or "default_api." in low:
+            skipping = True
+            continue
+        if skipping:
+            if not ln.strip():
+                skipping = False
+            continue
+        out.append(ln)
+    return "\n".join(out).strip()
+
+
 async def _run_model_turn(
     *,
     chat,
@@ -1459,6 +1495,9 @@ async def _run_model_turn(
             raise
         function_calls: list[Any] = []
         iter_usage: Any = None
+        iter_text = ""            # this turn's raw text (for scaffold detection)
+        suppress = False          # once scaffolding appears, stop leaking the trace
+        streamed_clean = False    # did we stream any real text this iteration?
         async for chunk in stream:
             um = getattr(chunk, "usage_metadata", None)
             if um is not None:
@@ -1470,13 +1509,24 @@ async def _run_model_turn(
                 if not content or not getattr(content, "parts", None):
                     continue
                 for part in content.parts:
+                    # Structured "thinking" parts (Gemini 2.5) are internal — never show.
+                    if getattr(part, "thought", False):
+                        continue
                     txt = getattr(part, "text", None)
                     if txt:
                         full_text += txt
-                        # Stream the text chunk to the client as the
-                        # SAME `transcript role:model` event the
-                        # LandingChatView already consumes.
-                        await send_json({"type": "transcript", "role": "model", "text": txt})
+                        iter_text += txt
+                        # Suppress tool_code/thought narration: once the accumulated
+                        # text trips the scaffold detector, stop streaming for this
+                        # turn. The real user-facing answer arrives in the NEXT
+                        # iteration (after the tool result), free of scaffolding.
+                        if not suppress and _CHAT_SCAFFOLD_RE.search(iter_text):
+                            suppress = True
+                        if not suppress:
+                            # Stream the text chunk to the client as the SAME
+                            # `transcript role:model` event LandingChatView consumes.
+                            await send_json({"type": "transcript", "role": "model", "text": txt})
+                            streamed_clean = True
                     fc = getattr(part, "function_call", None)
                     if fc and getattr(fc, "name", None):
                         function_calls.append(fc)
@@ -1487,8 +1537,15 @@ async def _run_model_turn(
             usage["out"] = usage.get("out", 0) + (getattr(iter_usage, "candidates_token_count", 0) or 0)
         if not function_calls:
             # Model finished without calling any more tools — turn done.
+            # If we suppressed a scaffolding-laced final turn but it also carried
+            # a real answer we never streamed, deliver the cleaned answer now so
+            # the visitor isn't left with an empty reply.
+            if suppress and not streamed_clean:
+                clean = _strip_chat_scaffolding(iter_text)
+                if clean:
+                    await send_json({"type": "transcript", "role": "model", "text": clean})
             await send_json({"type": "turn_complete"})
-            return full_text
+            return _strip_chat_scaffolding(full_text)
         # Execute every tool call this iteration produced, build
         # function-response parts to feed back into the chat.
         responses: list[Any] = []
@@ -1513,7 +1570,7 @@ async def _run_model_turn(
     # spin forever.
     log.warning("chat turn hit 10-iteration cap without resolving — emitting turn_complete")
     await send_json({"type": "turn_complete"})
-    return full_text
+    return _strip_chat_scaffolding(full_text)
 
 
 # ─────────────────── Customer-facing AGENT chat (Build 265) ────────────────
