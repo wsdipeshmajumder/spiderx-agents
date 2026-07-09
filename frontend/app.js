@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 320;
+const SXAI_BUILD = 321;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1625,6 +1625,32 @@ function EmbedView({ slug, blobSize, blobMode, engineRef, onPressStart, onPressE
   `;
 }
 
+// Turn URLs + markdown links in a chat message into clickable anchors (new tab,
+// noopener). Returns an array of strings + <a> nodes for htm to render, so a
+// reply like "book here: https://…" or "[book](https://…)" is actually clickable.
+function linkifyChat(text) {
+  if (!text || typeof text !== "string") return text;
+  const re = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|((?:https?:\/\/|www\.)[^\s<]+)/g;
+  const out = [];
+  let last = 0, m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    if (m[2]) {                        // markdown [label](url)
+      out.push(html`<a href=${m[2]} target="_blank" rel="noopener noreferrer">${m[1]}</a>`);
+    } else {                           // bare http(s):// or www. URL
+      let url = m[3], trail = "";
+      const t = url.match(/[.,;:!?)\]]+$/);           // don't swallow trailing punctuation
+      if (t) { trail = t[0]; url = url.slice(0, -trail.length); }
+      const href = url.indexOf("www.") === 0 ? "https://" + url : url;
+      out.push(html`<a href=${href} target="_blank" rel="noopener noreferrer">${url}</a>`);
+      if (trail) out.push(trail);
+    }
+    last = re.lastIndex;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out.length ? out : text;
+}
+
 // AgentChatEmbed — the TEXT chat surface served at /embed/<slug>?channel=chat
 // (the paid chat add-on). Self-contained: its own WS to /ws/session?mode=chat,
 // streaming model tokens into bubbles. No mic, no AudioEngine. Shares the
@@ -1645,6 +1671,7 @@ function AgentChatEmbed({ slug, contained, override }) {
   const [humanAgent, setHumanAgent] = useState(null);   // operator name once a human takes over
   const [thinking, setThinking] = useState(false);      // "agent is typing…" indicator
   const [csat, setCsat] = useState(null);               // null | "asking" | "up" | "down" | "done"
+  const [restartN, setRestartN] = useState(0);          // bump → drop context + reconnect fresh
   const wsRef = useRef(null);
   const streamingRef = useRef(false);                  // mid model-turn → append tokens
   const logRef = useRef(null);
@@ -1752,7 +1779,7 @@ function AgentChatEmbed({ slug, contained, override }) {
     ws.onclose = () => setStatus((s) => (s === "error" || s === "ended") ? s : "ended");
     ws.onerror = () => setStatus((s) => s === "ended" ? s : "error");
     return () => { try { ws.close(); } catch {} };
-  }, [agent?.id]);
+  }, [agent?.id, restartN]);
 
   useEffect(() => {
     try { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; } catch {}
@@ -1856,6 +1883,18 @@ function AgentChatEmbed({ slug, contained, override }) {
     try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "feedback", rating })); } catch {}
   };
 
+  // "New chat" — forget the resumed transcript and reconnect clean, so the
+  // visitor starts a FRESH conversation instead of continuing the old context.
+  const newChat = () => {
+    try { if (resumeKeyRef.current) sessionStorage.removeItem(resumeKeyRef.current); } catch {}
+    try { wsRef.current && wsRef.current.close(); } catch {}
+    streamingRef.current = false;
+    setMessages([]); setInput(""); setQuickReplies([]); setActiveForm(null);
+    setFormValues({}); setActiveCards([]); setHandoff(null); setHumanAgent(null);
+    setThinking(false); setCsat(null); setStatus("connecting");
+    setRestartN((n) => n + 1);   // re-runs the connection effect → fresh sid, no resume
+  };
+
   if (err && !agent) return html`<div class="embed-err">${err}</div>`;
   if (!agent) return html`<div class="embed-loading">Loading…</div>`;
 
@@ -1911,10 +1950,16 @@ function AgentChatEmbed({ slug, contained, override }) {
           <div class="chatembed-name">${agent.name}</div>
           <div class=${"chatembed-status chatembed-status-" + status}>${statusLabel}</div>
         </div>
-        ${status === "ready" && !handoff ? html`
-          <button type="button" class="chatembed-human" onClick=${requestHuman}
-            title="Talk to a human">Talk to a human</button>
-        ` : ""}
+        <div class="chatembed-head-actions">
+          ${status === "ready" && !handoff ? html`
+            <button type="button" class="chatembed-human" onClick=${requestHuman}
+              title="Talk to a human">Talk to a human</button>
+          ` : ""}
+          <button type="button" class="chatembed-newchat" onClick=${newChat}
+            title="Start a new chat" aria-label="Start a new chat">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+          </button>
+        </div>
       </header>
       ${humanAgent ? html`
         <div class="chatembed-livebar">🟢 You're chatting with ${humanAgent}</div>
@@ -1925,7 +1970,7 @@ function AgentChatEmbed({ slug, contained, override }) {
           : html`
           <div key=${i} class=${"chatembed-msg chatembed-msg-" + (m.role === "user" ? "user" : "model")}>
             ${m.role === "human" ? html`<div class="chatembed-human-tag">${m.operator || "Team"}</div>` : ""}
-            <div class=${"chatembed-bubble" + (m.role === "human" ? " chatembed-bubble-human" : "")}>${m.text}</div>
+            <div class=${"chatembed-bubble" + (m.role === "human" ? " chatembed-bubble-human" : "")}>${linkifyChat(m.text)}</div>
           </div>
         `)}
         ${thinking ? html`
