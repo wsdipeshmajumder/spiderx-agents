@@ -5,7 +5,7 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 309**
+**Last updated: build 324**
 
 **Evidence tiers**
 - **Behavioral** — observed live in a real browser session (prod or preview)
@@ -62,6 +62,7 @@
 | U6 | Chat embed: customise response-box colour + size before embedding | PASS | Behavioral | 311 | `chat_settings.bubble_radius` + `bubble_size` (sm/md/lg) + accent, edited in-config (roundness slider, size toggle), applied via `--chat-radius`/`--chat-size`; `embed.js` also forwards `data-accent/radius/size` (override wins). Headless: embed resolves the CSS vars from URL params |
 | U7 | Chat embed: bot home as the starting point (preset questions) | PASS | Behavioral | 312, 314 | Fresh chat opens on a home hero + preset-question card grid. **314:** home is the opening screen whenever a welcome OR starters are set — the welcome_message becomes the hero (no longer a redundant chat bubble) and the model kickoff greeting is suppressed, so the preview/widget open on the "search home" even with no starters (tester). Headless: welcome-only agent → welcome-as-hero, 0 cards, 0 bubbles; welcome+starters → hero + 4 cards |
 | U8 | Chat embed: voice mode (ask by voice) | PASS (needs live-mic audition) | Behavioral | 313 | Mic in the composer using the browser Web Speech API — dictates into the box live and auto-sends on stop; hidden where SpeechRecognition is unavailable (Firefox). Headless-verified: mic renders, API present. **Actual transcription needs a real mic to audition** |
+| U9 | Chat-widget page uses the full screen width | PASS | Behavioral | 324 | Tester: "give the chat menu + body more space, widen the 3 tabs to fit screen." The page was capped at a centered 1020px column (`.golive-focus-wide`), wasting the right half and clustering the Settings / What-it-knows / Conversations tabs in the middle. Scoped `.chatpage` to fill the content width (1440 cap) + stretch, so the tab bar spans full-width and both the two-pane preview and the card grids breathe. Headless before/after at 1440px: focus 1020→1112 (fills content); all 3 tabs verified wide (Settings 2-pane, Knowledge 4-across, Conversations full-width list) |
 
 ## Score
 13 of 15 closed (PASS). 1 PARTIAL pending audition (#9). 1 OPEN (#12). #13 code-complete; prod playback pending a persistent-volume config. +8 ad-hoc (U1 outcomes intro, U2 call-log fields, U3 upload fix, U4 channel-aware responses, U5–U8 chat-embed: drawer / response-box styling / preset-question home / voice mode).

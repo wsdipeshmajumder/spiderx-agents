@@ -11766,6 +11766,11 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
 }
 /* Chat tab is two-pane (settings + live preview) — give it more room. */
 .golive-focus-wide { max-width: 1020px; }
+/* Chat page fills the content width instead of a centered 1020px column — the
+   cap wasted the right half on wide screens and cramped the 3-tab bar + the
+   two-pane preview. Stretch so the tabs span full width and both panes breathe. */
+.chatpage .golive-focus-wide { max-width: 1440px; align-items: stretch; }
+.chatpage .chatpage-tabs { align-self: stretch; }
 .golive-tabs {
   display: inline-flex; gap: 4px;
   padding: 4px; margin: 0 auto 18px;
