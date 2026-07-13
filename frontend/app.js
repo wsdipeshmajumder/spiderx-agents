@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 325;
+const SXAI_BUILD = 326;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1957,21 +1957,34 @@ function AgentChatEmbed({ slug, contained, override }) {
   if (!isNaN(_radius) && _radius >= 0 && _radius <= 40) rootStyle["--chat-radius"] = _radius + "px";
   if (_sizePx) rootStyle["--chat-size"] = _sizePx;
 
-  // Suggested starter chips — shown on open until the visitor sends anything.
-  let starters = Array.isArray(cs.starters) ? cs.starters.filter((s) => typeof s === "string" && s.trim()).slice(0, 4) : [];
-  // In the config LIVE PREVIEW, if the operator hasn't set questions yet, show a
-  // sample set of 4 so the home always demos the "Ask me anything…" card layout
-  // (like the reference design). Live embeds only ever show the operator's own.
-  if (!starters.length && contained) {
-    starters = ["What are your opening hours?", "Where are you located?",
-                "What services do you offer?", "How do I get in touch?"];
+  // Suggested starters — the embed ALWAYS opens on the "chat home" (search-home)
+  // with 4 preset questions. Use the operator's own first; if they set fewer than
+  // 4, pad with generic prompts — skipping any whose topic a real starter already
+  // covers, so we never show two near-duplicate cards (e.g. "your hours?" +
+  // "opening hours?"). Applies to the live embed AND the config preview.
+  const GENERIC_STARTERS = [
+    { q: "What are your opening hours?",    kw: ["hour", "open", "timing"] },
+    { q: "Where are you located?",          kw: ["locat", "where", "address", "direction"] },
+    { q: "What services do you offer?",     kw: ["service", "offer", "product", "menu"] },
+    { q: "How do I get in touch?",          kw: ["touch", "contact", "reach", "call", "phone", "email"] },
+    { q: "Do you have any current offers?", kw: ["deal", "discount", "promo", "price", "cost"] },
+  ];
+  let starters = Array.isArray(cs.starters) ? cs.starters.filter((s) => typeof s === "string" && s.trim()) : [];
+  const _low = starters.map((s) => s.trim().toLowerCase());
+  for (const g of GENERIC_STARTERS) {
+    if (starters.length >= 4) break;
+    const gl = g.q.toLowerCase();
+    if (_low.includes(gl)) continue;                                    // exact duplicate
+    if (g.kw.some((k) => _low.some((s) => s.includes(k)))) continue;    // topic already covered
+    starters.push(g.q); _low.push(gl);
   }
+  starters = starters.slice(0, 4);
   const hasUserMsg = messages.some((m) => m.role === "user");
   const _welcomeText = (cs.welcome_message || "").trim();
   // Bot home — the opening "search home": a hero (the operator's welcome, else
-  // "Ask me anything about <name>") + any preset-question cards. Shown on a
-  // fresh chat as the starting point whenever a welcome OR starters are set.
-  const showHome = (starters.length || _welcomeText) && status === "ready"
+  // "Ask me anything about <name>") + the 4 preset-question cards. It's the
+  // starting point of every fresh chat (we always have 4 starters now).
+  const showHome = status === "ready"
     && !hasUserMsg && !humanAgent && !csat && !activeForm && !quickReplies.length;
 
   return html`
