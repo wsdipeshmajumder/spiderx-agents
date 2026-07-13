@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 324;
+const SXAI_BUILD = 325;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1636,13 +1636,13 @@ function linkifyChat(text) {
   while ((m = re.exec(text)) !== null) {
     if (m.index > last) out.push(text.slice(last, m.index));
     if (m[2]) {                        // markdown [label](url)
-      out.push(html`<a href=${m[2]} target="_blank" rel="noopener noreferrer">${m[1]}</a>`);
+      out.push(html`<a class="chatembed-link" href=${m[2]} data-preview=${m[2]} target="_blank" rel="noopener noreferrer">${m[1]}</a>`);
     } else {                           // bare http(s):// or www. URL
       let url = m[3], trail = "";
       const t = url.match(/[.,;:!?)\]]+$/);           // don't swallow trailing punctuation
       if (t) { trail = t[0]; url = url.slice(0, -trail.length); }
       const href = url.indexOf("www.") === 0 ? "https://" + url : url;
-      out.push(html`<a href=${href} target="_blank" rel="noopener noreferrer">${url}</a>`);
+      out.push(html`<a class="chatembed-link" href=${href} data-preview=${href} target="_blank" rel="noopener noreferrer">${url}</a>`);
       if (trail) out.push(trail);
     }
     last = re.lastIndex;
@@ -1672,6 +1672,9 @@ function AgentChatEmbed({ slug, contained, override }) {
   const [thinking, setThinking] = useState(false);      // "agent is typing…" indicator
   const [csat, setCsat] = useState(null);               // null | "asking" | "up" | "down" | "done"
   const [restartN, setRestartN] = useState(0);          // bump → drop context + reconnect fresh
+  const [linkPreview, setLinkPreview] = useState(null); // hover unfurl {href, top, left, data, loading}
+  const previewCacheRef = useRef({});                   // href → preview data (fetched once)
+  const previewTimerRef = useRef(null);                 // hover-in / hover-out debounce
   const wsRef = useRef(null);
   const streamingRef = useRef(false);                  // mid model-turn → append tokens
   const logRef = useRef(null);
@@ -1895,6 +1898,37 @@ function AgentChatEmbed({ slug, contained, override }) {
     setRestartN((n) => n + 1);   // re-runs the connection effect → fresh sid, no resume
   };
 
+  // Link hover-preview: fetch the target's OG title/image/description once (server
+  // -side, cached), show an unfurl card above the link. Delegated on the log so it
+  // covers every linkified anchor. Preloads on hover, positioned in the widget.
+  const showLinkPreview = (a) => {
+    const href = a.getAttribute("data-preview");
+    if (!href) return;
+    clearTimeout(previewTimerRef.current);
+    const rect = a.getBoundingClientRect();
+    const x = Math.max(8, Math.min(rect.left, (window.innerWidth || 380) - 288));
+    const cached = previewCacheRef.current[href];
+    setLinkPreview({ href, x, y: rect.top, data: cached || null, loading: !cached });
+    if (!cached) {
+      fetch("/api/link-preview?url=" + encodeURIComponent(href))
+        .then((r) => r.ok ? r.json() : null)
+        .then((d) => {
+          const data = d || { url: href, site: "", title: "", description: "", image: "" };
+          previewCacheRef.current[href] = data;
+          setLinkPreview((p) => (p && p.href === href) ? { ...p, data, loading: false } : p);
+        })
+        .catch(() => setLinkPreview((p) => (p && p.href === href) ? { ...p, loading: false } : p));
+    }
+  };
+  const hideLinkPreview = () => {
+    clearTimeout(previewTimerRef.current);
+    previewTimerRef.current = setTimeout(() => setLinkPreview(null), 200);
+  };
+  const onLogPointerOver = (e) => {
+    const a = e.target && e.target.closest && e.target.closest("a.chatembed-link");
+    if (a) showLinkPreview(a);
+  };
+
   if (err && !agent) return html`<div class="embed-err">${err}</div>`;
   if (!agent) return html`<div class="embed-loading">Loading…</div>`;
 
@@ -1957,14 +1991,15 @@ function AgentChatEmbed({ slug, contained, override }) {
           ` : ""}
           <button type="button" class="chatembed-newchat" onClick=${newChat}
             title="Start a new chat" aria-label="Start a new chat">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+            <span class="chatembed-newchat-label">New chat</span>
           </button>
         </div>
       </header>
       ${humanAgent ? html`
         <div class="chatembed-livebar">🟢 You're chatting with ${humanAgent}</div>
       ` : ""}
-      <div class="chatembed-log" ref=${logRef}>
+      <div class="chatembed-log" ref=${logRef} onMouseOver=${onLogPointerOver} onMouseOut=${hideLinkPreview}>
         ${messages.map((m, i) => m.role === "system"
           ? html`<div key=${i} class="chatembed-sysnote">${m.text}</div>`
           : html`
@@ -2060,6 +2095,21 @@ function AgentChatEmbed({ slug, contained, override }) {
           ` : html`
             <span class="chatembed-csat-thanks">${csat === "down" ? "Thanks — we'll use this to do better. 🙏" : "Thanks for the feedback! 🙌"}</span>
           `}
+        </div>
+      ` : ""}
+      ${linkPreview ? html`
+        <div class="chatembed-linkcard" style=${{ left: linkPreview.x + "px", top: linkPreview.y + "px" }}
+             onMouseEnter=${() => clearTimeout(previewTimerRef.current)} onMouseLeave=${hideLinkPreview}>
+          ${(!linkPreview.data && linkPreview.loading)
+            ? html`<div class="chatembed-linkcard-load"><span class="db-spin"></span> Loading preview…</div>`
+            : html`
+              ${linkPreview.data && linkPreview.data.image
+                ? html`<img class="chatembed-linkcard-img" src=${linkPreview.data.image} alt="" onError=${(e) => { e.target.style.display = "none"; }} />` : ""}
+              <div class="chatembed-linkcard-body">
+                ${linkPreview.data && linkPreview.data.title ? html`<div class="chatembed-linkcard-title">${linkPreview.data.title}</div>` : ""}
+                <div class="chatembed-linkcard-site">🔗 ${(linkPreview.data && linkPreview.data.site) || linkPreview.href}</div>
+                ${linkPreview.data && linkPreview.data.description ? html`<div class="chatembed-linkcard-desc">${linkPreview.data.description}</div>` : ""}
+              </div>`}
         </div>
       ` : ""}
       <form class="chatembed-input" onSubmit=${send}>
@@ -11510,66 +11560,77 @@ function TelephonyPanel({ agent, refreshAgent }) {
 // AgentChatPage — dedicated page for the chat widget (its own menu item),
 // split out of Go-live. Snippet + appearance/behaviour/trust settings on the
 // left, a live preview on the right; paywall when the add-on isn't active.
-// ChatDetailDrawer — slide-in panel showing a past chat's full transcript +
-// captured info + CSAT (Build 297). Replaces the centered modal for the
-// Conversations tab.
-function ChatDetailDrawer({ loading, data, agent, onClose }) {
-  const ex = (data && !data._err && data.extracted && typeof data.extracted === "object") ? data.extracted : {};
+// chatDetailHeadRow — the outcome pill + timestamp for a chat detail header.
+function chatDetailHeadRow(data) {
+  const fmtWhen = (ts) => { try { return new Date(ts).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
+  return html`
+    <div class="chatdrawer-headrow">
+      <span class=${"call-outcome call-outcome-" + (data.outcome || "unknown")}>${(data.outcome || "unknown").replace(/_/g, " ")}</span>
+      <span class="chatdrawer-when">${fmtWhen(data.started_at)}${data.duration_s ? ` · ${Math.round(data.duration_s)}s` : ""}</span>
+    </div>`;
+}
+
+// chatDetailBody — a past chat's transcript + captured info + CSAT. Shared by the
+// slide-in drawer (Call-log page) AND the inline right pane (Conversations tab).
+function chatDetailBody(loading, data, agent) {
+  if (loading) return html`<div class="db-loading-sm" style=${{ padding: "20px 0" }}>Loading…</div>`;
+  if (data?._err) return html`<div class="db-form-help" style=${{ padding: "20px 0" }}>Couldn't load this chat.</div>`;
+  if (!data) return "";
+  const ex = (data.extracted && typeof data.extracted === "object") ? data.extracted : {};
   const csat = ex.csat;
   const fields = Object.entries(ex).filter(([k]) => k !== "csat" && k !== "csat_comment" && k !== "handoff_requested" && k !== "handoff_reason");
-  const fmtWhen = (ts) => { try { return new Date(ts).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
+  return html`
+    ${csat ? html`
+      <div class=${"chatdrawer-csat chatdrawer-csat-" + csat}>
+        ${csat === "up" ? "👍 Visitor rated this Good" : "👎 Visitor said it could be better"}
+        ${ex.csat_comment ? html`<span class="chatdrawer-csat-note">“${ex.csat_comment}”</span>` : ""}
+      </div>` : ""}
+    ${ex.handoff_requested ? html`<div class="chatdrawer-handoff">🙋 Human handoff was requested${ex.handoff_reason ? html` — ${ex.handoff_reason}` : ""}</div>` : ""}
+    ${data.summary ? html`<div class="chatdrawer-section"><div class="chatdrawer-label">Summary</div><p class="chatdrawer-summary">${data.summary}</p></div>` : ""}
+    ${fields.length ? html`
+      <div class="chatdrawer-section">
+        <div class="chatdrawer-label">Captured info</div>
+        <div class="chatdrawer-fields">
+          ${fields.map(([k, v], i) => html`
+            <div key=${i} class="chatdrawer-field">
+              <span class="chatdrawer-field-k">${String(k).replace(/_/g, " ")}</span>
+              <span class="chatdrawer-field-v">${v && typeof v === "object" ? JSON.stringify(v) : String(v)}</span>
+            </div>`)}
+        </div>
+      </div>` : ""}
+    <div class="chatdrawer-section">
+      <div class="chatdrawer-label">Transcript</div>
+      ${(data.transcript_turns || []).length === 0
+        ? html`<div class="db-form-help">No transcript was captured for this chat.</div>`
+        : html`<div class="chatdrawer-tx">
+            ${(data.transcript_turns || []).map((t, i) => {
+              const isUser = /^(user|caller|human)/i.test(t.role || "");
+              return html`
+                <div key=${i} class=${"chatdrawer-msg " + (isUser ? "is-user" : "is-agent")}>
+                  <span class="chatdrawer-who">${isUser ? "Visitor" : (agent?.name || "AI")}</span>
+                  <div class="chatdrawer-bubble">${t.text}</div>
+                </div>`;
+            })}
+          </div>`}
+    </div>`;
+}
+
+// ChatDetailDrawer — slide-in panel showing a past chat's full transcript +
+// captured info + CSAT (Build 297). Still used by the Call-log page; the
+// Conversations tab now renders the same body inline in a right pane instead.
+function ChatDetailDrawer({ loading, data, agent, onClose }) {
   return html`
     <div class="chatdrawer-backdrop" onClick=${onClose}>
       <aside class="chatdrawer" onClick=${(e) => e.stopPropagation()}>
         <header class="chatdrawer-head">
           <div class="chatdrawer-head-meta">
             <div class="chatdrawer-title">Chat details</div>
-            ${data && !data._err && !loading ? html`
-              <div class="chatdrawer-headrow">
-                <span class=${"call-outcome call-outcome-" + (data.outcome || "unknown")}>${(data.outcome || "unknown").replace(/_/g, " ")}</span>
-                <span class="chatdrawer-when">${fmtWhen(data.started_at)}${data.duration_s ? ` · ${Math.round(data.duration_s)}s` : ""}</span>
-              </div>` : ""}
+            ${data && !data._err && !loading ? chatDetailHeadRow(data) : ""}
           </div>
           <button class="db-modal-close" type="button" aria-label="Close" onClick=${onClose}>×</button>
         </header>
         <div class="chatdrawer-body">
-          ${loading ? html`<div class="db-loading-sm" style=${{ padding: "20px 0" }}>Loading…</div>`
-            : data?._err ? html`<div class="db-form-help" style=${{ padding: "20px 0" }}>Couldn't load this chat.</div>`
-            : data ? html`
-              ${csat ? html`
-                <div class=${"chatdrawer-csat chatdrawer-csat-" + csat}>
-                  ${csat === "up" ? "👍 Visitor rated this Good" : "👎 Visitor said it could be better"}
-                  ${ex.csat_comment ? html`<span class="chatdrawer-csat-note">“${ex.csat_comment}”</span>` : ""}
-                </div>` : ""}
-              ${ex.handoff_requested ? html`<div class="chatdrawer-handoff">🙋 Human handoff was requested${ex.handoff_reason ? html` — ${ex.handoff_reason}` : ""}</div>` : ""}
-              ${data.summary ? html`<div class="chatdrawer-section"><div class="chatdrawer-label">Summary</div><p class="chatdrawer-summary">${data.summary}</p></div>` : ""}
-              ${fields.length ? html`
-                <div class="chatdrawer-section">
-                  <div class="chatdrawer-label">Captured info</div>
-                  <div class="chatdrawer-fields">
-                    ${fields.map(([k, v], i) => html`
-                      <div key=${i} class="chatdrawer-field">
-                        <span class="chatdrawer-field-k">${String(k).replace(/_/g, " ")}</span>
-                        <span class="chatdrawer-field-v">${v && typeof v === "object" ? JSON.stringify(v) : String(v)}</span>
-                      </div>`)}
-                  </div>
-                </div>` : ""}
-              <div class="chatdrawer-section">
-                <div class="chatdrawer-label">Transcript</div>
-                ${(data.transcript_turns || []).length === 0
-                  ? html`<div class="db-form-help">No transcript was captured for this chat.</div>`
-                  : html`<div class="chatdrawer-tx">
-                      ${(data.transcript_turns || []).map((t, i) => {
-                        const isUser = /^(user|caller|human)/i.test(t.role || "");
-                        return html`
-                          <div key=${i} class=${"chatdrawer-msg " + (isUser ? "is-user" : "is-agent")}>
-                            <span class="chatdrawer-who">${isUser ? "Visitor" : (agent?.name || "AI")}</span>
-                            <div class="chatdrawer-bubble">${t.text}</div>
-                          </div>`;
-                      })}
-                    </div>`}
-              </div>
-            ` : ""}
+          ${chatDetailBody(loading, data, agent)}
         </div>
       </aside>
     </div>
@@ -12007,7 +12068,8 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   `;
 
   const conversationsPanel = hasChat ? html`
-    <section class="db-panel">
+    <div class="chatconv-layout">
+    <section class="db-panel chatconv-list">
       ${liveChats.length > 0 ? html`
         <div class="db-panel-head">
           <div>
@@ -12042,7 +12104,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
         : chatLogs.length === 0 ? html`<div class="db-form-help" style=${{ padding: "10px 0" }}>No chats yet — conversations appear here once visitors start chatting.</div>`
         : html`<ul class="call-log">
             ${chatLogs.map((c) => html`
-              <li key=${c.id} class="call-row call-row-clickable" onClick=${() => setDetailId(c.id)}>
+              <li key=${c.id} class=${"call-row call-row-clickable" + (detailId === c.id ? " is-selected" : "")} onClick=${() => setDetailId(c.id)}>
                 <div class="call-row-head">
                   <span class=${"call-outcome call-outcome-" + (c.outcome || "unknown")}>${(c.outcome || "unknown").replace(/_/g, " ")}</span>
                   <span class="call-channel call-channel-web_chat">💬 Chat</span>
@@ -12054,6 +12116,20 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
             `)}
           </ul>`}
     </section>
+    <section class="db-panel chatconv-detail">
+      <header class="chatdrawer-head chatconv-detail-head">
+        <div class="chatdrawer-head-meta">
+          <div class="chatdrawer-title">Chat details</div>
+          ${detailId && detail && !detail._err && !detailLoading ? chatDetailHeadRow(detail) : ""}
+        </div>
+      </header>
+      <div class="chatdrawer-body chatconv-detail-body">
+        ${!detailId
+          ? html`<div class="chatconv-empty"><span class="chatconv-empty-glyph" aria-hidden="true">💬</span><div>Select a conversation on the left to read its full transcript here.</div></div>`
+          : chatDetailBody(detailLoading, detail, agent)}
+      </div>
+    </section>
+    </div>
   ` : "";
 
   const embedFlyout = html`
@@ -12162,7 +12238,6 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
       </div>
     </div>
     ${liveSid ? html`<${LiveChatModal} agent=${agent} sid=${liveSid} onClose=${() => { setLiveSid(null); loadChatLogs(); }} />` : ""}
-    ${detailId ? html`<${ChatDetailDrawer} loading=${detailLoading} data=${detail} agent=${agent} onClose=${() => { setDetailId(null); setDetail(null); }} />` : ""}
     ${instrFull ? html`
       <div class="db-modal-backdrop" onClick=${() => setInstrFull(false)}>
         <div class="db-modal chatinstr-modal" onClick=${(e) => e.stopPropagation()}>

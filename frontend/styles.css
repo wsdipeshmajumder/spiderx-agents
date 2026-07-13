@@ -1252,15 +1252,38 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 .chatembed-head-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex: none; }
 .chatembed-head-actions .chatembed-human { margin-left: 0; }
 .chatembed-newchat {
-  width: 30px; height: 30px; flex: none; border: 0; border-radius: 8px;
-  display: inline-flex; align-items: center; justify-content: center;
+  flex: none; border: 1px solid var(--border, #d7dae3); border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px 5px 9px;
   background: transparent; color: var(--fg-dim, #9aa0ad); cursor: pointer;
-  transition: background .12s, color .12s;
+  font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap;
+  transition: background .12s, color .12s, border-color .12s;
 }
-.chatembed-newchat:hover { background: var(--bg-1, #eef0f6); color: var(--chat-accent, #4f46e5); }
+.chatembed-newchat svg { flex: none; }
+.chatembed-newchat:hover { background: var(--bg-1, #eef0f6); color: var(--chat-accent, #4f46e5); border-color: var(--chat-accent, #4f46e5); }
+/* On the narrowest widgets, drop the label back to just the icon so the header
+   doesn't crowd next to "Talk to a human". */
+@media (max-width: 360px) { .chatembed-newchat-label { display: none; } .chatembed-newchat { padding: 6px; } }
 /* Clickable links inside chat bubbles (build 321). */
 .chatembed-bubble a { color: var(--chat-accent, #4f46e5); text-decoration: underline; word-break: break-word; }
 .chatembed-msg-user .chatembed-bubble a { color: #fff; }
+/* Link hover-preview unfurl card (build 325). */
+.chatembed-linkcard {
+  position: fixed; z-index: 30; width: 272px; max-width: calc(100% - 16px);
+  transform: translateY(-100%) translateY(-8px);
+  background: var(--bg-0, #fff); border: 1px solid var(--border, #e6e8ef);
+  border-radius: 12px; overflow: hidden; box-shadow: 0 12px 32px rgba(0,0,0,0.16);
+  font-size: 12.5px; line-height: 1.4;
+}
+.chatembed-linkcard-img { width: 100%; height: 118px; object-fit: cover; display: block; background: var(--bg-1, #f1f2f7); }
+.chatembed-linkcard-body { padding: 9px 11px; }
+.chatembed-linkcard-title { font-weight: 700; color: var(--fg, #1a1c25); margin-bottom: 3px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.chatembed-linkcard-site { font-size: 11px; color: var(--chat-accent, #4f46e5); word-break: break-all;
+  display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+.chatembed-linkcard-desc { margin-top: 4px; color: var(--muted, #6a6f7d);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.chatembed-linkcard-load { padding: 12px; display: flex; align-items: center; gap: 8px; color: var(--muted, #6a6f7d); }
+:root[data-theme="dark"] .chatembed-linkcard { background: #14172a; border-color: #2a2e44; }
 .chatembed-handoff {
   display: flex; align-items: center; gap: 8px; margin: 0 12px 8px;
   padding: 9px 12px; border-radius: 10px; line-height: 1.4;
@@ -1350,6 +1373,20 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 :root[data-theme="dark"] .call-row-clickable:hover, :root[data-theme="dark"] .livechat-live-row:hover { background: #1a1e2b; }
 
 /* Chat detail drawer (Build 297) — slides in from the right */
+/* Conversations tab: two-pane (chat list left, transcript right) instead of a
+   slide-in drawer. Detail pane is sticky so it stays put as the list scrolls;
+   it reuses the .chatdrawer-* body styles. The drawer is still used elsewhere
+   (Call-log page). */
+.chatconv-layout { display: grid; grid-template-columns: minmax(300px, 0.85fr) minmax(0, 1.4fr); gap: 18px; align-items: start; }
+.chatconv-list { min-width: 0; }
+.chatconv-detail { position: sticky; top: 16px; padding: 0; display: flex; flex-direction: column; max-height: calc(100vh - 150px); }
+.chatconv-empty { display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; gap: 10px; padding: 48px 24px; color: var(--fg-dim, #9aa0ad); font-size: 13.5px; min-height: 220px; }
+.chatconv-empty-glyph { font-size: 30px; opacity: 0.6; }
+.call-row.is-selected { background: #eef0ff; box-shadow: inset 3px 0 0 #4f46e5; }
+:root[data-theme="dark"] .call-row.is-selected { background: #1e2233; box-shadow: inset 3px 0 0 #6366f1; }
+@media (max-width: 860px) { .chatconv-layout { grid-template-columns: 1fr; } .chatconv-detail { position: static; max-height: none; } }
+
 .chatdrawer-backdrop { position: fixed; inset: 0; z-index: 1000; background: rgba(15,23,42,0.32);
   display: flex; justify-content: flex-end; animation: chatdrawer-fade .18s ease; }
 @keyframes chatdrawer-fade { from { opacity: 0; } to { opacity: 1; } }

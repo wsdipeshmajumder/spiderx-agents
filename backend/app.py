@@ -118,7 +118,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 324
+APP_BUILD = 325
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1851,6 +1851,81 @@ async def storage_health(request: Request) -> dict:
         info["recordings_on_disk"] = None
         info["scan_error"] = str(e)
     return info
+
+
+# ─── Link preview (chat hover cards) ────────────────────────────────────────
+_LINK_PREVIEW_CACHE: dict[str, tuple[float, dict]] = {}
+_LINK_PREVIEW_TTL = 3600.0
+
+
+def _host_is_public(host: str) -> bool:
+    """SSRF guard — resolve `host` and reject if ANY address is private /
+    loopback / link-local / reserved. Only public hosts may be previewed."""
+    import socket as _socket, ipaddress as _ip
+    try:
+        infos = _socket.getaddrinfo(host, None)
+    except Exception:  # noqa: BLE001
+        return False
+    if not infos:
+        return False
+    for info in infos:
+        try:
+            addr = _ip.ip_address(info[4][0])
+        except ValueError:
+            return False
+        if (addr.is_private or addr.is_loopback or addr.is_link_local
+                or addr.is_reserved or addr.is_multicast or addr.is_unspecified):
+            return False
+    return True
+
+
+@app.get("/api/link-preview")
+async def link_preview(url: str) -> dict:
+    """Fetch a URL's OpenGraph title/description/image for the chat hover-preview
+    card. Public http(s) hosts only (SSRF-guarded), size/time-capped, cached.
+    Unauthenticated by design — chat visitors aren't signed in — but the guards
+    stop it being used as an internal-network proxy or an amplifier."""
+    from urllib.parse import urlparse, urljoin
+    import time as _t, re as _re, html as _html, httpx
+    u = (url or "").strip()
+    if not (u.startswith("http://") or u.startswith("https://")):
+        raise HTTPException(status_code=400, detail="only http(s) URLs")
+    p = urlparse(u)
+    if not p.hostname or not _host_is_public(p.hostname):
+        raise HTTPException(status_code=400, detail="host not allowed")
+    now = _t.time()
+    hit = _LINK_PREVIEW_CACHE.get(u)
+    if hit and now - hit[0] < _LINK_PREVIEW_TTL:
+        return hit[1]
+    title = desc = image = ""
+    try:
+        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True, max_redirects=4,
+                                     headers={"User-Agent": "SpiderX-LinkPreview/1.0"}) as client:
+            r = await client.get(u)
+            if "html" in (r.headers.get("content-type", "").lower()):
+                body = r.text[:200_000]
+
+                def _meta(prop: str) -> str:
+                    m = _re.search(r'<meta[^>]+(?:property|name)=["\']' + _re.escape(prop)
+                                   + r'["\'][^>]+content=["\']([^"\']*)["\']', body, _re.I)
+                    if not m:
+                        m = _re.search(r'<meta[^>]+content=["\']([^"\']*)["\'][^>]+(?:property|name)=["\']'
+                                       + _re.escape(prop) + r'["\']', body, _re.I)
+                    return _html.unescape(m.group(1)).strip() if m else ""
+
+                title = _meta("og:title") or _meta("twitter:title")
+                if not title:
+                    tm = _re.search(r'<title[^>]*>([^<]+)</title>', body, _re.I)
+                    title = _html.unescape(tm.group(1)).strip() if tm else ""
+                desc = _meta("og:description") or _meta("description") or _meta("twitter:description")
+                image = _meta("og:image") or _meta("twitter:image")
+                if image:
+                    image = urljoin(str(r.url), image)
+    except Exception:  # noqa: BLE001
+        pass   # partial/empty preview is fine — the client falls back to the bare URL
+    data = {"url": u, "site": p.hostname, "title": title[:200], "description": desc[:300], "image": image[:600]}
+    _LINK_PREVIEW_CACHE[u] = (now, data)
+    return data
 
 
 @app.get("/api/agents/{agent_id}/calls/{call_id}/recording.wav")
