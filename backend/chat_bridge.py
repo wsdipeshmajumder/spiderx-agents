@@ -1883,9 +1883,11 @@ def _agent_chat_system_prompt(agent: dict[str, Any]) -> str:
     parts.append(f"\n━━━ RULES ━━━\n{guards}")
     parts.append(
         "\n━━━ EDGE CASES (handle these like a top-tier support agent) ━━━\n"
-        "• DON'T KNOW / NOT IN KNOWLEDGE: never guess or invent prices, stock, availability, "
-        "policies or facts. Say you're not certain, then offer the next best step — capture their "
-        "details for a callback, or hand to a human (`request_human_handoff`).\n"
+        "• DON'T KNOW / NOT IN KNOWLEDGE: never guess or invent the address/location, opening hours, "
+        "prices, stock, availability, policies or any fact. ONLY state a detail that's in the business "
+        "info/knowledge above — if it isn't there, do NOT make up a plausible answer (never name a "
+        "random area/landmark of the city, never invent hours). Say you're not certain, then offer the "
+        "next best step — capture their details for a callback, or hand to a human (`request_human_handoff`).\n"
         "• OFF-TOPIC / OUT OF SCOPE: politely redirect to what you CAN help with in one line; don't "
         "argue or lecture. Offer the relevant options as quick_replies.\n"
         "• REPEATED OR CONFUSED VISITOR: if they repeat themselves or seem stuck, slow down, "
