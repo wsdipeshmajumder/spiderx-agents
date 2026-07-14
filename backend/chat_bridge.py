@@ -2022,6 +2022,43 @@ async def generate_chat_starters(agent: dict[str, Any]) -> Optional[list[str]]:
         return None
 
 
+_FORM_CC_ADDRESS = "hello@spiderx.ai"
+
+
+async def _email_form_submission(agent: dict, title: str, fdata: dict) -> None:
+    """Email a chat form submission to the account admin (the agent's owner),
+    CC'd to hello@spiderx.ai. Best-effort — never breaks the chat."""
+    import html as _htmlmod
+    from . import email_stub as _es
+    admin_email = ""
+    try:
+        uid = agent.get("user_id")
+        if uid:
+            u = await db.get_user(int(uid))
+            admin_email = ((u or {}).get("email") or "").strip()
+    except Exception:  # noqa: BLE001
+        admin_email = ""
+    if not admin_email:
+        log.warning("form-submit email skipped — no admin email for agent %s", agent.get("id"))
+        return
+    aname = agent.get("name") or "Your assistant"
+    items = [(str(k), str(v)) for k, v in fdata.items() if str(v).strip()]
+    rows_txt = "\n".join(f"  • {k}: {v}" for k, v in items) or "  (no fields)"
+    subject = f"New chat form submission — {title} ({aname})"
+    body = (f"{aname} received a form submission from a website visitor via chat.\n\n"
+            f"Form: {title}\n\n{rows_txt}\n\n— SpiderX.AI")
+    html_rows = "".join(
+        f"<li><b>{_htmlmod.escape(k)}:</b> {_htmlmod.escape(v)}</li>" for k, v in items)
+    html_body = (
+        "<div style='font-family:-apple-system,Segoe UI,sans-serif;color:#1a1c25'>"
+        f"<p><b>{_htmlmod.escape(aname)}</b> received a form submission via chat.</p>"
+        f"<p><b>Form:</b> {_htmlmod.escape(title)}</p>"
+        f"<ul>{html_rows}</ul>"
+        "<p style='color:#8a8f9a;font-size:12px'>Sent automatically by your SpiderX.AI chat agent.</p></div>")
+    await _es._send(admin_email, subject, body, html_body=html_body, cc=_FORM_CC_ADDRESS)
+    log.info("form-submit email sent to=%s cc=%s form=%r", admin_email, _FORM_CC_ADDRESS, title)
+
+
 async def run_agent_chat_session(
     ws: WebSocket,
     agent_id: int,
@@ -2409,6 +2446,12 @@ async def run_agent_chat_session(
                     break
                 fdata = data.get("data") if isinstance(data.get("data"), dict) else {}
                 ftitle = (str(data.get("title") or "form").strip())[:80]
+                # Email the submission to the account admin (cc hello@spiderx.ai) in
+                # the background so it never delays the chat. Best-effort.
+                try:
+                    asyncio.create_task(_email_form_submission(agent, ftitle, dict(fdata)))
+                except Exception:  # noqa: BLE001
+                    pass
                 # Form values → extracted (scalars). Cleaner than parsing free text.
                 if isinstance(agent.get("_extracted_extra"), dict):
                     for k, v in fdata.items():

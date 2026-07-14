@@ -1284,6 +1284,9 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .chatembed-linkcard-load { padding: 12px; display: flex; align-items: center; gap: 8px; color: var(--muted, #6a6f7d); }
 :root[data-theme="dark"] .chatembed-linkcard { background: #14172a; border-color: #2a2e44; }
+/* Checkbox row in the chat-widget config (build 327). */
+.chatcfg-check { flex-direction: row; align-items: flex-start; gap: 9px; cursor: pointer; }
+.chatcfg-check input[type="checkbox"] { margin-top: 3px; flex: none; }
 .chatembed-handoff {
   display: flex; align-items: center; gap: 8px; margin: 0 12px 8px;
   padding: 9px 12px; border-radius: 10px; line-height: 1.4;

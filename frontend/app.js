@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 326;
+const SXAI_BUILD = 327;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1998,7 +1998,7 @@ function AgentChatEmbed({ slug, contained, override }) {
           <div class=${"chatembed-status chatembed-status-" + status}>${statusLabel}</div>
         </div>
         <div class="chatembed-head-actions">
-          ${status === "ready" && !handoff ? html`
+          ${status === "ready" && !handoff && !cs.hide_human_handoff ? html`
             <button type="button" class="chatembed-human" onClick=${requestHuman}
               title="Talk to a human">Talk to a human</button>
           ` : ""}
@@ -11766,6 +11766,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
     starters: Array.isArray(_cs0.starters) ? _cs0.starters.join("\n") : "",
     allowed_domains: Array.isArray(_cs0.allowed_domains) ? _cs0.allowed_domains.join(", ") : "",
     privacy_note: _cs0.privacy_note || "",
+    hide_human_handoff: !!_cs0.hide_human_handoff,   // hide the "Talk to a human" button
   });
   const [chatCfgSaving, setChatCfgSaving] = useState(false);
   const [chatCfgSaved, setChatCfgSaved] = useState(false);
@@ -11957,6 +11958,12 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
               <input class="db-input" type="text" placeholder="Hi! How can I help today?" value=${chatCfg.welcome_message}
                      onInput=${(e) => setChatField("welcome_message", e.target.value)} />
             </label>
+            <label class="db-form-field db-form-span-2 chatcfg-check">
+              <input type="checkbox" checked=${!!chatCfg.hide_human_handoff}
+                     onChange=${(e) => setChatField("hide_human_handoff", e.target.checked)} />
+              <span><b>Hide the "Talk to a human" button</b><br/>
+                <span class="db-form-help" style=${{ margin: 0 }}>Removes the header button so visitors can't request a human handoff. The agent can still hand off on its own if it decides to.</span></span>
+            </label>
             <label class="db-form-field">
               <span class="db-form-label">Proactive nudge <span class="db-form-opt">(optional)</span></span>
               <input class="db-input" type="text" placeholder="👋 Looking for something? Ask me anything." value=${chatCfg.teaser}
@@ -12061,6 +12068,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
                 accent_color: chatCfg.accent_color,
                 bubble_radius: chatCfg.bubble_radius === "" ? null : Number(chatCfg.bubble_radius),
                 bubble_size: chatCfg.bubble_size,
+                hide_human_handoff: chatCfg.hide_human_handoff,
               }} />
           </div>
           <div class="chatcfg-preview-note">A real chat with ${agent.name}. Appearance + questions update live here; the AI's behaviour applies on Save. ↻ to restart.</div>

@@ -56,7 +56,8 @@ def _report_recipient() -> Optional[str]:
 
 async def _send(to: str, subject: str, body: str,
                 *, html_body: Optional[str] = None,
-                inline_images: Optional[dict] = None) -> None:
+                inline_images: Optional[dict] = None,
+                cc: Optional[str] = None) -> None:
     """The single chokepoint. Selects a provider, never raises.
 
     Build 198 — also emits a notify.email.sent / notify.email.failed
@@ -73,13 +74,13 @@ async def _send(to: str, subject: str, body: str,
     err_msg = None
     try:
         if provider == "gmail":
-            _send_gmail(to, subject, body, html_body=html_body, inline_images=inline_images)
+            _send_gmail(to, subject, body, html_body=html_body, inline_images=inline_images, cc=cc)
         elif provider == "postmark":
-            _send_postmark(to, subject, body, html_body=html_body)
+            _send_postmark(to, subject, body, html_body=html_body, cc=cc)
         elif provider == "resend":
-            _send_resend(to, subject, body, html_body=html_body)
+            _send_resend(to, subject, body, html_body=html_body, cc=cc)
         else:
-            log.info("email.send to=%s subject=%r\n%s", to, subject, body)
+            log.info("email.send to=%s cc=%s subject=%r\n%s", to, cc, subject, body)
         sent_ok = True
     except Exception as e:  # noqa: BLE001
         err_msg = str(e)[:240]
@@ -120,7 +121,8 @@ def _post_json(url: str, headers: dict, payload: dict) -> dict:
 
 def _send_gmail(to: str, subject: str, body: str,
                 *, html_body: Optional[str] = None,
-                inline_images: Optional[dict] = None) -> None:
+                inline_images: Optional[dict] = None,
+                cc: Optional[str] = None) -> None:
     """Send via Gmail's SMTP-over-SSL endpoint. Requires an App Password —
     the regular account password no longer works once 2-Step Verification
     is on. Generate at https://myaccount.google.com/apppasswords.
@@ -176,27 +178,32 @@ def _send_gmail(to: str, subject: str, body: str,
     msg["Subject"] = subject
     msg["From"] = formataddr(("SpiderX.AI", _from_address()))
     msg["To"] = to
+    cc_list = [c.strip() for c in (cc or "").split(",") if c.strip()]
+    if cc_list:
+        msg["Cc"] = ", ".join(cc_list)
     # Gmail App Passwords ignore the visible spaces but accept them for
     # paste-convenience; strip just in case any provider tightens this.
     clean_pwd = (pwd or "").replace(" ", "")
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as s:
         s.login(user, clean_pwd)
-        s.sendmail(_from_address(), [to], msg.as_string())
+        s.sendmail(_from_address(), [to] + cc_list, msg.as_string())
     log.info("gmail.sent to=%s subject=%r inline=%d",
              to, subject, len(inline_images or {}))
 
 
 def _send_postmark(to: str, subject: str, body: str,
-                   *, html_body: Optional[str] = None) -> None:
+                   *, html_body: Optional[str] = None, cc: Optional[str] = None) -> None:
     token = os.environ.get("POSTMARK_TOKEN")
     if not token:
         log.warning("postmark.token_missing; falling back to log")
-        log.info("email.send to=%s subject=%r\n%s", to, subject, body)
+        log.info("email.send to=%s cc=%s subject=%r\n%s", to, cc, subject, body)
         return
     payload = {
         "From": _from_address(), "To": to, "Subject": subject,
         "TextBody": body, "MessageStream": "outbound",
     }
+    if cc:
+        payload["Cc"] = cc
     if html_body:
         payload["HtmlBody"] = html_body
     r = _post_json(
@@ -208,13 +215,16 @@ def _send_postmark(to: str, subject: str, body: str,
 
 
 def _send_resend(to: str, subject: str, body: str,
-                 *, html_body: Optional[str] = None) -> None:
+                 *, html_body: Optional[str] = None, cc: Optional[str] = None) -> None:
     api_key = os.environ.get("RESEND_API_KEY")
     if not api_key:
         log.warning("resend.api_key_missing; falling back to log")
-        log.info("email.send to=%s subject=%r\n%s", to, subject, body)
+        log.info("email.send to=%s cc=%s subject=%r\n%s", to, cc, subject, body)
         return
     payload = {"from": _from_address(), "to": [to], "subject": subject, "text": body}
+    cc_list = [c.strip() for c in (cc or "").split(",") if c.strip()]
+    if cc_list:
+        payload["cc"] = cc_list
     if html_body:
         payload["html"] = html_body
     r = _post_json(
