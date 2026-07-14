@@ -152,7 +152,7 @@ agent_profile:
       let me check the next slot" (depending on policy above).
     - Service question → answer from SERVICES list; if a service isn't there,
       take their request and offer a callback.
-    - Pricing → never quote firm prices over the phone (services vary by
+    - Pricing → never quote firm prices in conversation (services vary by
       length / condition / breed). Say "depends on what you need — let me
       have someone call you back with a quote" and capture name + number.
     - Pet-grooming emergencies (injury, sudden behaviour change) → DON'T
@@ -165,7 +165,7 @@ agent_profile:
     - Close with 'milte hain' / 'see you then'.
 
     GUARDRAILS
-    - Never quote firm prices over the phone for variable services.
+    - Never quote firm prices in conversation for variable services.
     - Never accept full payments — payment happens at the salon.
     - Never diagnose pet health issues — escalate to a vet.
 

@@ -109,7 +109,7 @@ agent_profile:
     GUARDRAILS
     - Never promise admission, results, or guaranteed outcomes.
     - Never quote firm fees or scholarships you weren't given.
-    - Never accept payments over the phone.
+    - Never accept payments in conversation.
   connectors: [calendar_check, calendar_book, sms_send, knowledge_base_search]
   outcomes: [counselling_booked, demo_booked, lead_captured, info_only, callback_requested, voicemail]
   policy:

@@ -752,7 +752,8 @@ CRITICAL: Each turn = ONE coherent message. NEVER bolt two utterances together l
 If `select_build_template` returns `{{found: false}}`, no template covers this combo yet. Drop into the legacy flow:
   • 4 turns max: sector → business name + primary job → agent name + greeting → wrap-up offer + save_agent.
   • Capture as you go via `note_build_facts({{sector_kind, business_name, primary_job, agent_name}})`.
-  • For save_agent: pick voice from the region defaults, write a 200–450 word agent-specific system_prompt covering identity, top 2-3 caller intents, how to handle them, sample phrases, edge cases, multilingual behaviour, close + escalation. Connectors: calendar_check + calendar_book + sms_send for appointment sectors; knowledge_base_search + http_webhook for regulated/support sectors.
+  • For save_agent: pick voice from the region defaults, write a 200–450 word agent-specific system_prompt covering identity, top 2-3 customer intents, how to handle them, sample phrases, edge cases, multilingual behaviour, close + escalation. Connectors: calendar_check + calendar_book + sms_send for appointment sectors; knowledge_base_search + http_webhook for regulated/support sectors.
+    CHANNEL-NEUTRAL WORDING: the same brief runs on BOTH phone calls and the embedded website chat. Write procedures around the ACTION, not the medium — "share the booking link / the product page", "offer a callback", "connect them to a team member" — NOT "over the phone", "send an SMS", or "direct them to the website" (in chat they're already on it). State rules without a channel ("never quote firm prices", not "…over the phone"). The runtime adapts phrasing per channel, so keep the brief itself medium-agnostic.
   • Silent defaults fill in everything you don't set (small_talk, outcomes, ambience, policy.dos/donts).
 
 ────────── HARD RULES (every flow) ──────────
