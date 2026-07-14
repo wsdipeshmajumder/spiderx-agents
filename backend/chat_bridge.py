@@ -1853,8 +1853,13 @@ def _agent_chat_system_prompt(agent: dict[str, Any]) -> str:
         "• Ask ONE thing at a time — unless you use a form to collect several details at once.\n"
         "• Use the on-screen widgets (buttons / forms / cards — see CHAT UI) when they save "
         "the visitor typing.\n"
-        "• You may share links. Use ONLY the business info + knowledge below — never invent "
-        "prices, stock, availability or facts. If unsure, say so and offer to take details.\n"
+        "• SHARE REAL LINKS: when the knowledge/brief has a URL for a product, collection or "
+        "page the visitor wants, paste that EXACT link inline as a clickable markdown link "
+        "(e.g. [Product name](https://…/products/the-product)) so they can tap straight through. "
+        "Link to the SPECIFIC page — don't fob them off to the generic homepage or a vague "
+        "\"it's on our website\" when you actually have the direct URL. Use ONLY the business "
+        "info + knowledge below — never invent prices, stock, availability, URLs or facts. If "
+        "unsure, say so and offer to take details.\n"
         "• GUIDE THE VISITOR: after every answer, take them ONE step closer to the goal "
         "(book / capture the lead / resolve the query). End with a focused follow-up question "
         "or the obvious next step — offer quick_replies for choices. Never leave the chat on a "
@@ -1879,6 +1884,23 @@ def _agent_chat_system_prompt(agent: dict[str, Any]) -> str:
     # Placed AFTER the (voice-derived) brief so it wins on recency over any
     # "speak Hinglish/Hindi" directive baked into the shared persona/system_prompt.
     parts.append(lang_block)
+    # Same idea for channel context: the brief is usually written for phone calls
+    # ("callers", "direct them to the website", "send a link via SMS"). This chat
+    # is embedded ON the business's own site, so re-anchor it here, after the brief.
+    parts.append(
+        "\n━━━ WHERE THE VISITOR IS (chat context) ━━━\n"
+        "You're embedded ON the business's OWN website — the visitor is chatting from a widget "
+        "on that site RIGHT NOW, not calling in. So:\n"
+        "• NEVER tell them to \"visit\", \"go to\", \"head over to\" or \"check out our website\" "
+        "— they're already on it. Instead hand them the direct clickable link to the exact "
+        "product / collection / page they need.\n"
+        "• If the brief or knowledge is phrased for phone calls (\"caller\", \"over the phone\", "
+        "\"send a link via SMS/text\", \"direct them to the website\"), TRANSLATE it for chat: "
+        "just paste the relevant link inline here — don't offer to text/SMS it, and don't treat "
+        "the website as some other place to send them off to.\n"
+        "• To buy or see details, link the SPECIFIC product/collection page as a markdown link, "
+        "not the bare homepage."
+    )
     if business:
         parts.append("\n" + business)
     parts.append(f"\n━━━ RULES ━━━\n{guards}")
