@@ -1858,7 +1858,8 @@ def _agent_chat_system_prompt(agent: dict[str, Any]) -> str:
         "• GUIDE THE VISITOR: after every answer, take them ONE step closer to the goal "
         "(book / capture the lead / resolve the query). End with a focused follow-up question "
         "or the obvious next step — offer quick_replies for choices. Never leave the chat on a "
-        "dead stop; always give a clear way forward. (Once the goal is met, wrap up with end_call.)\n"
+        "dead stop; always give a clear way forward. Do NOT end the chat after a single answer — "
+        "keep helping until the visitor clearly says they're done.\n"
         "• REMEMBER WHAT THEY'VE TOLD YOU: track everything the visitor has already shared in "
         "this chat (name, phone, email, dates, vehicle, party size, preferences, …). NEVER ask "
         "for the same detail twice or re-confirm what you already have. When you show a form, "
@@ -1908,8 +1909,12 @@ def _agent_chat_system_prompt(agent: dict[str, Any]) -> str:
         "realistic expectation (a teammate will follow up) — never promise an exact time.\n"
         "• GOODBYE / RESOLVED: confirm the outcome, offer one more thing, then wrap up.")
     parts.append(
-        "\n━━━ WRAP-UP ━━━\nCall `end_call` once the chat reaches a conclusion (lead "
-        "captured, booking made, question answered, or the visitor says bye):\n"
+        "\n━━━ WRAP-UP ━━━\nCall `end_call` ONLY when the visitor is CLEARLY finished — they say "
+        "goodbye / 'that's all' / 'no thanks', or a booking is fully confirmed AND they've said they "
+        "need nothing more. Do NOT end just because you answered a question — after EVERY answer, "
+        "invite the next step and WAIT for the visitor's reply. Never end right after providing "
+        "information or a link. Ending early kills the conversation and loses the lead; a chat that "
+        "keeps going is good. When you genuinely do wrap up, pass:\n"
         f"  outcome → one of: {outcomes_csv}\n"
         + (outcomes_block + "\n" if outcomes_block else "")
         + "  reason → CONVERSATION_COMPLETE / USER_REQUESTED / ABANDONED / ESCALATED_TO_HUMAN\n"

@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 327;
+const SXAI_BUILD = 328;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1628,27 +1628,54 @@ function EmbedView({ slug, blobSize, blobMode, engineRef, onPressStart, onPressE
 // Turn URLs + markdown links in a chat message into clickable anchors (new tab,
 // noopener). Returns an array of strings + <a> nodes for htm to render, so a
 // reply like "book here: https://…" or "[book](https://…)" is actually clickable.
-function linkifyChat(text) {
-  if (!text || typeof text !== "string") return text;
-  const re = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|((?:https?:\/\/|www\.)[^\s<]+)/g;
+// Inline markdown for one line: **bold**, *italic* / _italic_, `code`, markdown
+// links [label](url), and bare http(s)/www URLs → clickable anchors (with the
+// hover-preview hooks). htm escapes interpolated text, so this is XSS-safe.
+function _mdInline(s) {
+  if (!s) return s;
+  const re = /\*\*([^*]+)\*\*|__([^_]+)__|\*([^*\s][^*]*?)\*|_([^_\s][^_]*?)_|`([^`]+)`|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|((?:https?:\/\/|www\.)[^\s<]+)/g;
   const out = [];
   let last = 0, m;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) out.push(text.slice(last, m.index));
-    if (m[2]) {                        // markdown [label](url)
-      out.push(html`<a class="chatembed-link" href=${m[2]} data-preview=${m[2]} target="_blank" rel="noopener noreferrer">${m[1]}</a>`);
-    } else {                           // bare http(s):// or www. URL
-      let url = m[3], trail = "";
-      const t = url.match(/[.,;:!?)\]]+$/);           // don't swallow trailing punctuation
+  const anchor = (label, url) => {
+    const href = url.indexOf("www.") === 0 ? "https://" + url : url;
+    return html`<a class="chatembed-link" href=${href} data-preview=${href} target="_blank" rel="noopener noreferrer">${label}</a>`;
+  };
+  while ((m = re.exec(s)) !== null) {
+    if (m.index > last) out.push(s.slice(last, m.index));
+    if (m[1] != null || m[2] != null) out.push(html`<strong>${m[1] != null ? m[1] : m[2]}</strong>`);
+    else if (m[3] != null || m[4] != null) out.push(html`<em>${m[3] != null ? m[3] : m[4]}</em>`);
+    else if (m[5] != null) out.push(html`<code class="chatembed-code">${m[5]}</code>`);
+    else if (m[7]) out.push(anchor(m[6], m[7]));                 // [label](url)
+    else if (m[8]) {                                            // bare url
+      let url = m[8], trail = "";
+      const t = url.match(/[.,;:!?)\]]+$/);
       if (t) { trail = t[0]; url = url.slice(0, -trail.length); }
-      const href = url.indexOf("www.") === 0 ? "https://" + url : url;
-      out.push(html`<a class="chatembed-link" href=${href} data-preview=${href} target="_blank" rel="noopener noreferrer">${url}</a>`);
+      out.push(anchor(url, url));
       if (trail) out.push(trail);
     }
     last = re.lastIndex;
   }
-  if (last < text.length) out.push(text.slice(last));
-  return out.length ? out : text;
+  if (last < s.length) out.push(s.slice(last));
+  return out;
+}
+
+// Render a chat message as light markdown: bold/italic/code/links inline, plus
+// bullet lists (`* ` / `- ` / `• `). Keeps line breaks. Returns nodes for htm.
+function renderChatMarkdown(text) {
+  if (!text || typeof text !== "string") return text;
+  const lines = text.replace(/\r/g, "").split("\n");
+  const blocks = [];
+  let list = null;
+  const flush = () => { if (list) { blocks.push(html`<ul class="chatembed-md-ul">${list}</ul>`); list = null; } };
+  lines.forEach((ln, i) => {
+    const b = ln.match(/^\s*(?:[*\-•]|\d+\.)\s+(.*)$/);
+    if (b) { (list = list || []).push(html`<li key=${i}>${_mdInline(b[1])}</li>`); return; }
+    flush();
+    if (ln.trim() === "") { if (blocks.length) blocks.push(html`<div class="chatembed-md-gap"></div>`); }
+    else blocks.push(html`<div key=${i}>${_mdInline(ln)}</div>`);
+  });
+  flush();
+  return blocks;
 }
 
 // AgentChatEmbed — the TEXT chat surface served at /embed/<slug>?channel=chat
@@ -2018,7 +2045,7 @@ function AgentChatEmbed({ slug, contained, override }) {
           : html`
           <div key=${i} class=${"chatembed-msg chatembed-msg-" + (m.role === "user" ? "user" : "model")}>
             ${m.role === "human" ? html`<div class="chatembed-human-tag">${m.operator || "Team"}</div>` : ""}
-            <div class=${"chatembed-bubble" + (m.role === "human" ? " chatembed-bubble-human" : "")}>${linkifyChat(m.text)}</div>
+            <div class=${"chatembed-bubble" + (m.role === "human" ? " chatembed-bubble-human" : "")}>${renderChatMarkdown(m.text)}</div>
           </div>
         `)}
         ${thinking ? html`
@@ -11753,6 +11780,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   const [chatCfg, setChatCfg] = useState({
     accent_color: _cs0.accent_color || "",
     avatar_url: _cs0.avatar_url || "",
+    launcher_icon: _cs0.launcher_icon || "",   // custom FAB/launcher bubble icon (image URL)
     mode: _cs0.mode || "popover",              // popover | fullscreen | drawer (bottom sheet)
     bubble_radius: _cs0.bubble_radius != null ? _cs0.bubble_radius : "",
     bubble_size: _cs0.bubble_size || "md",     // sm | md | lg — response text scale
@@ -11867,15 +11895,12 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
     } catch { /* leave as-is */ } finally { setSuggestingStarters(false); }
   };
 
+  // The snippet is intentionally minimal: the widget fetches the agent's live
+  // chat_settings (icon, teaser, colours, mode, label…) at load, so operators
+  // change the look from this page WITHOUT re-pasting the code on their site.
+  // Only structural knobs that aren't in chat_settings go on the tag.
   const chatAttrs = [`data-agent="${agent.slug || agent.id}"`, `data-channel="chat"`];
   if (embedPosition !== "bottom-right") chatAttrs.push(`data-position="${embedPosition}"`);
-  if (chatCfg.mode && chatCfg.mode !== "popover") chatAttrs.push(`data-mode="${chatCfg.mode}"`);
-  if (chatCfg.accent_color) chatAttrs.push(`data-color="${chatCfg.accent_color}"`);
-  if (chatCfg.launcher_text.trim()) chatAttrs.push(`data-label="${chatCfg.launcher_text.replace(/"/g, "'")}"`);
-  if ((chatCfg.teaser || "").trim()) {
-    chatAttrs.push(`data-teaser="${chatCfg.teaser.trim().replace(/"/g, "'")}"`);
-    if (Number(chatCfg.teaser_delay) > 0 && Number(chatCfg.teaser_delay) !== 8) chatAttrs.push(`data-teaser-delay="${Number(chatCfg.teaser_delay)}"`);
-  }
   const chatSnippet = `<script src="${embedOrigin}/static/embed.js" ${chatAttrs.join(" ")}></script>`;
   const [chatCopied, setChatCopied] = useState(false);
   const [embedOpen, setEmbedOpen] = useState(false);   // top-right embed-code flyout
@@ -11947,6 +11972,12 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
               <span class="db-form-label">Logo / avatar URL</span>
               <input class="db-input" type="url" placeholder="https://…/logo.png" value=${chatCfg.avatar_url}
                      onInput=${(e) => setChatField("avatar_url", e.target.value)} />
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Launcher icon URL <span class="db-form-opt">(optional)</span></span>
+              <input class="db-input" type="url" placeholder="https://…/icon.png — defaults to the logo, then a chat icon" value=${chatCfg.launcher_icon}
+                     onInput=${(e) => setChatField("launcher_icon", e.target.value)} />
+              <span class="db-form-help">The icon shown on the floating chat bubble. Falls back to the logo above, then a default chat icon.</span>
             </label>
             <label class="db-form-field">
               <span class="db-form-label">Launcher text</span>

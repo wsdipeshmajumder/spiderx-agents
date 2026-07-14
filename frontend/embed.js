@@ -44,25 +44,20 @@
     console.warn("[SpiderX.AI] embed.js: missing data-agent='<slug>' on the script tag");
     return;
   }
-  var position = (scriptEl.getAttribute("data-position") || "bottom-right").trim();
   // data-channel: "voice" (default, mic orb) | "chat" (text surface). Chat is
   // the paid add-on; the iframe surface adapts via the ?channel=chat param.
+  // This is fixed at the snippet — every OTHER knob can now come from the
+  // dashboard (agent.chat_settings), fetched below, so operators change the
+  // teaser / icon / colours / mode without re-pasting the embed code.
   var channel = (scriptEl.getAttribute("data-channel") || "voice").trim().toLowerCase();
   var defaultVerb = channel === "chat" ? "Chat with " : "Talk to ";
-  var label = scriptEl.getAttribute("data-label") || (defaultVerb + slug.replace(/-/g, " "));
-  var mode = scriptEl.getAttribute("data-mode") || "popover";
-  var color = scriptEl.getAttribute("data-color") || "";
-  // Response-box look, forwarded to the chat surface via the iframe URL so the
-  // operator can style bubbles from the embed snippet without a server save.
-  var accent = (scriptEl.getAttribute("data-accent") || "").trim();
-  var radius = (scriptEl.getAttribute("data-radius") || "").trim();
-  var size   = (scriptEl.getAttribute("data-size") || "").trim();
-  // Proactive teaser (Build 293): show a small message bubble after a delay to
-  // invite the visitor in. data-teaser="<msg>" enables it; data-teaser-delay in
-  // seconds (default 8). Shown once per browser session (sessionStorage).
-  var teaserMsg = (scriptEl.getAttribute("data-teaser") || "").trim();
-  var teaserDelay = parseInt(scriptEl.getAttribute("data-teaser-delay") || "8", 10);
-  if (isNaN(teaserDelay) || teaserDelay < 0) teaserDelay = 8;
+  // Explicit data-* overrides — null when the attribute is absent, so the
+  // remote chat_settings value is used instead. A present attribute always wins.
+  function _attr(n) { return scriptEl.hasAttribute(n) ? (scriptEl.getAttribute(n) || "").trim() : null; }
+  var oPosition = _attr("data-position"), oLabel = _attr("data-label"), oMode = _attr("data-mode"),
+      oColor = _attr("data-color"), oAccent = _attr("data-accent"), oRadius = _attr("data-radius"),
+      oSize = _attr("data-size"), oIcon = _attr("data-icon"), oTeaser = _attr("data-teaser"),
+      oTeaserDelay = _attr("data-teaser-delay");
 
   // Resolve our origin from the script's src so we know where to point the
   // iframe. Works regardless of how the host page is hosted.
@@ -72,6 +67,24 @@
   } catch (e) {
     ourOrigin = scriptEl.src.replace(/\/static\/embed\.js.*$/, "");
   }
+
+  // Build the widget once we know the config. `cs` = agent.chat_settings from
+  // the server (may be {}); explicit data-* attributes still win over it.
+  var _booted = false;
+  function boot(cs) {
+    if (_booted) return; _booted = true;
+    cs = (cs && typeof cs === "object") ? cs : {};
+    var position   = oPosition || "bottom-right";
+    var label      = oLabel || (cs.launcher_text || "").trim() || (defaultVerb + slug.replace(/-/g, " "));
+    var mode       = oMode || cs.mode || "popover";
+    var color      = oColor || "";
+    var accent     = oAccent || (cs.accent_color || "").trim();
+    var radius     = oRadius || (cs.bubble_radius != null ? String(cs.bubble_radius) : "");
+    var size       = oSize || (cs.bubble_size || "").trim();
+    var iconUrl    = oIcon || (cs.launcher_icon || cs.avatar_url || "").trim();
+    var teaserMsg  = (oTeaser != null ? oTeaser : (cs.teaser || "")).trim();
+    var teaserDelay = parseInt(oTeaserDelay != null ? oTeaserDelay : (cs.teaser_delay != null ? cs.teaser_delay : "8"), 10);
+    if (isNaN(teaserDelay) || teaserDelay < 0) teaserDelay = 8;
 
   // ─── Styles — injected once, scoped under .sxai-fab / .sxai-frame ────────
   var styleEl = document.createElement("style");
@@ -84,6 +97,7 @@
     ".sxai-fab:hover{transform:translateY(-2px) scale(1.04);box-shadow:0 12px 32px rgba(99,102,241,0.42),0 4px 10px rgba(0,0,0,0.22);}",
     ".sxai-fab:active{transform:scale(.96);}",
     ".sxai-fab svg{width:26px;height:26px;}",
+    ".sxai-fab-icon{width:34px;height:34px;border-radius:50%;object-fit:cover;pointer-events:none;}",
     // Tooltip on hover
     ".sxai-tip{position:absolute;bottom:100%;right:0;margin-bottom:10px;padding:7px 12px;border-radius:8px;background:#0f1119;color:#fff;font-size:12.5px;white-space:nowrap;opacity:0;transform:translateY(4px);transition:opacity .15s ease,transform .15s ease;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,0.22);}",
     ".sxai-root[data-pos='bottom-left'] .sxai-tip{left:0;right:auto;}",
@@ -125,7 +139,17 @@
   fab.className = "sxai-fab";
   fab.type = "button";
   fab.setAttribute("aria-label", label);
-  fab.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 13a14 14 0 0 1 20 0l-2.4 2.4a2 2 0 0 1-2.6.2l-2-1.5a2 2 0 0 1-.7-2.1l.6-2a10 10 0 0 0-5.8 0l.6 2a2 2 0 0 1-.7 2.1l-2 1.5a2 2 0 0 1-2.6-.2L2 13z"/></svg>';
+  var chatIconSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
+  var voiceIconSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 13a14 14 0 0 1 20 0l-2.4 2.4a2 2 0 0 1-2.6.2l-2-1.5a2 2 0 0 1-.7-2.1l.6-2a10 10 0 0 0-5.8 0l.6 2a2 2 0 0 1-.7 2.1l-2 1.5a2 2 0 0 1-2.6-.2L2 13z"/></svg>';
+  if (iconUrl) {
+    var _img = document.createElement("img");
+    _img.className = "sxai-fab-icon";
+    _img.src = iconUrl;
+    _img.alt = "";
+    fab.appendChild(_img);
+  } else {
+    fab.innerHTML = channel === "chat" ? chatIconSvg : voiceIconSvg;
+  }
   root.appendChild(fab);
 
   var tip = document.createElement("div");
@@ -221,4 +245,16 @@
   window.__sxAI_embed.open = function () { setOpen(true); };
   window.__sxAI_embed.close = function () { setOpen(false); };
   window.__sxAI_embed.slug = slug;
+  } // end boot()
+
+  // Fetch the agent's live chat_settings so dashboard changes (teaser, launcher
+  // icon, colours, mode, label…) take effect without re-pasting the snippet.
+  // Falls back to data-* / defaults if the API is unreachable or slow (3s cap).
+  var _fallback = setTimeout(function () { boot({}); }, 3000);
+  try {
+    fetch(ourOrigin + "/api/agents/by-slug/" + encodeURIComponent(slug), { credentials: "omit" })
+      .then(function (r) { return r && r.ok ? r.json() : null; })
+      .then(function (a) { clearTimeout(_fallback); boot(a && a.chat_settings ? a.chat_settings : {}); })
+      .catch(function () { clearTimeout(_fallback); boot({}); });
+  } catch (e) { clearTimeout(_fallback); boot({}); }
 })();
