@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, WebSocket
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -118,7 +118,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 328
+APP_BUILD = 329
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1564,11 +1564,17 @@ async def get_agent(agent_id: int, request: Request) -> dict:
 
 
 @app.get("/api/agents/by-slug/{slug}")
-async def get_agent_by_slug(slug: str, request: Request) -> dict:
+async def get_agent_by_slug(slug: str, request: Request, response: Response) -> dict:
     """Resolve an agent by its URL-friendly slug. Phase 9b made slugs
     org-scoped (composite UNIQUE on `(org_id, slug)`), so we resolve
     inside the caller's primary org. The membership check is still
     the safety net for any cross-org slug-guessing attempt."""
+    # The embed widget's script runs on the customer's OWN domain and fetches
+    # this endpoint cross-origin to read the agent's public look (chat_settings:
+    # teaser, launcher icon, colours…). Allow any origin — the payload is the
+    # public shape only (no secrets, see _public_agent) and auth here is via a
+    # client-set header, not an ambient cookie, so `*` carries no CSRF risk.
+    response.headers["Access-Control-Allow-Origin"] = "*"
     from . import auth
     user = await current_user(request)
     org_id = await auth.primary_org_id(user["id"])
