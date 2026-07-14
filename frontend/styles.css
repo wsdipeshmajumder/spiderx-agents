@@ -1356,7 +1356,12 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 .chatembed-codeflyout-head strong { font-size: 14px; color: var(--fg, #1a1c25); }
 .chatembed-codeflyout .db-embed-snippet { margin: 8px 0; max-width: 100%; overflow: hidden; }
 .chatembed-codeflyout .db-embed-snippet code { white-space: pre-wrap; word-break: break-all; }
+.chatembed-codeid { font-size: 12.5px; color: var(--fg-dim, #6b7280); margin: 4px 0 2px; }
+.chatembed-codeid code { font-size: 12.5px; font-weight: 600; color: var(--fg, #1a1c25);
+  background: var(--bg-1, #f1f2f7); border-radius: 5px; padding: 1px 6px; user-select: all; }
+.chatembed-codeid-hint { margin-left: 6px; font-size: 11.5px; color: var(--fg-dim, #9aa0ad); }
 :root[data-theme="dark"] .chatembed-codeflyout { background: var(--db-card-bg, #14171f); border-color: #2a2f3d; }
+:root[data-theme="dark"] .chatembed-codeid code { background: #1b1f33; color: #e6e8f2; }
 .call-row-clickable, .livechat-live-row { cursor: pointer; transition: background .12s; }
 .call-row-clickable:hover, .livechat-live-row:hover { background: var(--bg-1, #f7f8fa); }
 .livechat-live-row { border-left: 3px solid #10b981; }

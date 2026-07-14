@@ -12192,6 +12192,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
       </div>
       <p class="db-form-help">Paste this one line on any page — visitors chat with ${agent.name} by text.</p>
       <div class="db-embed-snippet"><code>${chatSnippet}</code></div>
+      <div class="chatembed-codeid">Bot ID: <code>${agent.id}</code><span class="chatembed-codeid-hint">— use this when contacting support or via the API</span></div>
       <div class="db-actions-row">
         <button type="button" class=${"db-btn-primary db-btn-sm " + (chatCopied ? "is-copied" : "")} onClick=${copyChatSnippet}>
           ${chatCopied
