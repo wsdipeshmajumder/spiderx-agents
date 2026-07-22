@@ -75,5 +75,13 @@
 ## Score
 13 of 15 closed (PASS). 1 PARTIAL pending audition (#9). 1 OPEN (#12). #13 code-complete; prod playback pending a persistent-volume config. +13 ad-hoc (U1 outcomes intro, U2 call-log fields, U3 upload fix, U4 channel-aware responses, U5–U8 chat-embed: drawer / response-box styling / preset-question home / voice mode; U9–U11 chat page width / conversations pane / new-chat control; U12 chat markdown, U13 live teaser via chat_settings fetch, U14 hide-human, U15 launcher icon, U16 no premature end).
 
+## Round 3 (human test — "Moments ChatBot Test.pdf", agent 4 web chat) — systemic fixes
+
+Tester patterns: (A) knowledge gaps — ingredient list, safety data sheet, "vanilla masking natural/synthetic", vegan/latex-free, bundle rules; (B) **offers it can't deliver** — "would you like a link to the ingredient list / SDS / vegan alternatives?" then deflects; (C) broken product link ("Major Pleasure Toy"); (D strength) guardrails decline sexting/acts/kinks/medical cleanly. Fixes are generic (help every web-chat agent), not Moments-specific.
+
+| Item | Acceptance criterion | Verdict | Tier | Build | Notes |
+|---|---|---|---|---|---|
+| U18 | Chat never offers a link/list/document/alternative it doesn't actually have (Pattern B) | PASS | Code | 332 | Chat prompt EDGE CASES gains "ONLY OFFER WHAT YOU CAN DELIVER": never dangle a link/list/spec-sheet/SDS/alternative unless that exact thing is in the knowledge and producible in the next message; if not, answer with what you have, say plainly you don't have that document, and offer `request_human_handoff`. Backend-only (no frontend). Live-verify: ask agent 4 for the full ingredient list → should decline+offer handoff, not dangle |
+
 ## Out-of-band tooling (not a tester item, no build number)
 - **`backend/sip/` (`sipd`)** — native SIP UAS that accepts inbound INVITEs straight from a Grandstream UCM and bridges call audio to a Gemini agent (no Twilio/Plivo). Run as a **separate LAN process** (`python -m backend.sip`), NOT part of the Railway web app — `backend/app.py` does not import it, so it's inert for the deploy. Committed to the repo so it can be pulled onto a LAN box. Transport (SIP/RTP/G.711/digest) is unit- + loopback-proven; the live Gemini audio bridge (`gemini_handler.py`) is pending a first live call. Reuses `gemini_bridge._agent_system_prompt`/`_live_config`/connectors + `db.get_agent`; no new deps.
