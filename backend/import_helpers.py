@@ -21,6 +21,7 @@ import io as _io
 import json
 import logging
 import os
+import re as _re
 from typing import Any, Optional
 
 import httpx
@@ -360,3 +361,89 @@ def add_source_to_variables(
     items.append(rec)
     v["knowledge_sources"] = items[-50:]   # cap so it never balloons
     return v
+
+
+# ── Live Shopify catalog sync (build 333) ────────────────────────────────────
+# The durable fix for stale prices / broken links in e-commerce agents: pull the
+# catalog straight from the store's own products.json (authoritative names,
+# prices, URLs, availability, tags) instead of a one-off scrape + manual upload
+# that drift out of date. Re-sync REPLACES the prior block so it can't duplicate
+# or conflict with itself.
+SHOPIFY_CATALOG_LABEL = "Live Shopify catalog (auto-synced)"
+
+
+def remove_knowledge_blocks_by_label(existing_prompt: str, label: str) -> str:
+    """Strip any '### {label} (date)' yaml block-entry from the KNOWLEDGE region
+    so a re-sync REPLACES rather than stacks a second, conflicting copy."""
+    if not existing_prompt or label not in existing_prompt:
+        return existing_prompt or ""
+    pat = _re.compile(r"\n*###\s+" + _re.escape(label) + r"\b.*?\n```yaml\n.*?\n```", _re.S)
+    return pat.sub("", existing_prompt).rstrip()
+
+
+def _shopify_store_host(store_url: str) -> str:
+    from urllib.parse import urlparse
+    s = (store_url or "").strip()
+    if not s:
+        raise IngestError("store URL is required", code="shopify_url_missing", status=400)
+    if not s.startswith(("http://", "https://")):
+        s = "https://" + s
+    host = urlparse(s).hostname or ""
+    if not host or "." not in host:
+        raise IngestError("not a valid store URL", code="shopify_url_invalid", status=400)
+    return host
+
+
+async def fetch_shopify_catalog(store_url: str, *, max_products: int = 250) -> tuple[str, dict]:
+    """Fetch the store's public products.json and render a compact YAML catalog
+    (name · price · product URL · availability · tags). Returns (yaml, meta).
+    Shopify exposes products.json with no auth; we page until empty or capped."""
+    host = _shopify_store_host(store_url)
+    base = f"https://{host}"
+    products: list[dict] = []
+    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True,
+                                 headers={"User-Agent": "SpiderX-CatalogSync/1.0"}) as client:
+        for page in range(1, 8):   # up to ~1750 products, hard-capped below
+            try:
+                r = await client.get(f"{base}/products.json", params={"limit": 250, "page": page})
+            except Exception as e:  # noqa: BLE001
+                raise IngestError(f"could not reach {host}: {type(e).__name__}", code="shopify_unreachable", status=502)
+            if r.status_code == 404:
+                raise IngestError(f"{host} has no public products.json (is it a Shopify store?)", code="shopify_not_json", status=422)
+            if r.status_code >= 400:
+                raise IngestError(f"{host} returned HTTP {r.status_code}", code="shopify_http_error", status=502)
+            try:
+                batch = (r.json() or {}).get("products") or []
+            except Exception:  # noqa: BLE001
+                raise IngestError(f"{host}/products.json was not valid JSON", code="shopify_not_json", status=422)
+            if not batch:
+                break
+            products.extend(batch)
+            if len(products) >= max_products:
+                break
+    products = products[:max_products]
+    if not products:
+        raise IngestError(f"{host} returned no products", code="shopify_empty", status=422)
+
+    lines = [f"store: {base}", f"synced_products: {len(products)}", "products:"]
+    for p in products:
+        title = (p.get("title") or "").strip().replace('"', "'")
+        handle = p.get("handle") or ""
+        variants = p.get("variants") or []
+        prices = sorted({v.get("price") for v in variants if v.get("price")}, key=lambda x: float(x))
+        price = (f"A${prices[0]}" if len(prices) == 1 else
+                 f"A${prices[0]}-A${prices[-1]}" if prices else "—")
+        available = any(v.get("available") for v in variants)
+        tags = p.get("tags")
+        tags = ", ".join(tags) if isinstance(tags, list) else (tags or "")
+        lines.append(f'  - name: "{title}"')
+        lines.append(f"    url: {base}/products/{handle}")
+        lines.append(f'    price: "{price}"')
+        lines.append(f"    available: {'yes' if available else 'no'}")
+        if (p.get("product_type") or "").strip():
+            lines.append(f'    type: "{p.get("product_type").strip()}"')
+        if tags:
+            lines.append(f'    tags: "{tags[:200]}"')
+    yaml_text = "\n".join(lines)
+    meta = {"host": host, "base": base, "count": len(products)}
+    return yaml_text, meta

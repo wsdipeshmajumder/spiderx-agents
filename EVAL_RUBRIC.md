@@ -5,7 +5,7 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 331**
+**Last updated: build 333**
 
 **Evidence tiers**
 - **Behavioral** — observed live in a real browser session (prod or preview)
@@ -82,6 +82,9 @@ Tester patterns: (A) knowledge gaps — ingredient list, safety data sheet, "van
 | Item | Acceptance criterion | Verdict | Tier | Build | Notes |
 |---|---|---|---|---|---|
 | U18 | Chat never offers a link/list/document/alternative it doesn't actually have (Pattern B) | PASS | Code | 332 | Chat prompt EDGE CASES gains "ONLY OFFER WHAT YOU CAN DELIVER": never dangle a link/list/spec-sheet/SDS/alternative unless that exact thing is in the knowledge and producible in the next message; if not, answer with what you have, say plainly you don't have that document, and offer `request_human_handoff`. Backend-only (no frontend). Live-verify: ask agent 4 for the full ingredient list → should decline+offer handoff, not dangle |
+| U19 | Unanswered questions are captured as a knowledge-gap worklist (Pattern A visibility) | PASS | Code+Unit | 333 | `chat_bridge` detects "I don't have that information"-family replies (regex; EXCLUDES guardrail "can't provide advice" declines — 9/9 unit cases) and emits a deduped `knowledge.gap` event per (agent, question). New `GET /api/agents/{id}/knowledge/gaps` returns the distinct unanswered questions so the operator knows exactly what to add. Turns the tester's hand-made "bot couldn't answer" list into an automatic feed |
+| U20 | Broken knowledge links are detected before a visitor hits them (Pattern C) | PASS | Code | 333 | `GET /api/agents/{id}/knowledge/link-check` extracts every URL from the agent's knowledge, HEAD/GET-checks each (public hosts only, SSRF-guarded, concurrency+count capped), returns broken ones and emits `knowledge.link.broken`. Would have caught the "Major Pleasure Toy" 404 before the tester did. Extractor verified on agent 4 (23 URLs) |
+| U21 | Live Shopify catalog sync — authoritative prices/URLs/availability (durable fix for A+C) | PASS | Code+Unit | 333 | `POST /api/agents/{id}/knowledge/sync-shopify {store_url}` pulls the store's own `products.json` (names, prices, product URLs, availability, tags), renders a compact YAML catalog, and REPLACES the prior auto-synced block (re-sync can't duplicate/conflict — the exact failure that produced the A$20 vs A$12 price bug). Verified against the real Moments catalog: 52 products, valid YAML, Mega Thin 0.03 → correct A$12.00 + working URL. This one source would have prevented the price error, the broken link, and the vegan/latex-free gap (tags). Generic for any Shopify store |
 
 ## Out-of-band tooling (not a tester item, no build number)
 - **`backend/sip/` (`sipd`)** — native SIP UAS that accepts inbound INVITEs straight from a Grandstream UCM and bridges call audio to a Gemini agent (no Twilio/Plivo). Run as a **separate LAN process** (`python -m backend.sip`), NOT part of the Railway web app — `backend/app.py` does not import it, so it's inert for the deploy. Committed to the repo so it can be pulled onto a LAN box. Transport (SIP/RTP/G.711/digest) is unit- + loopback-proven; the live Gemini audio bridge (`gemini_handler.py`) is pending a first live call. Reuses `gemini_bridge._agent_system_prompt`/`_live_config`/connectors + `db.get_agent`; no new deps.

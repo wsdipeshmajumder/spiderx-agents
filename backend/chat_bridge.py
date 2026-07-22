@@ -47,6 +47,7 @@ import json
 import logging
 import os
 import re as _re
+import hashlib as _hashlib
 import time as _time_mod
 from typing import Any, Optional
 
@@ -1468,6 +1469,66 @@ def _strip_chat_scaffolding(s: str) -> str:
     return "\n".join(out).strip()
 
 
+# ── Knowledge-gap capture (build 333) ────────────────────────────────────────
+# When the agent answers "I don't have that information", the visitor asked
+# something the knowledge base can't cover. We log it as a `knowledge.gap` event
+# so the operator gets a worklist of real unanswered questions (feeds the
+# Observability feed + can roll into the EOD digest). We match ONLY the
+# "don't-have-the-fact" family — NOT guardrail refusals ("I can't provide advice
+# on …"), which are intentional, not gaps.
+_KNOWLEDGE_GAP_RE = _re.compile(
+    r"\bi (?:don't|do not|dont|don’t) have "
+    r"(?:(?:the |any |that |specific |detailed |more )*)"
+    r"(?:specific )?(?:information|details?|data|specifics?|access to (?:that|this)"
+    r"|that (?:on hand|document|detail|info)|it on hand)"
+    r"|\bnot (?:something i have|in my knowledge|available in my knowledge)"
+    r"|\bi'?m not certain (?:about|of) (?:the|that)\b"
+    r"|\bi don'?t have (?:a |the )?(?:full |complete )?(?:ingredient|spec|safety data)",
+    _re.IGNORECASE,
+)
+# Guardrail refusals to EXCLUDE — these are deliberate out-of-scope declines.
+_GUARDRAIL_DECLINE_RE = _re.compile(
+    r"can'?t provide (?:advice|instructions|guidance|medical)"
+    r"|cannot provide (?:advice|instructions|guidance|medical)",
+    _re.IGNORECASE,
+)
+
+
+def _looks_like_knowledge_gap(reply: str) -> bool:
+    if not reply:
+        return False
+    if _GUARDRAIL_DECLINE_RE.search(reply):
+        return False
+    return bool(_KNOWLEDGE_GAP_RE.search(reply))
+
+
+async def _maybe_flag_knowledge_gap(agent: dict, user_text: str, reply: str) -> None:
+    """Emit a deduped `knowledge.gap` event when the agent couldn't answer from
+    its knowledge. Best-effort — never let this break the chat."""
+    try:
+        if not _looks_like_knowledge_gap(reply):
+            return
+        q = (user_text or "").strip()
+        if not q or len(q) < 4:
+            return
+        from . import events as _events
+        agent_id = agent.get("id")
+        norm = _re.sub(r"\s+", " ", q.lower())[:200]
+        key = f"kgap:{agent_id}:{_hashlib.sha1(norm.encode()).hexdigest()[:16]}"
+        await _events.emit(
+            "knowledge.gap",
+            title=f"Unanswered question — {q[:80]}",
+            severity="info", source="agent",
+            org_id=agent.get("org_id"), agent_id=agent_id,
+            message=q[:500],
+            payload={"question": q[:500], "channel": "web_chat",
+                     "reply_excerpt": (reply or "")[:200]},
+            dedupe_key=key,   # one row per (agent, question) — a gaps worklist
+        )
+    except Exception as e:  # noqa: BLE001
+        log.debug("knowledge-gap flag skipped: %s", e)
+
+
 async def _run_model_turn(
     *,
     chat,
@@ -2578,6 +2639,8 @@ async def run_agent_chat_session(
                 memory.append({"role": "model", "text": _mask_pii(reply.strip())})
                 if live is not None:
                     live.mirror("model", reply.strip())
+                # Capture unanswered questions as a knowledge-gap worklist.
+                await _maybe_flag_knowledge_gap(agent, user_text, reply)
             if persisted["done"]:
                 await _finish_with_feedback()
                 break

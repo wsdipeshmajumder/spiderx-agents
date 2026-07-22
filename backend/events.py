@@ -280,6 +280,10 @@ KINDS = {
     "call.completed", "call.abandoned", "call.outcome.captured",
     # chat (build 288 — live web-chat human handoff)
     "chat.handoff.requested",
+    # knowledge gaps (build 333 — a visitor asked something not in the KB)
+    "knowledge.gap",
+    # knowledge link health (build 333 — a URL in the KB is broken)
+    "knowledge.link.broken",
     # cost
     "cost.agent.monthly.computed", "cost.agent.threshold.warning",
     "cost.agent.threshold.exceeded",

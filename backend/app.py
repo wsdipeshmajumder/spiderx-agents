@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -118,7 +119,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 332
+APP_BUILD = 333
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1217,6 +1218,48 @@ async def agent_knowledge_import_url(agent_id: int, request: Request) -> dict:
     return {"ok": True, "agent": updated, "source": source}
 
 
+@app.post("/api/agents/{agent_id}/knowledge/sync-shopify")
+async def agent_knowledge_sync_shopify(agent_id: int, request: Request) -> dict:
+    """Sync knowledge from a Shopify store's public products.json (build 333) —
+    authoritative names / prices / URLs / availability / tags. The durable fix
+    for stale prices + broken product links: point it at the store once and
+    re-sync to refresh. Re-sync REPLACES the prior catalog block (never stacks a
+    second, conflicting copy). Body: `{store_url}`."""
+    from . import import_helpers as _ih
+    user = await current_user(request)
+    agent = await _require_agent_owned(agent_id, user)
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid JSON body")
+    store_url = (body.get("store_url") or body.get("url") or "").strip()
+    try:
+        yaml_text, meta = await _ih.fetch_shopify_catalog(store_url)
+    except _ih.IngestError as e:
+        raise HTTPException(status_code=e.status, detail={"code": e.code, "message": str(e)})
+    source = {"kind": "url", "url": meta["base"], "title": _ih.SHOPIFY_CATALOG_LABEL}
+    base_prompt = _ih.remove_knowledge_blocks_by_label(
+        agent.get("system_prompt") or "", _ih.SHOPIFY_CATALOG_LABEL)
+    new_prompt = _ih.append_knowledge_block(base_prompt, yaml_text, source)
+    new_vars = _ih.add_source_to_variables(agent.get("variables") or {}, source)
+    updated = await db.update_agent(agent_id, {"system_prompt": new_prompt, "variables": new_vars})
+    if not updated:
+        raise HTTPException(status_code=404, detail="agent not found")
+    log.info("knowledge.sync_shopify: agent id=%s host=%s products=%d yaml_bytes=%d",
+             agent_id, meta["host"], meta["count"], len(yaml_text))
+    try:
+        from . import events as _events
+        await _events.emit(
+            "agent.knowledge.imported", source="user",
+            org_id=agent.get("org_id"), agent_id=agent_id, user_id=user["id"],
+            title=f"Shopify catalog synced — {meta['count']} products from {meta['host']}",
+            payload={"source": "shopify", "host": meta["host"], "count": meta["count"]},
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "synced_products": meta["count"], "host": meta["host"], "source": source}
+
+
 @app.post("/api/agents/{agent_id}/knowledge/upload")
 async def agent_knowledge_upload(agent_id: int, request: Request) -> dict:
     """Upload a .txt / .docx file onto an EXISTING agent's knowledge base.
@@ -1713,6 +1756,95 @@ async def agent_chat_knowledge(agent_id: int, request: Request) -> dict:
         "guardrails": agent.get("guardrails") or [],
         "instructions_set": bool((cs.get("instructions") or "").strip()),
     }
+
+
+@app.get("/api/agents/{agent_id}/knowledge/gaps")
+async def agent_knowledge_gaps(agent_id: int, request: Request, limit: int = 100) -> dict:
+    """Unanswered-question worklist (build 333). Every time the chat agent had
+    to answer "I don't have that information", `chat_bridge` logs a deduped
+    `knowledge.gap` event. This surfaces those distinct questions so the operator
+    knows EXACTLY what to add to the knowledge base — the biggest lever on the
+    'bot couldn't answer' class of failures."""
+    await _require_agent_owned(agent_id, await current_user(request))
+    from . import events as _events
+    rows = await _events.list_events(
+        kind_prefix="knowledge.gap", agent_id=agent_id, limit=min(max(limit, 1), 500),
+    )
+    gaps = []
+    for r in rows:
+        p = r.get("payload") if isinstance(r.get("payload"), dict) else {}
+        gaps.append({
+            "question": p.get("question") or r.get("message") or "",
+            "channel": p.get("channel") or "web_chat",
+            "reply_excerpt": p.get("reply_excerpt") or "",
+            "first_seen": r.get("created_at"),
+            "resolved": r.get("resolved_at") is not None,
+            "event_id": r.get("id"),
+        })
+    return {"agent_id": agent_id, "count": len(gaps), "gaps": gaps}
+
+
+_URL_IN_TEXT_RE = re.compile(r"https?://[^\s\)\]\}\"'<>|]+")
+
+
+def _extract_urls_from_text(text: str) -> list[str]:
+    """Pull every http(s) URL out of an agent's knowledge/system_prompt, trimming
+    trailing punctuation the regex over-captures (`.`, `,`, markdown `)`)."""
+    seen, out = set(), []
+    for m in _URL_IN_TEXT_RE.finditer(text or ""):
+        u = m.group(0).rstrip(".,;:!?’'\"")
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
+
+
+@app.get("/api/agents/{agent_id}/knowledge/link-check")
+async def agent_knowledge_link_check(agent_id: int, request: Request) -> dict:
+    """Health-check every URL in the agent's knowledge (build 333). The 'broken
+    product link' failure (a KB URL that 404s) is a whole class of bad customer
+    moments — this HEAD/GET-checks each link, flags the broken ones, and emits a
+    `knowledge.link.broken` event so a bad link surfaces to the operator instead
+    of to a visitor. Public hosts only (SSRF-guarded), concurrency + count capped."""
+    import httpx
+    from urllib.parse import urlparse
+    await _require_agent_owned(agent_id, await current_user(request))
+    agent = await db.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="agent not found")
+    urls = _extract_urls_from_text(agent.get("system_prompt") or "")[:80]  # cap
+    sem = asyncio.Semaphore(8)
+
+    async def _check(u: str) -> dict:
+        p = urlparse(u)
+        if not p.hostname or not _host_is_public(p.hostname):
+            return {"url": u, "ok": False, "status": None, "reason": "host not allowed"}
+        async with sem:
+            try:
+                async with httpx.AsyncClient(timeout=8.0, follow_redirects=True, max_redirects=4,
+                                             headers={"User-Agent": "SpiderX-LinkCheck/1.0"}) as client:
+                    r = await client.get(u)
+                    ok = r.status_code < 400
+                    return {"url": u, "ok": ok, "status": r.status_code,
+                            "reason": "" if ok else f"HTTP {r.status_code}"}
+            except Exception as e:  # noqa: BLE001
+                return {"url": u, "ok": False, "status": None, "reason": type(e).__name__}
+
+    results = await asyncio.gather(*[_check(u) for u in urls]) if urls else []
+    broken = [r for r in results if not r["ok"]]
+    if broken:
+        from . import events as _events
+        for b in broken[:20]:
+            await _events.emit(
+                "knowledge.link.broken", severity="warning", source="system",
+                org_id=agent.get("org_id"), agent_id=agent_id,
+                title=f"Broken knowledge link — {b['url'][:80]}",
+                message=f"{b['reason']}: {b['url']}"[:500],
+                payload={"url": b["url"], "status": b.get("status"), "reason": b.get("reason")},
+                dedupe_key=f"klink:{agent_id}:{b['url'][:180]}",
+            )
+    return {"agent_id": agent_id, "checked": len(results),
+            "broken_count": len(broken), "broken": broken, "results": results}
 
 
 @app.get("/api/agents/{agent_id}/calls/{call_id}")
