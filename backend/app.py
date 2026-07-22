@@ -119,7 +119,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 333
+APP_BUILD = 334
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1813,25 +1813,34 @@ async def agent_knowledge_link_check(agent_id: int, request: Request) -> dict:
     if not agent:
         raise HTTPException(status_code=404, detail="agent not found")
     urls = _extract_urls_from_text(agent.get("system_prompt") or "")[:80]  # cap
-    sem = asyncio.Semaphore(8)
+    sem = asyncio.Semaphore(4)   # gentle — a burst trips store rate-limits (429)
 
     async def _check(u: str) -> dict:
         p = urlparse(u)
         if not p.hostname or not _host_is_public(p.hostname):
-            return {"url": u, "ok": False, "status": None, "reason": "host not allowed"}
+            return {"url": u, "state": "skipped", "status": None, "reason": "host not allowed"}
         async with sem:
             try:
                 async with httpx.AsyncClient(timeout=8.0, follow_redirects=True, max_redirects=4,
-                                             headers={"User-Agent": "SpiderX-LinkCheck/1.0"}) as client:
-                    r = await client.get(u)
-                    ok = r.status_code < 400
-                    return {"url": u, "ok": ok, "status": r.status_code,
-                            "reason": "" if ok else f"HTTP {r.status_code}"}
+                                             headers={"User-Agent": "Mozilla/5.0 (compatible; SpiderX-LinkCheck/1.0)"}) as client:
+                    r = await client.head(u)
+                    if r.status_code in (405, 501):      # HEAD unsupported → GET
+                        r = await client.get(u)
+                    sc = r.status_code
             except Exception as e:  # noqa: BLE001
-                return {"url": u, "ok": False, "status": None, "reason": type(e).__name__}
+                return {"url": u, "state": "broken", "status": None, "reason": type(e).__name__}
+        # Only 404/410 (or a connection failure above) is a DEFINITELY-dead link.
+        # 401/403/429/5xx are anti-bot / rate-limit / transient — report as
+        # "unverified" so the check never cries wolf on a store that throttles us.
+        if sc in (404, 410):
+            return {"url": u, "state": "broken", "status": sc, "reason": f"HTTP {sc}"}
+        if sc in (401, 403, 429) or sc >= 500:
+            return {"url": u, "state": "unverified", "status": sc, "reason": f"HTTP {sc} (blocked/transient)"}
+        return {"url": u, "state": "ok", "status": sc, "reason": ""}
 
     results = await asyncio.gather(*[_check(u) for u in urls]) if urls else []
-    broken = [r for r in results if not r["ok"]]
+    broken = [r for r in results if r["state"] == "broken"]
+    unverified = [r for r in results if r["state"] == "unverified"]
     if broken:
         from . import events as _events
         for b in broken[:20]:
@@ -1844,7 +1853,9 @@ async def agent_knowledge_link_check(agent_id: int, request: Request) -> dict:
                 dedupe_key=f"klink:{agent_id}:{b['url'][:180]}",
             )
     return {"agent_id": agent_id, "checked": len(results),
-            "broken_count": len(broken), "broken": broken, "results": results}
+            "broken_count": len(broken), "broken": broken,
+            "unverified_count": len(unverified), "unverified": unverified,
+            "results": results}
 
 
 @app.get("/api/agents/{agent_id}/calls/{call_id}")
