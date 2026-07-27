@@ -1887,6 +1887,32 @@ def _agent_chat_system_prompt(agent: dict[str, Any]) -> str:
     # Resolve the chat-specific language directive NOW — `_cs` is shadowed below.
     lang_lead = _chat_language_lead(_cs)
     lang_block = _chat_language_block(_cs)
+    # Handoff behaviour (build 335). Some stores have NO live human staffing the
+    # widget — `chat_settings.handoff_mode="contact_info"` makes the agent share
+    # the support email / contact-us form instead of promising a teammate callback.
+    _handoff_mode = (str(_cs.get("handoff_mode") or "human")).strip().lower()
+    _support_email = (str(_cs.get("support_email") or "")).strip()
+    _contact_url = (str(_cs.get("contact_url") or "")).strip()
+    if _handoff_mode == "contact_info" and (_support_email or _contact_url):
+        _ways = []
+        if _contact_url:
+            _ways.append(f"the contact form ({_contact_url})")
+        if _support_email:
+            _ways.append(f"email at {_support_email}")
+        handoff_line = (
+            "• GETTING HELP FROM A PERSON: there is NO live agent in this chat. When the "
+            "visitor wants a human, has a complaint, or needs something you can't resolve, do "
+            "NOT say 'a teammate has been notified' or promise a callback. Instead share the "
+            "way to reach the team directly — " + " or ".join(_ways) + " — as a clickable link "
+            "where possible, and still offer to capture their details so nothing is lost.")
+    else:
+        handoff_line = (
+            "• HUMAN HANDOFF: if the visitor asks to talk to a person, is upset, has a complaint, "
+            "or needs something you can't resolve (refund, legal, safety, account-specific), call "
+            "`request_human_handoff` with a short reason. Then reassure them a teammate has been "
+            "notified and — if you don't already have it — ask for the best phone or email to reach "
+            "them on. Don't promise an exact response time; say someone will follow up shortly. Offer "
+            "'Talk to a human' as a quick reply when it's clearly what they want.")
     business = (_gb._format_business_facts_for_prompt(agent) or "").strip()
     dos, donts = _gb._format_policy_for_prompt(agent)
     outcomes_csv = ", ".join(agent.get("outcomes") or ["resolved", "callback_requested", "not_interested"])
@@ -1926,16 +1952,15 @@ def _agent_chat_system_prompt(agent: dict[str, Any]) -> str:
         "or the obvious next step — offer quick_replies for choices. Never leave the chat on a "
         "dead stop; always give a clear way forward. Do NOT end the chat after a single answer — "
         "keep helping until the visitor clearly says they're done.\n"
+        "• NEVER REPEAT YOURSELF: don't send the same answer (or a barely-reworded version of it) "
+        "twice in a row. When you attach quick-reply buttons, a card, or a form AFTER answering, do "
+        "NOT restate the answer — the widget attaches to the message you just sent; add at most one "
+        "short lead-in line, not the whole answer again.\n"
         "• REMEMBER WHAT THEY'VE TOLD YOU: track everything the visitor has already shared in "
         "this chat (name, phone, email, dates, vehicle, party size, preferences, …). NEVER ask "
         "for the same detail twice or re-confirm what you already have. When you show a form, "
-        "include ONLY the fields you don't already know — drop the ones already answered.\n"
-        "• HUMAN HANDOFF: if the visitor asks to talk to a person, is upset, has a complaint, or "
-        "needs something you can't resolve (refund, legal, safety, account-specific), call "
-        "`request_human_handoff` with a short reason. Then reassure them a teammate has been "
-        "notified and — if you don't already have it — ask for the best phone or email to reach "
-        "them on. Don't promise an exact response time; say someone will follow up shortly. Offer "
-        "'Talk to a human' as a quick reply when it's clearly what they want.",
+        "include ONLY the fields you don't already know — drop the ones already answered.\n",
+        handoff_line,
         f"\n━━━ WHO YOU ARE ━━━\n{persona}",
     ]
     if agent_prompt.strip():
@@ -1972,6 +1997,12 @@ def _agent_chat_system_prompt(agent: dict[str, Any]) -> str:
         "info/knowledge above — if it isn't there, do NOT make up a plausible answer (never name a "
         "random area/landmark of the city, never invent hours). Say you're not certain, then offer the "
         "next best step — capture their details for a callback, or hand to a human (`request_human_handoff`).\n"
+        "• ORDER / TRANSACTION STATUS: NEVER state, invent, or guess an order status, tracking "
+        "number, delivery/arrival date, or payment/refund status. You do NOT have live access to "
+        "the order system. If an order-lookup tool returns 'not configured' / no result, or you "
+        "have no such tool, tell the visitor you can't check order status from here and point them "
+        "to the store's order-tracking / account page (or its contact page) — do NOT make up an "
+        "order number, a status, or a date, even if the visitor gives you an order number.\n"
         "• ONLY OFFER WHAT YOU CAN DELIVER: never dangle a link, list, document, sample, spec sheet or "
         "alternative you don't actually have in the knowledge above — e.g. do NOT say \"would you like the "
         "full ingredient list / the safety data sheet / a link to our ingredients / vegan or latex-free "

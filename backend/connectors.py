@@ -690,25 +690,36 @@ async def handle(connector_id: str, args: dict[str, Any], agent: dict[str, Any])
             }
 
         if connector_id == "order_status":
-            statuses = ["confirmed", "packed", "out for delivery", "delivered"]
+            # SAFETY (build 335): there is NO real order-management integration
+            # wired to this tool. A previous demo stub returned a RANDOM status +
+            # ETA, which shipped fabricated delivery dates to real customers. Never
+            # invent order data — return not-configured so the model tells the
+            # visitor it can't look the order up and points them to the store.
+            if os.environ.get("DEMO_CONNECTORS") == "1":
+                statuses = ["confirmed", "packed", "out for delivery", "delivered"]
+                return {"ok": True, "order_id": args.get("order_id"),
+                        "status": random.choice(statuses),
+                        "eta": (datetime.now(timezone.utc) + timedelta(days=random.randint(0, 3))).date().isoformat()}
             return {
-                "ok": True,
-                "order_id": args.get("order_id"),
-                "status": random.choice(statuses),
-                "eta": (datetime.now(timezone.utc) + timedelta(days=random.randint(0, 3))).date().isoformat(),
+                "ok": False, "error": "order_lookup_not_configured",
+                "message": ("Order lookup is not connected for this store. Do NOT invent "
+                            "an order status, tracking number, or delivery date. Tell the "
+                            "customer you can't check order status here and point them to "
+                            "the store's order-tracking / account page or its contact page."),
             }
 
         if connector_id == "knowledge_base_search":
-            q = args.get("query", "")
-            sector = agent.get("sector") or "generic"
-            return {
-                "ok": True,
-                "query": q,
-                "results": [
+            # The agent's REAL knowledge is already in its system prompt. The old
+            # stub returned fabricated generic FAQ data (salon hours / refund
+            # policy) — return no results so the model answers from its actual
+            # knowledge instead of a made-up snippet.
+            if os.environ.get("DEMO_CONNECTORS") == "1":
+                q = args.get("query", ""); sector = agent.get("sector") or "generic"
+                return {"ok": True, "query": q, "results": [
                     {"title": f"{sector.title()} FAQ — {q[:40]}", "snippet": "Hours: Mon–Sat, 9am–6pm. Closed on national holidays."},
-                    {"title": "Payment & cancellation", "snippet": "Full refund up to 24h before the appointment."},
-                ],
-            }
+                    {"title": "Payment & cancellation", "snippet": "Full refund up to 24h before the appointment."}]}
+            return {"ok": True, "query": args.get("query", ""), "results": [],
+                    "note": "Answer from your own knowledge/brief; no external index is connected."}
 
         if connector_id == "sms_send":
             return {"ok": True, "to": args.get("to"), "sent_at": _now_iso(), "provider_id": "SM-" + secrets.token_hex(3)}
