@@ -2373,8 +2373,16 @@ async def run_agent_chat_session(
         if isinstance(agent.get("_extracted_extra"), dict):
             agent["_extracted_extra"]["handoff_requested"] = True
             agent["_extracted_extra"]["handoff_reason"] = reason
-        # Tell the embed to show the "a human has been notified" banner.
-        await _send_json({"type": "handoff", "status": "requested", "reason": reason})
+        # Handoff mode (build 335): "contact_info" = no live agent, so share the
+        # contact form / email instead of "a teammate has been notified".
+        _hcs = agent.get("chat_settings") if isinstance(agent.get("chat_settings"), dict) else {}
+        _hmode = (str(_hcs.get("handoff_mode") or "human")).strip().lower()
+        _hcu = (str(_hcs.get("contact_url") or "")).strip()
+        _hse = (str(_hcs.get("support_email") or "")).strip()
+        _contact_mode = _hmode == "contact_info" and (_hcu or _hse)
+        # Show the "notified" banner ONLY in live-human mode (else it's misleading).
+        if not _contact_mode:
+            await _send_json({"type": "handoff", "status": "requested", "reason": reason})
         # Notify the team via the events ledger (Observability + escalation pager).
         # Best-effort: a notification failure must never break the chat. Preview
         # sessions are silent (operator testing their own widget).
@@ -2398,10 +2406,21 @@ async def run_agent_chat_session(
                 )
             except Exception as e:  # noqa: BLE001
                 log.warning("agent-chat[%s] handoff emit failed: %s", agent_id, e)
-        return {"ok": True, "handoff": True,
-                "instruction": ("A teammate has been notified. Reassure the visitor warmly that "
-                                "a human will follow up shortly, and if you don't already have a "
-                                "phone or email, ask for the best one to reach them on.")}
+        if _contact_mode:
+            _ways = []
+            if _hcu:
+                _ways.append(f"the contact form ({_hcu})")
+            if _hse:
+                _ways.append(f"email at {_hse}")
+            instruction = ("There is no live agent in this chat. Share the way to reach the team "
+                           "directly — " + " or ".join(_ways) + " — as a clickable link. Do NOT say "
+                           "a teammate has been notified or promise a callback; you may still offer "
+                           "to note their details so nothing is lost.")
+        else:
+            instruction = ("A teammate has been notified. Reassure the visitor warmly that a human "
+                           "will follow up shortly, and if you don't already have a phone or email, "
+                           "ask for the best one to reach them on.")
+        return {"ok": True, "handoff": True, "instruction": instruction}
     handlers["request_human_handoff"] = _request_human_handler
 
     config = types.GenerateContentConfig(
