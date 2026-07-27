@@ -2305,7 +2305,10 @@ async def run_agent_chat_session(
         opts = [str(o).strip() for o in raw if str(o).strip()][:4]
         if opts:
             await _send_json({"type": "quick_replies", "options": opts})
-        return {"ok": True, "shown": len(opts)}
+        return {"ok": True, "shown": len(opts),
+                "note": ("Buttons are now shown attached to your last message. Do NOT repeat or "
+                         "restate that message — end your turn now unless you have genuinely NEW "
+                         "information to add.")}
     handlers["quick_replies"] = _quick_replies_handler
 
     async def _show_form_handler(args: dict[str, Any]) -> dict[str, Any]:
@@ -2329,7 +2332,8 @@ async def run_agent_chat_session(
         if not fields:
             return {"ok": False, "error": "no valid fields"}
         await _send_json({"type": "form", "form": {"title": title, "submit_label": submit_label, "fields": fields}})
-        return {"ok": True, "shown": len(fields)}
+        return {"ok": True, "shown": len(fields),
+                "note": "Form is now shown. Do NOT repeat your previous message; wait for the visitor to submit."}
     handlers["show_form"] = _show_form_handler
 
     async def _show_cards_handler(args: dict[str, Any]) -> dict[str, Any]:
