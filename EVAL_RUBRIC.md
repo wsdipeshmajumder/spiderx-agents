@@ -5,7 +5,15 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 339**
+**Last updated: build 340**
+
+**Build 340 (embed close "×" now visible on the light header):** the overlay
+button was styled white (`color:#fff` on `rgba(255,255,255,0.10)`) for the dark
+panel, but it sits over the iframe's light chat header, so it washed out. Now a
+light chip + slate glyph (`background:rgba(255,255,255,0.92); color:#475569`)
+with a soft shadow — clearly legible on light, still visible on dark. Verified
+in a live embed.js overlay: the "×" reads crisply and is separated from the
+"New chat" button. Evidence: **Behavioral**.
 
 **Build 339 (embed header no longer overlaps the close button):** in the
 floating chat embed, `embed.js` overlays a 28px "×" close button at

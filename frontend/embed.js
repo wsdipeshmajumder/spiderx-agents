@@ -115,8 +115,11 @@
     "@media (max-width:560px){.sxai-root[data-mode='drawer'] .sxai-panel{height:82vh;width:100%;border-radius:18px 18px 0 0;}}",
     ".sxai-panel iframe{width:100%;height:100%;border:0;display:block;background:#0f1119;}",
     // Close button overlay
-    ".sxai-close{position:absolute;top:10px;right:10px;width:28px;height:28px;border-radius:50%;border:0;background:rgba(255,255,255,0.10);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);}",
-    ".sxai-close:hover{background:rgba(255,255,255,0.18);}",
+    // The button floats over the iframe's LIGHT chat header, so a white glyph
+    // washed out (build 339). Use a light chip + slate glyph + soft shadow so
+    // it reads clearly on the light header (and stays visible on dark).
+    ".sxai-close{position:absolute;top:10px;right:10px;width:28px;height:28px;border-radius:50%;border:1px solid rgba(0,0,0,0.08);background:rgba(255,255,255,0.92);color:#475569;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);box-shadow:0 1px 4px rgba(0,0,0,0.14);transition:background .12s,color .12s;}",
+    ".sxai-close:hover{background:#fff;color:#0f172a;}",
     ".sxai-close svg{width:14px;height:14px;}",
     // Proactive teaser bubble (Build 293)
     ".sxai-teaser{position:absolute;bottom:100%;right:0;margin-bottom:12px;max-width:260px;padding:12px 34px 12px 14px;border-radius:14px;background:#fff;color:#1a1c25;font-size:13.5px;line-height:1.4;box-shadow:0 10px 30px rgba(0,0,0,0.18);opacity:0;transform:translateY(8px) scale(.96);transition:opacity .25s ease,transform .25s ease;pointer-events:none;cursor:pointer;text-align:left;}",
