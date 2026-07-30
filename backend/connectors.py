@@ -702,10 +702,12 @@ async def handle(connector_id: str, args: dict[str, Any], agent: dict[str, Any])
                         "eta": (datetime.now(timezone.utc) + timedelta(days=random.randint(0, 3))).date().isoformat()}
             return {
                 "ok": False, "error": "order_lookup_not_configured",
-                "message": ("Order lookup is not connected for this store. Do NOT invent "
-                            "an order status, tracking number, or delivery date. Tell the "
-                            "customer you can't check order status here and point them to "
-                            "the store's order-tracking / account page or its contact page."),
+                "message": ("Order lookup is not connected for this store. Do NOT invent an order "
+                            "status/tracking/date and do NOT keep asking for the order number. In "
+                            "one reply, tell the customer you can't look up orders here and point "
+                            "them to how they track it themselves — the tracking link in their "
+                            "order-confirmation/shipping email or their account page on the store, "
+                            "plus the contact page for help."),
             }
 
         if connector_id == "knowledge_base_search":
