@@ -5,7 +5,17 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 338**
+**Last updated: build 339**
+
+**Build 339 (embed header no longer overlaps the close button):** in the
+floating chat embed, `embed.js` overlays a 28px "×" close button at
+`top:10px/right:10px`, and the header action cluster ("New chat" /
+"Talk to a human") ran to the right edge and slid under it. Fix: reserve
+right-side room in the real embed only —
+`.chatembed:not(.chatembed-contained) .chatembed-head { padding-right: 48px; }`
+— so the operator preview (which has no overlay) is untouched. Verified in a
+live preview: root class `chatembed`, computed `padding-right` 48px, "New chat"
+clears a simulated × with a ~10px gap. Evidence: **Behavioral**.
 
 **Build 338 (order-status graceful redirect):** the not-invent fix (U22) still let the bot ask "what's your order number?" then say it'd "check" (screenshot). Now: as soon as an order/tracking question comes up, the agent redirects in ONE reply — no asking for a number, no "I'll check" — to the customer's order-confirmation/shipping email tracking link, their `/account` page, and `/pages/contact-us`. Prompt + connector not-configured message both updated; agent 4 had the `order_status` connector removed + an order-tracking policy added to knowledge.
 

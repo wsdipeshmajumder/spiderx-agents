@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 331;
+const SXAI_BUILD = 339;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -12326,6 +12326,113 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   `;
 }
 
+// NativeSipCard — self-serve "point your OWN PBX/trunk straight at us" setup.
+// Writes a native sip_config (DID + allowed IPs and/or generated trunk creds)
+// that the standalone `sipd` service reads to route + authenticate the call.
+// Distinct from the provider-forwarding (Voniz) flow above.
+function NativeSipCard({ agent, refreshAgent }) {
+  const [cfg, setCfg] = useState(null);
+  const [uri, setUri] = useState("");
+  const [did, setDid] = useState("");
+  const [ips, setIps] = useState("");
+  const [genCreds, setGenCreds] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState({ msg: "", cls: "" });
+
+  useEffect(() => {
+    if (!agent?.id) return;
+    fetch(`/api/agents/${agent.id}/sip-config`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d) return;
+        setUri(d.inbound_uri || "");
+        const c = d.config && d.config.mode === "native" ? d.config : null;
+        setCfg(c);
+        if (c) { setDid(c.did || ""); setIps((c.allowed_ips || []).join(", ")); }
+      })
+      .catch(() => {});
+  }, [agent?.id]);
+
+  const host = (() => { const m = /@([^:>]+)/.exec(uri || ""); return m ? m[1] : "your-sipd-host"; })();
+  const codeBox = { fontFamily: "ui-monospace, monospace", fontSize: "12.5px",
+    background: "var(--bg-1, #f4f5f8)", borderRadius: "6px", padding: "2px 7px" };
+
+  const save = async () => {
+    setSaving(true); setStatus({ msg: "Saving…", cls: "dim" });
+    try {
+      const r = await fetch(`/api/agents/${agent.id}/sip-config`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "native", did: did.trim(), allowed_ips: ips,
+                               generate_credentials: genCreds }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setStatus({ msg: d.detail || `Save failed (${r.status})`, cls: "err" }); return; }
+      if (d.config) setCfg(d.config.mode === "native" ? d.config : null);
+      if (d.inbound_uri) setUri(d.inbound_uri);
+      setGenCreds(false);
+      setStatus({ msg: "Saved ✓", cls: "ok" });
+      setTimeout(() => setStatus({ msg: "", cls: "" }), 2400);
+      refreshAgent && refreshAgent();
+    } catch { setStatus({ msg: "Network error — couldn't save.", cls: "err" }); }
+    finally { setSaving(false); }
+  };
+
+  return html`
+    <section class="db-panel golive-channel-card" style=${{ marginTop: 14 }}>
+      <div class="db-channel-head">
+        <div style=${{ flex: 1 }}>
+          <h3 class="db-panel-title">Point your own PBX / SIP trunk at ${agent.name}
+            ${cfg && cfg.status === "configured"
+              ? html`<span class="sip-status-pill db-tag-blue">Configured</span>` : ""}
+          </h3>
+          <p class="db-panel-sub">
+            Have a Grandstream/Asterisk/carrier trunk? Send inbound calls to
+            ${" " + (agent.name || "this agent") + " "} directly — no middleman. Enter the number + how your
+            trunk authenticates, then point the trunk at our SIP host.
+          </p>
+        </div>
+      </div>
+
+      <div style=${{ marginBottom: 12 }}>
+        <div class="db-form-help" style=${{ marginBottom: 4 }}>Our SIP endpoint — point your trunk here</div>
+        <span style=${codeBox}>${host}:5060</span> <span class="db-muted" style=${{ fontSize: "12px" }}>(UDP)</span>
+      </div>
+
+      <label style=${{ display: "block", marginBottom: 10 }}>
+        <div class="db-form-help" style=${{ marginBottom: 4 }}>Phone number (DID) callers dial</div>
+        <input class="db-input" placeholder="+913365430101" value=${did}
+               onInput=${(e) => setDid(e.target.value)} />
+      </label>
+
+      <label style=${{ display: "block", marginBottom: 10 }}>
+        <div class="db-form-help" style=${{ marginBottom: 4 }}>Your trunk's source IP(s) — for IP-peer auth</div>
+        <input class="db-input" placeholder="e.g. 10.79.217.5  (comma-separated; leave blank to use credentials)"
+               value=${ips} onInput=${(e) => setIps(e.target.value)} />
+      </label>
+
+      <label style=${{ display: "flex", alignItems: "center", gap: "8px", marginBottom: 10, fontSize: "13px" }}>
+        <input type="checkbox" checked=${genCreds} onChange=${(e) => setGenCreds(e.target.checked)} />
+        <span>Use a username/password instead — generate SIP credentials to enter in my PBX</span>
+      </label>
+
+      ${cfg && cfg.trunk_username ? html`
+        <div style=${{ border: "1px solid var(--border, #e6e8ef)", borderRadius: "8px", padding: "10px 12px", marginBottom: 10 }}>
+          <div class="db-form-help" style=${{ marginBottom: 4 }}>Trunk credentials — enter these in your PBX:</div>
+          <div style=${{ marginBottom: 3 }}>Username <span style=${codeBox}>${cfg.trunk_username}</span></div>
+          <div>Password <span style=${codeBox}>${cfg.trunk_password}</span></div>
+        </div>` : ""}
+
+      <div class="flex center gap8" style=${{ marginTop: 12 }}>
+        ${status.msg ? html`<span class="db-muted" style=${{ fontSize: "12.5px",
+          color: status.cls === "err" ? "var(--red, #cf4438)" : status.cls === "ok" ? "var(--green, #1c8f5a)" : "var(--muted)" }}>${status.msg}</span>` : ""}
+        <button class="db-btn-primary" style=${{ marginLeft: "auto" }} disabled=${saving} onClick=${save}>
+          ${saving ? "Saving…" : "Save SIP setup"}
+        </button>
+      </div>
+    </section>
+  `;
+}
+
 function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, org }) {
   // History of past number-request submissions for this agent — folded in
   // here (used to be its own /numbers page) so the whole phone-number
@@ -13360,6 +13467,7 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
              into TelephonyPanel's manual disclosure. -->
         <div class="golive-mode-content">
           <${TelephonyPanel} agent=${agent} refreshAgent=${refreshAgent} />
+          <${NativeSipCard} agent=${agent} refreshAgent=${refreshAgent} />
         </div>
       ` : html`
         <!-- Managed-number path: ops-fulfilled. Show the request form

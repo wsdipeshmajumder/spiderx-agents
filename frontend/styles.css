@@ -1231,6 +1231,11 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   padding: 12px 14px; border-bottom: 1px solid var(--border, #e6e8ef);
   flex-shrink: 0;
 }
+/* In the real embed (floating iframe), embed.js overlays a 28px "×" close
+   button at top:10px/right:10px. Reserve room on the right so the header
+   actions ("New chat" / "Talk to a human") never slide under it. The operator
+   preview (.chatembed-contained) has no such overlay, so it keeps 14px. */
+.chatembed:not(.chatembed-contained) .chatembed-head { padding-right: 48px; }
 .chatembed-avatar {
   width: 34px; height: 34px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
