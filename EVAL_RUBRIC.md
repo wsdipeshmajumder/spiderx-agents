@@ -5,7 +5,27 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 340**
+**Last updated: build 341**
+
+**Build 341 (per-agent chat brand kit — for Moments/BlissBot):** five new
+`chat_settings` keys make the embed brandable without code per-agent, all
+exposed in Chat → Appearance and driven through the live preview:
+- `accent_color_2` — second brand colour → gradient avatar + launcher FAB +
+  user bubble (`--chat-accent-2`, `?accent2=` forwarded by embed.js). Moments =
+  `#e45dbf` → `#e5a3ff`.
+- `full_width_responses` — `.chatembed-fullwidth`: model bubbles span the panel
+  width to cut scroll length. Verified: model bubble `max-width:100%`, fills
+  362/390px.
+- `display_name` — chat-only name override (e.g. "BlissBot") that never touches
+  the voice agent's real name/persona/greeting; applied to header, hero, input
+  placeholder.
+- `bubble_size:"xs"` — new 12px step in the size scale + dashboard selector.
+- `bot_bubble_color` — custom model-response bubble background.
+Logo provision is the existing `avatar_url` (header logo image). Verified live
+on a seeded config (computed styles: accent `#e45dbf`, accent-2 `#e5a3ff`,
+`--chat-size` 12px, gradient user bubble, full-width model bubble). Evidence:
+**Behavioral** (code) — production Moments agent still needs the config values
+applied (it lives outside the dev DB). Rendering paths all confirmed.
 
 **Build 340 (embed close "×" now visible on the light header):** the overlay
 button was styled white (`color:#fff` on `rgba(255,255,255,0.10)`) for the dark

@@ -1472,7 +1472,22 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   background: var(--chat-accent, #4f46e5); color: #fff; border-bottom-right-radius: 4px;
 }
 .chatembed-msg-model .chatembed-bubble {
-  background: var(--bg-1, #f1f2f7); color: var(--fg, #1a1c25); border-bottom-left-radius: 4px;
+  background: var(--chat-bot-bubble, var(--bg-1, #f1f2f7));
+  color: var(--chat-bot-bubble-text, var(--fg, #1a1c25)); border-bottom-left-radius: 4px;
+}
+/* Two-tone brand (accent → accent-2) — gradient avatar + user bubble so a
+   two-colour brand like Moments renders its real palette (build 341). */
+.chatembed-grad .chatembed-avatar:not(.chatembed-avatar-img) {
+  background: linear-gradient(135deg, var(--chat-accent, #7c6cf6), var(--chat-accent-2, #c084fc));
+}
+.chatembed-grad .chatembed-msg-user .chatembed-bubble {
+  background: linear-gradient(135deg, var(--chat-accent, #4f46e5), var(--chat-accent-2, #4f46e5));
+}
+/* Full-width responses — model bubbles fill the log width so long answers
+   need far less vertical scroll (build 341). User bubbles stay right-aligned. */
+.chatembed-fullwidth .chatembed-msg-model { width: 100%; }
+.chatembed-fullwidth .chatembed-msg-model .chatembed-bubble {
+  max-width: 100%; width: 100%; box-sizing: border-box;
 }
 /* "Agent is typing…" three-dot indicator (Build 292). */
 .chatembed-typing { display: inline-flex; align-items: center; gap: 4px; padding: 11px 14px; }
@@ -1609,7 +1624,9 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 }
 .chatembed .embed-brand { position: static; transform: none; padding: 6px 0 8px; text-align: center; }
 .chatembed-privacy { font-size: 10.5px; color: var(--fg-dim, #9aa0ad); text-align: center; padding: 4px 14px 0; line-height: 1.4; }
-:root[data-theme="dark"] .chatembed-msg-model .chatembed-bubble { background: #1b1f33; color: #e6e8f2; }
+:root[data-theme="dark"] .chatembed-msg-model .chatembed-bubble {
+  background: var(--chat-bot-bubble, #1b1f33); color: var(--chat-bot-bubble-text, #e6e8f2);
+}
 :root[data-theme="dark"] .chatembed-field { background: #14172a; border-color: #2a2e44; color: #e6e8f2; }
 :root[data-theme="dark"] .chatembed-head { border-color: #2a2e44; }
 :root[data-theme="dark"] .chatembed-input { border-color: #2a2e44; }

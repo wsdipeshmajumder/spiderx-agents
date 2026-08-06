@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 340;
+const SXAI_BUILD = 341;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1977,10 +1977,27 @@ function AgentChatEmbed({ slug, contained, override }) {
   // radius/size: URL param (snippet override) wins; else the saved chat_settings value.
   const _radius = parseInt(_p.get("radius") != null ? _p.get("radius") : (cs.bubble_radius != null ? String(cs.bubble_radius) : ""), 10);
   const _size = (_p.get("size") || cs.bubble_size || "").toLowerCase();
-  const _sizePx = _size === "sm" ? "13px" : _size === "lg" ? "16.5px" : null;   // md = default, unset
+  const _sizePx = _size === "xs" ? "12px" : _size === "sm" ? "13px" : _size === "lg" ? "16.5px" : null;   // md = default, unset
   const avatarUrl = (cs.avatar_url || "").trim();
+  // Second brand colour → a gradient (avatar + launcher + user bubble). Lets a
+  // two-tone brand like Moments (#e5a3ff → #e45dbf) render its real palette
+  // instead of a flat accent. Snippet ?accent2= overrides the saved value.
+  const _rawAccent2 = (_p.get("accent2") || "").trim();
+  const accent2Param = /^#?[0-9a-fA-F]{3,8}$/.test(_rawAccent2) ? (_rawAccent2[0] === "#" ? _rawAccent2 : "#" + _rawAccent2) : null;
+  const accent2 = accent2Param || (/^#[0-9a-fA-F]{3,8}$/.test(cs.accent_color_2 || "") ? cs.accent_color_2 : null);
+  // Optional custom model-response bubble colour (background + text).
+  const botBubble = /^#[0-9a-fA-F]{3,8}$/.test(cs.bot_bubble_color || "") ? cs.bot_bubble_color : null;
+  const botBubbleText = /^#[0-9a-fA-F]{3,8}$/.test(cs.bot_bubble_text || "") ? cs.bot_bubble_text : null;
+  // Full-width responses — model bubbles span the log to cut scroll length.
+  const fullWidth = !!cs.full_width_responses;
+  // Chat-only display name (e.g. "BlissBot") that never touches the voice agent's
+  // real `name` (persona, greeting, phone). Falls back to the agent name.
+  const displayName = (cs.display_name || "").trim() || agent.name;
   const rootStyle = {};
   if (accent) rootStyle["--chat-accent"] = accent;
+  if (accent2) rootStyle["--chat-accent-2"] = accent2;
+  if (botBubble) rootStyle["--chat-bot-bubble"] = botBubble;
+  if (botBubbleText) rootStyle["--chat-bot-bubble-text"] = botBubbleText;
   if (!isNaN(_radius) && _radius >= 0 && _radius <= 40) rootStyle["--chat-radius"] = _radius + "px";
   if (_sizePx) rootStyle["--chat-size"] = _sizePx;
 
@@ -2015,13 +2032,13 @@ function AgentChatEmbed({ slug, contained, override }) {
     && !hasUserMsg && !humanAgent && !csat && !activeForm && !quickReplies.length;
 
   return html`
-    <div class=${"chatembed" + (contained ? " chatembed-contained" : "")} style=${rootStyle}>
+    <div class=${"chatembed" + (contained ? " chatembed-contained" : "") + (fullWidth ? " chatembed-fullwidth" : "") + (accent2 ? " chatembed-grad" : "")} style=${rootStyle}>
       <header class="chatembed-head">
         ${avatarUrl
-          ? html`<img class="chatembed-avatar chatembed-avatar-img" src=${avatarUrl} alt=${agent.name} />`
-          : html`<div class="chatembed-avatar" aria-hidden="true">${(agent.name || "?").trim()[0]}</div>`}
+          ? html`<img class="chatembed-avatar chatembed-avatar-img" src=${avatarUrl} alt=${displayName} />`
+          : html`<div class="chatembed-avatar" aria-hidden="true">${(displayName || "?").trim()[0]}</div>`}
         <div class="chatembed-head-meta">
-          <div class="chatembed-name">${agent.name}</div>
+          <div class="chatembed-name">${displayName}</div>
           <div class=${"chatembed-status chatembed-status-" + status}>${statusLabel}</div>
         </div>
         <div class="chatembed-head-actions">
@@ -2053,12 +2070,12 @@ function AgentChatEmbed({ slug, contained, override }) {
             <div class="chatembed-bubble chatembed-typing"><span></span><span></span><span></span></div>
           </div>` : ""}
         ${status === "connecting" && messages.length === 0
-          ? html`<div class="chatembed-empty">Starting your chat with ${agent.name}…</div>` : ""}
+          ? html`<div class="chatembed-empty">Starting your chat with ${displayName}…</div>` : ""}
         ${status === "error" && messages.length === 0
           ? html`<div class="chatembed-empty">${err || "Chat is unavailable right now."}</div>` : ""}
         ${showHome ? html`
           <div class="chatembed-home">
-            <div class="chatembed-home-title">${_welcomeText || `Ask me anything about ${agent.name}`}</div>
+            <div class="chatembed-home-title">${_welcomeText || `Ask me anything about ${displayName}`}</div>
             ${starters.length ? html`
               <div class="chatembed-home-grid">
                 ${starters.map((q, i) => html`
@@ -2154,7 +2171,7 @@ function AgentChatEmbed({ slug, contained, override }) {
       ` : ""}
       <form class="chatembed-input" onSubmit=${send}>
         <input class="chatembed-field" type="text" autocomplete="off"
-               placeholder=${status === "ended" ? "Chat ended" : (listening ? "Listening…" : `Message ${agent.name}…`)}
+               placeholder=${status === "ended" ? "Chat ended" : (listening ? "Listening…" : `Message ${displayName}…`)}
                value=${input} onInput=${(e) => setInput(e.target.value)}
                disabled=${status !== "ready"} />
         ${voiceSupported ? html`
@@ -11779,11 +11796,15 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   const _cs0 = agent.chat_settings || {};
   const [chatCfg, setChatCfg] = useState({
     accent_color: _cs0.accent_color || "",
+    accent_color_2: _cs0.accent_color_2 || "",   // 2nd brand colour → gradient (blank = flat accent)
+    bot_bubble_color: _cs0.bot_bubble_color || "",   // custom model-response bubble bg (blank = default)
+    display_name: _cs0.display_name || "",       // chat-only name override (e.g. "BlissBot")
+    full_width_responses: !!_cs0.full_width_responses,   // model bubbles fill the width
     avatar_url: _cs0.avatar_url || "",
     launcher_icon: _cs0.launcher_icon || "",   // custom FAB/launcher bubble icon (image URL)
     mode: _cs0.mode || "popover",              // popover | fullscreen | drawer (bottom sheet)
     bubble_radius: _cs0.bubble_radius != null ? _cs0.bubble_radius : "",
-    bubble_size: _cs0.bubble_size || "md",     // sm | md | lg — response text scale
+    bubble_size: _cs0.bubble_size || "md",     // xs | sm | md | lg — response text scale
     launcher_text: _cs0.launcher_text || "",
     welcome_message: _cs0.welcome_message || "",
     instructions: _cs0.instructions || "",
@@ -11962,11 +11983,38 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
             <label class="db-form-field">
               <span class="db-form-label">Response text size</span>
               <div class="db-embed-seg">
-                ${["sm", "md", "lg"].map((s) => html`
+                ${["xs", "sm", "md", "lg"].map((s) => html`
                   <button type="button" key=${s}
                           class=${"db-embed-seg-btn" + ((chatCfg.bubble_size || "md") === s ? " active" : "")}
-                          onClick=${() => setChatField("bubble_size", s)}>${s === "sm" ? "Small" : s === "lg" ? "Large" : "Medium"}</button>`)}
+                          onClick=${() => setChatField("bubble_size", s)}>${s === "xs" ? "XS" : s === "sm" ? "Small" : s === "lg" ? "Large" : "Medium"}</button>`)}
               </div>
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Second brand colour <span class="db-form-opt">(gradient — blank for flat)</span></span>
+              <div class="chatcfg-color">
+                <input type="color" value=${chatCfg.accent_color_2 || "#e5a3ff"} onInput=${(e) => setChatField("accent_color_2", e.target.value)} />
+                <input class="db-input" type="text" placeholder="blank = flat accent" value=${chatCfg.accent_color_2}
+                       onInput=${(e) => setChatField("accent_color_2", e.target.value)} />
+              </div>
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Response bubble colour <span class="db-form-opt">(optional)</span></span>
+              <div class="chatcfg-color">
+                <input type="color" value=${chatCfg.bot_bubble_color || "#f1f2f7"} onInput=${(e) => setChatField("bot_bubble_color", e.target.value)} />
+                <input class="db-input" type="text" placeholder="blank = default grey" value=${chatCfg.bot_bubble_color}
+                       onInput=${(e) => setChatField("bot_bubble_color", e.target.value)} />
+              </div>
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Chat display name <span class="db-form-opt">(overrides the agent name in chat only)</span></span>
+              <input class="db-input" type="text" placeholder=${agent.name} value=${chatCfg.display_name}
+                     onInput=${(e) => setChatField("display_name", e.target.value)} />
+            </label>
+            <label class="db-form-field db-form-span-2 chatcfg-check">
+              <input type="checkbox" checked=${!!chatCfg.full_width_responses}
+                     onChange=${(e) => setChatField("full_width_responses", e.target.checked)} />
+              <span><b>Full-width responses</b><br/>
+                <span class="db-form-help" style=${{ margin: 0 }}>Model replies fill the panel width so long answers need far less scrolling.</span></span>
             </label>
             <label class="db-form-field">
               <span class="db-form-label">Logo / avatar URL</span>
@@ -12097,6 +12145,11 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
                 starters: (chatCfg.starters || "").split("\n").map((s) => s.trim()).filter(Boolean).slice(0, 4),
                 welcome_message: chatCfg.welcome_message,
                 accent_color: chatCfg.accent_color,
+                accent_color_2: chatCfg.accent_color_2,
+                bot_bubble_color: chatCfg.bot_bubble_color,
+                display_name: chatCfg.display_name,
+                full_width_responses: chatCfg.full_width_responses,
+                avatar_url: chatCfg.avatar_url,
                 bubble_radius: chatCfg.bubble_radius === "" ? null : Number(chatCfg.bubble_radius),
                 bubble_size: chatCfg.bubble_size,
                 hide_human_handoff: chatCfg.hide_human_handoff,

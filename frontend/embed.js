@@ -55,7 +55,8 @@
   // remote chat_settings value is used instead. A present attribute always wins.
   function _attr(n) { return scriptEl.hasAttribute(n) ? (scriptEl.getAttribute(n) || "").trim() : null; }
   var oPosition = _attr("data-position"), oLabel = _attr("data-label"), oMode = _attr("data-mode"),
-      oColor = _attr("data-color"), oAccent = _attr("data-accent"), oRadius = _attr("data-radius"),
+      oColor = _attr("data-color"), oAccent = _attr("data-accent"), oAccent2 = _attr("data-accent-2"),
+      oRadius = _attr("data-radius"),
       oSize = _attr("data-size"), oIcon = _attr("data-icon"), oTeaser = _attr("data-teaser"),
       oTeaserDelay = _attr("data-teaser-delay");
 
@@ -79,6 +80,11 @@
     var mode       = oMode || cs.mode || "popover";
     var color      = oColor || "";
     var accent     = oAccent || (cs.accent_color || "").trim();
+    var accent2    = oAccent2 || (cs.accent_color_2 || "").trim();
+    // A two-tone brand → gradient FAB; single accent → solid; else default.
+    var fabBg = color
+      || (accent && accent2 ? "linear-gradient(135deg," + accent + " 0%," + accent2 + " 100%)"
+          : (accent ? accent : "linear-gradient(135deg,#a855f7 0%,#ec4899 100%)"));
     var radius     = oRadius || (cs.bubble_radius != null ? String(cs.bubble_radius) : "");
     var size       = oSize || (cs.bubble_size || "").trim();
     var iconUrl    = oIcon || (cs.launcher_icon || cs.avatar_url || "").trim();
@@ -93,7 +99,7 @@
     ".sxai-root[data-pos='bottom-right']{right:18px;bottom:18px;}",
     ".sxai-root[data-pos='bottom-left']{left:18px;bottom:18px;}",
     // Floating action button
-    ".sxai-fab{width:60px;height:60px;border:0;border-radius:50%;background:" + (color || "linear-gradient(135deg,#a855f7 0%,#ec4899 100%)") + ";box-shadow:0 8px 24px rgba(99,102,241,0.35),0 2px 6px rgba(0,0,0,0.18);cursor:pointer;display:flex;align-items:center;justify-content:center;color:#fff;transition:transform .15s ease,box-shadow .15s ease;}",
+    ".sxai-fab{width:60px;height:60px;border:0;border-radius:50%;background:" + fabBg + ";box-shadow:0 8px 24px rgba(99,102,241,0.35),0 2px 6px rgba(0,0,0,0.18);cursor:pointer;display:flex;align-items:center;justify-content:center;color:#fff;transition:transform .15s ease,box-shadow .15s ease;}",
     ".sxai-fab:hover{transform:translateY(-2px) scale(1.04);box-shadow:0 12px 32px rgba(99,102,241,0.42),0 4px 10px rgba(0,0,0,0.22);}",
     ".sxai-fab:active{transform:scale(.96);}",
     ".sxai-fab svg{width:26px;height:26px;}",
@@ -170,6 +176,7 @@
   var q = [];
   if (channel === "chat") q.push("channel=chat");
   if (accent) q.push("accent=" + encodeURIComponent(accent));
+  if (accent2) q.push("accent2=" + encodeURIComponent(accent2));
   if (radius) q.push("radius=" + encodeURIComponent(radius));
   if (size)   q.push("size=" + encodeURIComponent(size));
   try { if (location.hostname) q.push("host=" + encodeURIComponent(location.hostname)); } catch (e) {}
