@@ -119,7 +119,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 353
+APP_BUILD = 355
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1716,18 +1716,22 @@ async def agent_live_chats(agent_id: int, request: Request) -> dict:
 @app.get("/api/agents/{agent_id}/chat/export.xlsx")
 async def agent_chat_export(agent_id: int, request: Request,
                             date_from: Optional[str] = None,
-                            date_to: Optional[str] = None) -> Response:
+                            date_to: Optional[str] = None,
+                            transcript: Optional[str] = None) -> Response:
     """Download a client-ready XLSX performance report for the Chat channel
-    (Conversations tab → Export). Honours the same date window as the list."""
+    (Conversations tab → Export). Honours the same date window as the list.
+    `transcript=1` adds the full "Chat log" sheet (opt-in — heavier)."""
     agent = await _require_agent_owned(agent_id, await current_user(request))
     df, dt = _parse_day(date_from), _parse_day(date_to, end=True)
+    want_tx = (transcript or "").strip().lower() in ("1", "true", "yes", "on")
     calls = await db.list_calls_for_agent(
         agent_id, limit=5000, channel="web_chat", date_from=df, date_to=dt,
-        include_transcript=True,
+        include_transcript=want_tx,
     )
     from . import chat_report
     data = chat_report.build_chat_report_xlsx(
         agent, calls, date_from=df, date_to=(dt - timedelta(days=1)) if dt else None,
+        include_transcript=want_tx,
     )
     slug = (agent.get("slug") or str(agent_id)).replace("/", "-")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d")

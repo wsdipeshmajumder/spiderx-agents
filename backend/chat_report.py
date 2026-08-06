@@ -125,8 +125,10 @@ def build_chat_report_xlsx(
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
     generated_at: Optional[datetime] = None,
+    include_transcript: bool = False,
 ) -> bytes:
-    """Render the two-sheet report and return the .xlsx bytes."""
+    """Render the report and return the .xlsx bytes. With `include_transcript`,
+    appends a third "Chat log" sheet holding every message of every chat."""
     generated_at = generated_at or datetime.now(timezone.utc)
     accent = _accent(agent)
     business = _business(agent)
@@ -341,9 +343,13 @@ def build_chat_report_xlsx(
     if not calls:
         ws2.cell(row=2, column=1, value="No conversations in this period.").font = Font(italic=True, color="6B7080")
 
-    # ══ Sheet 3 · Full chat log ═══════════════════════════════════════════════
+    # ══ Sheet 3 · Full chat log (opt-in) ═════════════════════════════════════
     # Every message of every conversation, grouped chat-by-chat with a tinted
     # header row (date · outcome · captured info) so it reads as a transcript.
+    if not include_transcript:
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
     ws3 = wb.create_sheet("Chat log")
     ws3.sheet_view.showGridLines = False
     ws3.column_dimensions["A"].width = 16

@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 353;
+const SXAI_BUILD = 355;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1926,13 +1926,18 @@ function AgentChatEmbed({ slug, contained, override }) {
   };
 
   // When a chat ends, return to the fresh "home" (starter questions) instead of
-  // leaving the visitor on a dead "chat ended" screen — but only once any
-  // post-chat rating prompt has been answered (or there is none). A short delay
-  // lets the agent's goodbye / "thanks for the feedback" linger first. Build 351.
+  // leaving the visitor on a dead "chat ended" screen. A short delay lets the
+  // agent's goodbye / "thanks for the feedback" linger first. If the post-chat
+  // rating prompt is still open we give the visitor time to answer, but fall
+  // back to home after a while so an un-rated ended chat never gets stuck
+  // (build 354). Builds on 351.
   useEffect(() => {
     if (status !== "ended") return;
-    if (csat === "asking" || csat === "up" || csat === "down") return;  // wait for the rating to resolve
-    const t = setTimeout(newChat, csat === "done" ? 2200 : 1400);
+    const ratingPending = csat === "asking" || csat === "up" || csat === "down";
+    const delay = ratingPending ? 15000     // rating showing → wait, but don't trap
+                : csat === "done" ? 2200     // just thanked → brief pause
+                : 1400;                       // no rating → straight home
+    const t = setTimeout(newChat, delay);
     return () => clearTimeout(t);
   }, [status, csat]);
 
@@ -11910,10 +11915,13 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
     return () => clearTimeout(t);
   }, [dateFrom, dateTo]);
   // Export the current (filtered) window as the client-ready XLSX report.
+  // `includeTx` adds the full "Chat log" transcript sheet (opt-in — heavier).
+  const [includeTx, setIncludeTx] = useState(false);
   const exportChatReport = () => {
     const p = new URLSearchParams();
     if (dateFrom) p.set("date_from", dateFrom);
     if (dateTo) p.set("date_to", dateTo);
+    if (includeTx) p.set("transcript", "1");
     const qs = p.toString();
     window.open(`/api/agents/${agent.id}/chat/export.xlsx${qs ? "?" + qs : ""}`, "_blank");
   };
@@ -12349,6 +12357,11 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
                  onInput=${(e) => setDateTo(e.target.value)} /></label>
         ${(dateFrom || dateTo) ? html`<button class="db-btn-ghost db-btn-sm" onClick=${() => { setDateFrom(""); setDateTo(""); }}>Clear</button>` : ""}
         <span class="chatconv-toolbar-spacer"></span>
+        <label style=${{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 600, color: "var(--fg-mute, #6b7080)", cursor: "pointer", whiteSpace: "nowrap" }}
+               title="Adds a full transcript sheet of every conversation — heavier file">
+          <input type="checkbox" checked=${includeTx} onChange=${(e) => setIncludeTx(e.target.checked)} />
+          Include full transcripts
+        </label>
         <button class="db-btn-primary db-btn-sm" onClick=${exportChatReport} disabled=${!chatLogs || chatLogs.length === 0}
                 title="Download a client-ready XLSX performance report for the selected dates">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>

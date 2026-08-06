@@ -5,7 +5,17 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 353**
+**Last updated: build 355**
+
+**Build 355 ("Include full transcripts" export checkbox):** the Chat log
+transcript sheet (build 353) is now opt-in. A checkbox in the Conversations
+export toolbar adds `transcript=1` to the export URL; the endpoint only pulls
+the heavy `transcript` column (`include_transcript`) and only appends the
+"Chat log" sheet when set — so the default export stays light (Summary +
+Conversations). Verified over HTTP: no param → 2 sheets, `transcript=1` → 3
+sheets; and in the dashboard the checkbox toggles the URL param. (Build 354 was
+taken by a concurrent session's mobile close-button fix; this lands as 355 to
+avoid a number collision.) Evidence: **Behavioral**.
 
 **Build 353 (legible links on branded response bubbles + chat returns to home on end):**
 two embed polish items:
