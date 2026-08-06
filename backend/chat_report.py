@@ -133,9 +133,16 @@ def build_chat_report_xlsx(
     leads = 0
     durations = []
     outcomes: Counter = Counter()
+    devices: Counter = Counter()
+    sources: Counter = Counter()
     period_min = period_max = None
     for c in calls:
         ex = c.get("extracted") if isinstance(c.get("extracted"), dict) else {}
+        pv = _prov(ex)
+        if pv.get("device"):
+            devices[pv["device"]] += 1
+        if pv.get("source"):
+            sources[pv["source"]] += 1
         if ex.get("handoff_requested") or c.get("outcome") == "transferred_human":
             handoffs += 1
         if ex.get("csat") == "up":
@@ -225,32 +232,44 @@ def build_chat_report_xlsx(
         for rr in (gr, gr + 1):
             ws[f"{gc}{rr}"].border = border
 
-    # Outcome breakdown table
-    tbl_row = start_row + 8
-    ws[f"B{tbl_row}"] = "Outcome breakdown"
-    ws[f"B{tbl_row}"].font = Font(name="Calibri", bold=True, size=12, color="1A1C25")
-    hdr = tbl_row + 1
-    for col, name in zip(("B", "C", "D"), ("Outcome", "Count", "Share")):
-        cell = ws[f"{col}{hdr}"]
-        cell.value = name
-        cell.font = white
-        cell.fill = accent_fill
-        cell.alignment = left_mid if col == "B" else center
-        cell.border = border
-    ri = hdr + 1
-    for outcome, n in outcomes.most_common():
-        ws[f"B{ri}"] = str(outcome).replace("_", " ")
-        ws[f"C{ri}"] = n
-        ws[f"D{ri}"] = (n / total) if total else 0
-        ws[f"D{ri}"].number_format = "0%"
-        ws[f"B{ri}"].alignment = left_mid
-        ws[f"C{ri}"].alignment = center
-        ws[f"D{ri}"].alignment = center
-        for col in ("B", "C", "D"):
-            ws[f"{col}{ri}"].border = border
-            if (ri - hdr) % 2 == 0:
-                ws[f"{col}{ri}"].fill = zebra
-        ri += 1
+    # Breakdown tables (outcome, then visitor device + top sources for
+    # analytics). Each: bold title, accent header row, zebra-striped data.
+    def _table(row: int, title: str, first_col: str, pairs: list) -> int:
+        ws[f"B{row}"] = title
+        ws[f"B{row}"].font = Font(name="Calibri", bold=True, size=12, color="1A1C25")
+        h = row + 1
+        for col, name in zip(("B", "C", "D"), (first_col, "Count", "Share")):
+            cell = ws[f"{col}{h}"]
+            cell.value = name
+            cell.font = white
+            cell.fill = accent_fill
+            cell.alignment = left_mid if col == "B" else center
+            cell.border = border
+        r = h + 1
+        if not pairs:
+            ws[f"B{r}"] = "No data in this period."
+            ws[f"B{r}"].font = small
+            for col in ("B", "C", "D"):
+                ws[f"{col}{r}"].border = border
+            return r + 2
+        for label, n in pairs:
+            ws[f"B{r}"] = str(label).replace("_", " ")
+            ws[f"C{r}"] = n
+            ws[f"D{r}"] = (n / total) if total else 0
+            ws[f"D{r}"].number_format = "0%"
+            ws[f"B{r}"].alignment = left_mid
+            ws[f"C{r}"].alignment = center
+            ws[f"D{r}"].alignment = center
+            for col in ("B", "C", "D"):
+                ws[f"{col}{r}"].border = border
+                if (r - h) % 2 == 0:
+                    ws[f"{col}{r}"].fill = zebra
+            r += 1
+        return r + 1   # blank spacer row after the table
+
+    ri = _table(start_row + 8, "Outcome breakdown", "Outcome", outcomes.most_common())
+    ri = _table(ri, "Visitor device", "Device", devices.most_common())
+    ri = _table(ri, "Top sources", "Source", sources.most_common(8))
 
     note = ws.cell(row=ri + 1, column=2)
     note.value = ("“Resolved by AI” = conversations handled end-to-end without a human handoff.  "

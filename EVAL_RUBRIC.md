@@ -5,7 +5,15 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 351**
+**Last updated: build 352**
+
+**Build 352 (provenance analytics on the report Summary):** the XLSX Summary
+sheet now carries two more breakdown tables below Outcome breakdown — **Visitor
+device** (Mobile/Desktop/Tablet split) and **Top sources** (source domain,
+top 8) — each with count + share, built from `extracted._provenance`. Refactored
+the three tables through one `_table()` helper. Verified: device split
+Mobile 57% / Desktop 29% / Tablet 14%, sources led by moments-shop.com 57%.
+Evidence: **Behavioral** (openpyxl round-trip).
 
 **Build 351 (visitor provenance labels + Conversations UX polish):** three
 changes to the Chat → Conversations tab:
