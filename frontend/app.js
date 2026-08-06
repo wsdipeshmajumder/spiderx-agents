@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 345;
+const SXAI_BUILD = 346;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -11830,10 +11830,6 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   const [chatCfgSaving, setChatCfgSaving] = useState(false);
   const [chatCfgSaved, setChatCfgSaved] = useState(false);
   const setChatField = (k, v) => { setChatCfg((c) => ({ ...c, [k]: v })); setChatCfgSaved(false); };
-  // Chat-settings accordion — group the many fields into collapsible sections so
-  // the form isn't an overwhelming wall of inputs (build 345). Brand opens first.
-  const [openSect, setOpenSect] = useState({ brand: true });
-  const toggleSect = (id) => setOpenSect((s) => ({ ...s, [id]: !s[id] }));
   const saveChatCfg = async () => {
     setChatCfgSaving(true);
     try {
@@ -11966,227 +11962,195 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
         <div class="chatcfg-layout">
         <div class="chatcfg-main">
         <div class="chatcfg">
-          ${(() => {
-            // One collapsible section. `id` keys the open/closed state; `sub` is
-            // the muted one-liner shown under the title when collapsed.
-            const Section = (id, title, sub, body) => html`
-              <div class=${"chatcfg-acc" + (openSect[id] ? " open" : "")}>
-                <button type="button" class="chatcfg-acc-head" aria-expanded=${!!openSect[id]}
-                        onClick=${() => toggleSect(id)}>
-                  <span class="chatcfg-acc-titles">
-                    <span class="chatcfg-acc-title">${title}</span>
-                    <span class="chatcfg-acc-sub">${sub}</span>
-                  </span>
-                  <svg class="chatcfg-acc-chev" viewBox="0 0 24 24" width="18" height="18" fill="none"
-                       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
-                </button>
-                <div class="chatcfg-acc-body">${body}</div>
-              </div>`;
-            return html`
-            ${Section("brand", "🎨 Brand & colours", "Accent, gradient, bubble & starter-card colours, logo", html`
-              <div class="chatcfg-grid">
-                <label class="db-form-field">
-                  <span class="db-form-label">Accent colour</span>
-                  <div class="chatcfg-color">
-                    <input type="color" value=${chatCfg.accent_color || "#4f46e5"} onInput=${(e) => setChatField("accent_color", e.target.value)} />
-                    <input class="db-input" type="text" placeholder="#4f46e5" value=${chatCfg.accent_color}
-                           onInput=${(e) => setChatField("accent_color", e.target.value)} />
-                  </div>
-                </label>
-                <label class="db-form-field">
-                  <span class="db-form-label">Second brand colour <span class="db-form-opt">(gradient — blank for flat)</span></span>
-                  <div class="chatcfg-color">
-                    <input type="color" value=${chatCfg.accent_color_2 || "#e5a3ff"} onInput=${(e) => setChatField("accent_color_2", e.target.value)} />
-                    <input class="db-input" type="text" placeholder="blank = flat accent" value=${chatCfg.accent_color_2}
-                           onInput=${(e) => setChatField("accent_color_2", e.target.value)} />
-                  </div>
-                </label>
-                <label class="db-form-field">
-                  <span class="db-form-label">Response bubble colour <span class="db-form-opt">(optional)</span></span>
-                  <div class="chatcfg-color">
-                    <input type="color" value=${chatCfg.bot_bubble_color || "#f1f2f7"} onInput=${(e) => setChatField("bot_bubble_color", e.target.value)} />
-                    <input class="db-input" type="text" placeholder="blank = default grey" value=${chatCfg.bot_bubble_color}
-                           onInput=${(e) => setChatField("bot_bubble_color", e.target.value)} />
-                  </div>
-                </label>
-                <label class="db-form-field">
-                  <span class="db-form-label">Starter card colour <span class="db-form-opt">(optional)</span></span>
-                  <div class="chatcfg-color">
-                    <input type="color" value=${chatCfg.card_bg_color || "#f1f2f7"} onInput=${(e) => setChatField("card_bg_color", e.target.value)} />
-                    <input class="db-input" type="text" placeholder="blank = default grey" value=${chatCfg.card_bg_color}
-                           onInput=${(e) => setChatField("card_bg_color", e.target.value)} />
-                  </div>
-                </label>
-                <label class="db-form-field">
-                  <span class="db-form-label">Starter card text colour <span class="db-form-opt">(optional)</span></span>
-                  <div class="chatcfg-color">
-                    <input type="color" value=${chatCfg.card_text_color || "#1a1c25"} onInput=${(e) => setChatField("card_text_color", e.target.value)} />
-                    <input class="db-input" type="text" placeholder="blank = default" value=${chatCfg.card_text_color}
-                           onInput=${(e) => setChatField("card_text_color", e.target.value)} />
-                  </div>
-                </label>
-                <label class="db-form-field">
-                  <span class="db-form-label">Logo / avatar URL</span>
-                  <input class="db-input" type="url" placeholder="https://…/logo.png" value=${chatCfg.avatar_url}
-                         onInput=${(e) => setChatField("avatar_url", e.target.value)} />
-                </label>
-              </div>`)}
-
-            ${Section("layout", "📐 Layout & text", "How the widget opens, corner roundness, text size", html`
-              <div class="chatcfg-grid">
-                <label class="db-form-field">
-                  <span class="db-form-label">Open as</span>
-                  <select class="db-input" value=${chatCfg.mode}
-                          onChange=${(e) => setChatField("mode", e.target.value)}>
-                    <option value="popover">Popover — corner bubble</option>
-                    <option value="drawer">Bottom drawer — slides up</option>
-                    <option value="fullscreen">Fullscreen</option>
-                  </select>
-                </label>
-                <label class="db-form-field">
-                  <span class="db-form-label">Response box roundness</span>
-                  <div style=${{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <input type="range" min="0" max="28" style=${{ flex: 1 }}
-                           value=${chatCfg.bubble_radius === "" ? 14 : chatCfg.bubble_radius}
-                           onInput=${(e) => setChatField("bubble_radius", Number(e.target.value))} />
-                    <span class="db-form-help" style=${{ margin: 0, width: "42px", textAlign: "right" }}>${chatCfg.bubble_radius === "" ? 14 : chatCfg.bubble_radius}px</span>
-                  </div>
-                </label>
-                <label class="db-form-field">
-                  <span class="db-form-label">Response text size</span>
-                  <div class="db-embed-seg">
-                    ${["xs", "sm", "md", "lg"].map((s) => html`
-                      <button type="button" key=${s}
-                              class=${"db-embed-seg-btn" + ((chatCfg.bubble_size || "md") === s ? " active" : "")}
-                              onClick=${() => setChatField("bubble_size", s)}>${s === "xs" ? "XS" : s === "sm" ? "Small" : s === "lg" ? "Large" : "Medium"}</button>`)}
-                  </div>
-                </label>
-                <label class="db-form-field db-form-span-2 chatcfg-check">
-                  <input type="checkbox" checked=${!!chatCfg.full_width_responses}
-                         onChange=${(e) => setChatField("full_width_responses", e.target.checked)} />
-                  <span><b>Full-width responses</b><br/>
-                    <span class="db-form-help" style=${{ margin: 0 }}>Model replies fill the panel width so long answers need far less scrolling.</span></span>
-                </label>
-              </div>`)}
-
-            ${Section("identity", "🏷️ Name, launcher & welcome", "Display name, launcher icon/text, welcome message", html`
-              <div class="chatcfg-grid">
-                <label class="db-form-field">
-                  <span class="db-form-label">Chat display name <span class="db-form-opt">(overrides the agent name in chat only)</span></span>
-                  <input class="db-input" type="text" placeholder=${agent.name} value=${chatCfg.display_name}
-                         onInput=${(e) => setChatField("display_name", e.target.value)} />
-                </label>
-                <label class="db-form-field">
-                  <span class="db-form-label">Launcher icon URL <span class="db-form-opt">(optional)</span></span>
-                  <input class="db-input" type="url" placeholder="https://…/icon.png — defaults to the logo, then a chat icon" value=${chatCfg.launcher_icon}
-                         onInput=${(e) => setChatField("launcher_icon", e.target.value)} />
-                  <span class="db-form-help">The icon shown on the floating chat bubble. Falls back to the logo above, then a default chat icon.</span>
-                </label>
-                <label class="db-form-field">
-                  <span class="db-form-label">Launcher text</span>
-                  <input class="db-input" type="text" placeholder=${`Chat with ${agent.name}`} value=${chatCfg.launcher_text}
-                         onInput=${(e) => setChatField("launcher_text", e.target.value)} />
-                </label>
-                <label class="db-form-field">
-                  <span class="db-form-label">Welcome message <span class="db-form-opt">(optional)</span></span>
-                  <input class="db-input" type="text" placeholder="Hi! How can I help today?" value=${chatCfg.welcome_message}
-                         onInput=${(e) => setChatField("welcome_message", e.target.value)} />
-                </label>
-              </div>`)}
-
-            ${Section("convo", "💬 Conversation & behaviour", "Instructions, starter questions, language, human handoff", html`
-              <div class="chatcfg-acc-toolbar">
-                <span class="db-form-label" style=${{ margin: 0 }}>Chat-only instructions — tone/rules layered on the shared brief</span>
-                <button type="button" class="db-btn-ghost db-btn-sm" onClick=${suggestInstructions} disabled=${suggesting}>
-                  ${suggesting ? "✨ Drafting…" : (chatCfg.instructions || "").trim() ? "✨ Regenerate" : "✨ Suggest"}
-                </button>
-                <button type="button" class="db-btn-ghost db-btn-sm" onClick=${() => setInstrFull(true)}>⤢ Expand</button>
+          <div class="chatcfg-head">Appearance</div>
+          <div class="chatcfg-grid">
+            <label class="db-form-field">
+              <span class="db-form-label">Accent colour</span>
+              <div class="chatcfg-color">
+                <input type="color" value=${chatCfg.accent_color || "#4f46e5"} onInput=${(e) => setChatField("accent_color", e.target.value)} />
+                <input class="db-input" type="text" placeholder="#4f46e5" value=${chatCfg.accent_color}
+                       onInput=${(e) => setChatField("accent_color", e.target.value)} />
               </div>
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Open as</span>
+              <select class="db-input" value=${chatCfg.mode}
+                      onChange=${(e) => setChatField("mode", e.target.value)}>
+                <option value="popover">Popover — corner bubble</option>
+                <option value="drawer">Bottom drawer — slides up</option>
+                <option value="fullscreen">Fullscreen</option>
+              </select>
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Response box roundness</span>
+              <div style=${{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <input type="range" min="0" max="28" style=${{ flex: 1 }}
+                       value=${chatCfg.bubble_radius === "" ? 14 : chatCfg.bubble_radius}
+                       onInput=${(e) => setChatField("bubble_radius", Number(e.target.value))} />
+                <span class="db-form-help" style=${{ margin: 0, width: "42px", textAlign: "right" }}>${chatCfg.bubble_radius === "" ? 14 : chatCfg.bubble_radius}px</span>
+              </div>
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Response text size</span>
+              <div class="db-embed-seg">
+                ${["xs", "sm", "md", "lg"].map((s) => html`
+                  <button type="button" key=${s}
+                          class=${"db-embed-seg-btn" + ((chatCfg.bubble_size || "md") === s ? " active" : "")}
+                          onClick=${() => setChatField("bubble_size", s)}>${s === "xs" ? "XS" : s === "sm" ? "Small" : s === "lg" ? "Large" : "Medium"}</button>`)}
+              </div>
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Second brand colour <span class="db-form-opt">(gradient — blank for flat)</span></span>
+              <div class="chatcfg-color">
+                <input type="color" value=${chatCfg.accent_color_2 || "#e5a3ff"} onInput=${(e) => setChatField("accent_color_2", e.target.value)} />
+                <input class="db-input" type="text" placeholder="blank = flat accent" value=${chatCfg.accent_color_2}
+                       onInput=${(e) => setChatField("accent_color_2", e.target.value)} />
+              </div>
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Response bubble colour <span class="db-form-opt">(optional)</span></span>
+              <div class="chatcfg-color">
+                <input type="color" value=${chatCfg.bot_bubble_color || "#f1f2f7"} onInput=${(e) => setChatField("bot_bubble_color", e.target.value)} />
+                <input class="db-input" type="text" placeholder="blank = default grey" value=${chatCfg.bot_bubble_color}
+                       onInput=${(e) => setChatField("bot_bubble_color", e.target.value)} />
+              </div>
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Starter card colour <span class="db-form-opt">(optional)</span></span>
+              <div class="chatcfg-color">
+                <input type="color" value=${chatCfg.card_bg_color || "#f1f2f7"} onInput=${(e) => setChatField("card_bg_color", e.target.value)} />
+                <input class="db-input" type="text" placeholder="blank = default grey" value=${chatCfg.card_bg_color}
+                       onInput=${(e) => setChatField("card_bg_color", e.target.value)} />
+              </div>
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Starter card text colour <span class="db-form-opt">(optional)</span></span>
+              <div class="chatcfg-color">
+                <input type="color" value=${chatCfg.card_text_color || "#1a1c25"} onInput=${(e) => setChatField("card_text_color", e.target.value)} />
+                <input class="db-input" type="text" placeholder="blank = default" value=${chatCfg.card_text_color}
+                       onInput=${(e) => setChatField("card_text_color", e.target.value)} />
+              </div>
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Chat display name <span class="db-form-opt">(overrides the agent name in chat only)</span></span>
+              <input class="db-input" type="text" placeholder=${agent.name} value=${chatCfg.display_name}
+                     onInput=${(e) => setChatField("display_name", e.target.value)} />
+            </label>
+            <label class="db-form-field db-form-span-2 chatcfg-check">
+              <input type="checkbox" checked=${!!chatCfg.full_width_responses}
+                     onChange=${(e) => setChatField("full_width_responses", e.target.checked)} />
+              <span><b>Full-width responses</b><br/>
+                <span class="db-form-help" style=${{ margin: 0 }}>Model replies fill the panel width so long answers need far less scrolling.</span></span>
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Logo / avatar URL</span>
+              <input class="db-input" type="url" placeholder="https://…/logo.png" value=${chatCfg.avatar_url}
+                     onInput=${(e) => setChatField("avatar_url", e.target.value)} />
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Launcher icon URL <span class="db-form-opt">(optional)</span></span>
+              <input class="db-input" type="url" placeholder="https://…/icon.png — defaults to the logo, then a chat icon" value=${chatCfg.launcher_icon}
+                     onInput=${(e) => setChatField("launcher_icon", e.target.value)} />
+              <span class="db-form-help">The icon shown on the floating chat bubble. Falls back to the logo above, then a default chat icon.</span>
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Launcher text</span>
+              <input class="db-input" type="text" placeholder=${`Chat with ${agent.name}`} value=${chatCfg.launcher_text}
+                     onInput=${(e) => setChatField("launcher_text", e.target.value)} />
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Welcome message <span class="db-form-opt">(optional)</span></span>
+              <input class="db-input" type="text" placeholder="Hi! How can I help today?" value=${chatCfg.welcome_message}
+                     onInput=${(e) => setChatField("welcome_message", e.target.value)} />
+            </label>
+            <label class="db-form-field db-form-span-2 chatcfg-check">
+              <input type="checkbox" checked=${!!chatCfg.hide_human_handoff}
+                     onChange=${(e) => setChatField("hide_human_handoff", e.target.checked)} />
+              <span><b>Hide the "Talk to a human" button</b><br/>
+                <span class="db-form-help" style=${{ margin: 0 }}>Removes the header button so visitors can't request a human handoff. The agent can still hand off on its own if it decides to.</span></span>
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Proactive nudge <span class="db-form-opt">(optional)</span></span>
+              <input class="db-input" type="text" placeholder="👋 Looking for something? Ask me anything." value=${chatCfg.teaser}
+                     onInput=${(e) => setChatField("teaser", e.target.value)} />
+              <span class="db-form-help">A teaser bubble that pops up next to the launcher to invite visitors in. Leave blank to disable.</span>
+            </label>
+            ${(chatCfg.teaser || "").trim() ? html`
               <label class="db-form-field">
-                <textarea class="db-input chatcfg-instr" rows="10"
-                          placeholder=${suggesting ? "Drafting from your industry & knowledge…" : `e.g. Be a touch more playful than the phone line. Always mention free home delivery. Offer a brochure link before booking.`}
-                          value=${chatCfg.instructions}
-                          onInput=${(e) => setChatField("instructions", e.target.value)}></textarea>
-                <span class="db-form-help">✨ Auto-drafted from your industry, business context and what this agent captures — edit or clear it freely. ${(chatCfg.instructions || "").length} characters.</span>
-              </label>
+                <span class="db-form-label">Show after</span>
+                <div style=${{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <input class="db-input" type="number" min="1" max="120" style=${{ width: "90px" }} value=${chatCfg.teaser_delay}
+                         onInput=${(e) => setChatField("teaser_delay", Math.max(1, Math.min(120, Number(e.target.value) || 8)))} />
+                  <span class="db-form-help" style=${{ margin: 0 }}>seconds on the page</span>
+                </div>
+              </label>` : ""}
+          </div>
+          <div class="chatcfg-head" style=${{ marginTop: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+            <span>Chat behaviour</span>
+            <button type="button" class="db-btn-ghost db-btn-sm" onClick=${suggestInstructions} disabled=${suggesting}>
+              ${suggesting ? "✨ Drafting…" : (chatCfg.instructions || "").trim() ? "✨ Regenerate" : "✨ Suggest"}
+            </button>
+            <button type="button" class="db-btn-ghost db-btn-sm" style=${{ marginLeft: "auto" }} onClick=${() => setInstrFull(true)}>⤢ Expand editor</button>
+          </div>
+          <label class="db-form-field">
+            <span class="db-form-label">Chat-only instructions — tone/rules layered on the shared brief</span>
+            <textarea class="db-input chatcfg-instr" rows="10"
+                      placeholder=${suggesting ? "Drafting from your industry & knowledge…" : `e.g. Be a touch more playful than the phone line. Always mention free home delivery. Offer a brochure link before booking.`}
+                      value=${chatCfg.instructions}
+                      onInput=${(e) => setChatField("instructions", e.target.value)}></textarea>
+            <span class="db-form-help">✨ Auto-drafted from your industry, business context and what this agent captures — edit or clear it freely. ${(chatCfg.instructions || "").length} characters.</span>
+          </label>
+          <label class="db-form-field">
+            <span class="db-form-label" style=${{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span>Suggested questions <span class="db-form-opt">(shown as tappable chips on open — one per line, up to 4)</span></span>
+              <button type="button" class="db-btn-ghost db-btn-sm" style=${{ marginLeft: "auto" }} onClick=${suggestStarters} disabled=${suggestingStarters}>
+                ${suggestingStarters ? "✨ Drafting…" : "✨ Suggest"}
+              </button>
+            </span>
+            <textarea class="db-input" rows="3"
+                      placeholder=${`Book a test drive\nSee pricing\nWhat are your hours?`}
+                      value=${chatCfg.starters}
+                      onInput=${(e) => setChatField("starters", e.target.value)}></textarea>
+          </label>
+          <div class="chatcfg-grid">
+            <label class="db-form-field">
+              <span class="db-form-label">Chat language</span>
+              <select class="db-input" value=${chatCfg.language}
+                      onChange=${(e) => setChatField("language", e.target.value)}>
+                <option value="auto">Auto — match the visitor's language</option>
+                <option value="en">English</option>
+                <option value="hi">Hindi (हिंदी)</option>
+                <option value="hinglish">Hinglish (Roman)</option>
+                <option value="bn">Bengali (বাংলা)</option>
+                <option value="ta">Tamil (தமிழ்)</option>
+                <option value="te">Telugu (తెలుగు)</option>
+                <option value="mr">Marathi (मराठी)</option>
+                <option value="other">Other…</option>
+              </select>
+              <span class="db-form-help">Text chat sets its own language — it does not inherit the phone line's. Auto replies in whatever language the visitor types.</span>
+            </label>
+            ${chatCfg.language === "other" ? html`
               <label class="db-form-field">
-                <span class="db-form-label" style=${{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span>Suggested questions <span class="db-form-opt">(shown as tappable chips on open — one per line, up to 4)</span></span>
-                  <button type="button" class="db-btn-ghost db-btn-sm" style=${{ marginLeft: "auto" }} onClick=${suggestStarters} disabled=${suggestingStarters}>
-                    ${suggestingStarters ? "✨ Drafting…" : "✨ Suggest"}
-                  </button>
-                </span>
-                <textarea class="db-input" rows="3"
-                          placeholder=${`Book a test drive\nSee pricing\nWhat are your hours?`}
-                          value=${chatCfg.starters}
-                          onInput=${(e) => setChatField("starters", e.target.value)}></textarea>
+                <span class="db-form-label">Language name</span>
+                <input class="db-input" type="text" placeholder="e.g. Gujarati, Kannada, Spanish"
+                       value=${chatCfg.language_other}
+                       onInput=${(e) => setChatField("language_other", e.target.value)} />
               </label>
-              <div class="chatcfg-grid">
-                <label class="db-form-field">
-                  <span class="db-form-label">Chat language</span>
-                  <select class="db-input" value=${chatCfg.language}
-                          onChange=${(e) => setChatField("language", e.target.value)}>
-                    <option value="auto">Auto — match the visitor's language</option>
-                    <option value="en">English</option>
-                    <option value="hi">Hindi (हिंदी)</option>
-                    <option value="hinglish">Hinglish (Roman)</option>
-                    <option value="bn">Bengali (বাংলা)</option>
-                    <option value="ta">Tamil (தமிழ்)</option>
-                    <option value="te">Telugu (తెలుగు)</option>
-                    <option value="mr">Marathi (मराठी)</option>
-                    <option value="other">Other…</option>
-                  </select>
-                  <span class="db-form-help">Text chat sets its own language — it does not inherit the phone line's. Auto replies in whatever language the visitor types.</span>
-                </label>
-                ${chatCfg.language === "other" ? html`
-                  <label class="db-form-field">
-                    <span class="db-form-label">Language name</span>
-                    <input class="db-input" type="text" placeholder="e.g. Gujarati, Kannada, Spanish"
-                           value=${chatCfg.language_other}
-                           onInput=${(e) => setChatField("language_other", e.target.value)} />
-                  </label>
-                ` : ""}
-                <label class="db-form-field db-form-span-2 chatcfg-check">
-                  <input type="checkbox" checked=${!!chatCfg.hide_human_handoff}
-                         onChange=${(e) => setChatField("hide_human_handoff", e.target.checked)} />
-                  <span><b>Hide the "Talk to a human" button</b><br/>
-                    <span class="db-form-help" style=${{ margin: 0 }}>Removes the header button so visitors can't request a human handoff. The agent can still hand off on its own if it decides to.</span></span>
-                </label>
-              </div>`)}
-
-            ${Section("nudge", "👋 Proactive nudge", "Optional teaser bubble that invites visitors in", html`
-              <div class="chatcfg-grid">
-                <label class="db-form-field">
-                  <span class="db-form-label">Proactive nudge <span class="db-form-opt">(optional)</span></span>
-                  <input class="db-input" type="text" placeholder="👋 Looking for something? Ask me anything." value=${chatCfg.teaser}
-                         onInput=${(e) => setChatField("teaser", e.target.value)} />
-                  <span class="db-form-help">A teaser bubble that pops up next to the launcher to invite visitors in. Leave blank to disable.</span>
-                </label>
-                ${(chatCfg.teaser || "").trim() ? html`
-                  <label class="db-form-field">
-                    <span class="db-form-label">Show after</span>
-                    <div style=${{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <input class="db-input" type="number" min="1" max="120" style=${{ width: "90px" }} value=${chatCfg.teaser_delay}
-                             onInput=${(e) => setChatField("teaser_delay", Math.max(1, Math.min(120, Number(e.target.value) || 8)))} />
-                      <span class="db-form-help" style=${{ margin: 0 }}>seconds on the page</span>
-                    </div>
-                  </label>` : ""}
-              </div>`)}
-
-            ${Section("privacy", "🔒 Trust & privacy", "Domain allow-list and the privacy note", html`
-              <div class="chatcfg-grid">
-                <label class="db-form-field">
-                  <span class="db-form-label">Allowed domains <span class="db-form-opt">(comma-separated)</span></span>
-                  <input class="db-input" type="text" placeholder="example.com, shop.example.com" value=${chatCfg.allowed_domains}
-                         onInput=${(e) => setChatField("allowed_domains", e.target.value)} />
-                </label>
-                <label class="db-form-field">
-                  <span class="db-form-label">Privacy note <span class="db-form-opt">(optional)</span></span>
-                  <input class="db-input" type="text" placeholder="We may use this chat to follow up." value=${chatCfg.privacy_note}
-                         onInput=${(e) => setChatField("privacy_note", e.target.value)} />
-                </label>
-              </div>`)}`;
-          })()}
+            ` : ""}
+          </div>
+          <div class="chatcfg-head" style=${{ marginTop: "16px" }}>Trust & privacy</div>
+          <div class="chatcfg-grid">
+            <label class="db-form-field">
+              <span class="db-form-label">Allowed domains <span class="db-form-opt">(comma-separated)</span></span>
+              <input class="db-input" type="text" placeholder="example.com, shop.example.com" value=${chatCfg.allowed_domains}
+                     onInput=${(e) => setChatField("allowed_domains", e.target.value)} />
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Privacy note <span class="db-form-opt">(optional)</span></span>
+              <input class="db-input" type="text" placeholder="We may use this chat to follow up." value=${chatCfg.privacy_note}
+                     onInput=${(e) => setChatField("privacy_note", e.target.value)} />
+            </label>
+          </div>
           <div class="db-actions-row">
             <button type="button" class=${"db-btn-primary db-btn-sm " + (chatCfgSaved ? "is-copied" : "")}
                     onClick=${saveChatCfg} disabled=${chatCfgSaving}>

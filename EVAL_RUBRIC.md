@@ -5,7 +5,13 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 345**
+**Last updated: build 346**
+
+**Build 346 (isolate the chat-settings accordion out of 345):** a chat-settings
+form accordion refactor (not part of the mobile fix) had landed on disk and got
+bundled into build 345's app.js. This reverts app.js to the flat form so 345
+stands as the mobile fix alone; the accordion re-lands complete (JS + CSS) in
+build 347. No behavioural change vs the pre-accordion form. Evidence: **Code**.
 
 **Build 345 (fix: "New chat" un-tappable on mobile):** regression from build 343
 — removing the header's right-padding reservation and floating the "×" close at
