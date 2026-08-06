@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 349;
+const SXAI_BUILD = 350;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -11829,6 +11829,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
     allowed_domains: Array.isArray(_cs0.allowed_domains) ? _cs0.allowed_domains.join(", ") : "",
     privacy_note: _cs0.privacy_note || "",
     hide_human_handoff: !!_cs0.hide_human_handoff,   // hide the "Talk to a human" button
+    followup_suggestions: _cs0.followup_suggestions !== false,   // suggested next-question chips (default on)
   });
   const [chatCfgSaving, setChatCfgSaving] = useState(false);
   const [chatCfgSaved, setChatCfgSaved] = useState(false);
@@ -12192,6 +12193,12 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
                   <span><b>Hide the "Talk to a human" button</b><br/>
                     <span class="db-form-help" style=${{ margin: 0 }}>Removes the header button so visitors can't request a human handoff. The agent can still hand off on its own if it decides to.</span></span>
                 </label>
+                <label class="db-form-field db-form-span-2 chatcfg-check">
+                  <input type="checkbox" checked=${chatCfg.followup_suggestions !== false}
+                         onChange=${(e) => setChatField("followup_suggestions", e.target.checked)} />
+                  <span><b>Suggest follow-up questions</b><br/>
+                    <span class="db-form-help" style=${{ margin: 0 }}>After each reply, show 2-3 tappable "next question" chips — grounded in the conversation and the agent's scope — so visitors always have a natural next step.</span></span>
+                </label>
               </div>`)}
 
             ${Section("nudge", "Proactive nudge", "Optional teaser bubble that invites visitors in", html`
@@ -12257,6 +12264,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
                 bubble_radius: chatCfg.bubble_radius === "" ? null : Number(chatCfg.bubble_radius),
                 bubble_size: chatCfg.bubble_size,
                 hide_human_handoff: chatCfg.hide_human_handoff,
+                followup_suggestions: chatCfg.followup_suggestions,
               }} />
           </div>
           <div class="chatcfg-preview-note">A real chat with ${agent.name}. Appearance + questions update live here; the AI's behaviour applies on Save. ↻ to restart.</div>

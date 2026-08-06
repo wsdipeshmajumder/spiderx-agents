@@ -1529,6 +1529,85 @@ async def _maybe_flag_knowledge_gap(agent: dict, user_text: str, reply: str) -> 
         log.debug("knowledge-gap flag skipped: %s", e)
 
 
+async def _generate_followups(
+    agent: dict[str, Any], memory: list[dict[str, str]], reply: str,
+) -> list[str]:
+    """Suggest 2-3 questions the VISITOR would naturally ask NEXT, so the chat
+    flow is never lost. Grounded in (a) the running conversation, (b) the
+    agent's persona/scope (its 'goal'), and (c) its guardrails — we never
+    suggest a question that asks the agent to do something it won't/can't do.
+
+    Phrased in the visitor's own voice (first person), each a natural
+    continuation of the assistant's last answer. Best-effort: returns [] on any
+    failure so it can never break a chat. Uses the fast flash model directly
+    (not the pro-first `_best_generate`) to keep the chips snappy."""
+    try:
+        client = _gb._client()
+        if client is None:
+            return []
+        variables = agent.get("variables") or {}
+        persona = _gb._substitute_variables(
+            str(agent.get("system_prompt") or agent.get("persona") or ""), variables)[:1000]
+        try:
+            dos, donts = _gb._format_policy_for_prompt(agent)
+        except Exception:  # noqa: BLE001
+            dos, donts = [], []
+        guardrails = [str(g) for g in (agent.get("guardrails") or []) if str(g).strip()]
+        recent = memory[-6:]
+        convo = "\n".join(
+            f"{'Visitor' if m.get('role') == 'user' else 'Assistant'}: {m.get('text', '')}"
+            for m in recent if m.get("text"))
+        guard_terms = "; ".join([*(str(d) for d in donts[:6]), *guardrails[:6]])[:600]
+        scope = ", ".join(str(d) for d in dos[:8])[:500] if dos else "the business described above"
+        system = (
+            "You suggest what a website visitor would naturally ask NEXT in a live chat so the "
+            "conversation keeps flowing. Rules: 2-3 SHORT questions; phrased in the VISITOR's own "
+            "voice (first person); each a natural next step from the assistant's last answer and "
+            "strictly within the assistant's scope; do NOT repeat anything already asked; no "
+            "greetings, no meta, no questions the assistant already fully answered. "
+            "NEVER suggest a question that asks the assistant to do something it refuses or cannot "
+            "do. Return ONLY a JSON array of strings."
+        )
+        prompt = (
+            f"Assistant / business: {persona}\n"
+            f"What it can help with (scope): {scope}\n"
+            + (f"Off-limits — never lead the visitor toward these: {guard_terms}\n" if guard_terms else "")
+            + f"\nConversation so far:\n{convo}\n\n"
+            f"Assistant's latest answer:\n{reply[:800]}\n\n"
+            "Return 2-3 natural next questions the visitor might tap to continue, as a JSON array "
+            "of short strings."
+        )
+        cfg = types.GenerateContentConfig(
+            system_instruction=system,
+            response_mime_type="application/json",
+            temperature=0.6,
+        )
+        resp = await asyncio.wait_for(
+            client.aio.models.generate_content(model=CHAT_MODEL, contents=prompt, config=cfg),
+            timeout=8.0,
+        )
+        data = _parse_json_blob(getattr(resp, "text", None))
+        if isinstance(data, dict):  # tolerate {"questions": [...]}
+            data = data.get("questions") or data.get("followups") or data.get("options") or []
+        if not isinstance(data, list):
+            return []
+        asked = {(_re.sub(r"\s+", " ", (m.get("text") or "").lower().strip()))
+                 for m in memory if m.get("role") == "user"}
+        out: list[str] = []
+        for q in data:
+            s = str(q).strip().strip('"').strip()
+            if not s or len(s) > 90:
+                continue
+            if _re.sub(r"\s+", " ", s.lower()) in asked:   # don't re-suggest a prior question
+                continue
+            if s not in out:
+                out.append(s)
+        return out[:3]
+    except Exception as e:  # noqa: BLE001
+        log.debug("followup generation skipped: %s", e)
+        return []
+
+
 async def _run_model_turn(
     *,
     chat,
@@ -2234,6 +2313,15 @@ async def run_agent_chat_session(
     usage = {"in": 0, "out": 0}                 # token totals for cost
     persisted = {"done": False}
     recall = {"done": False}                     # cross-session recall fired once
+    # Follow-up suggestion chips after each reply (Build 349). On by default;
+    # `chat_settings.followup_suggestions=false` disables. `turn_widget` guards
+    # against doubling up when the agent already offered its own widget this
+    # turn; `turn_seq` cancels stale chips if the visitor sends first.
+    _cs0 = agent.get("chat_settings") if isinstance(agent.get("chat_settings"), dict) else {}
+    followups_on = bool(_cs0.get("followup_suggestions", True))
+    turn_widget = {"shown": False}
+    turn_seq = {"n": 0}
+    _bg_tasks: set = set()   # strong refs so fire-and-forget tasks aren't GC'd
 
     # Live-session registry — lets an operator watch / join this chat (Build 290).
     # Skipped for the operator's own dashboard preview. Best-effort throughout.
@@ -2306,6 +2394,7 @@ async def run_agent_chat_session(
         raw = args.get("options") or args.get("replies") or []
         opts = [str(o).strip() for o in raw if str(o).strip()][:4]
         if opts:
+            turn_widget["shown"] = True   # agent offered its own chips — skip auto follow-ups
             await _send_json({"type": "quick_replies", "options": opts})
         return {"ok": True, "shown": len(opts),
                 "note": ("Buttons are now shown attached to your last message. Do NOT repeat or "
@@ -2333,6 +2422,7 @@ async def run_agent_chat_session(
             fields.append(item)
         if not fields:
             return {"ok": False, "error": "no valid fields"}
+        turn_widget["shown"] = True
         await _send_json({"type": "form", "form": {"title": title, "submit_label": submit_label, "fields": fields}})
         return {"ok": True, "shown": len(fields),
                 "note": "Form is now shown. Do NOT repeat your previous message; wait for the visitor to submit."}
@@ -2366,6 +2456,7 @@ async def run_agent_chat_session(
             cards.append(card)
         if not cards:
             return {"ok": False, "error": "no valid cards"}
+        turn_widget["shown"] = True
         await _send_json({"type": "cards", "cards": cards})
         return {"ok": True, "shown": len(cards)}
     handlers["show_cards"] = _show_cards_handler
@@ -2375,6 +2466,7 @@ async def run_agent_chat_session(
         reason = (str(args.get("reason") or "").strip())[:300] or "Visitor asked to talk to a human."
         first = not handoff["requested"]
         handoff["requested"] = True
+        turn_widget["shown"] = True   # handoff in progress — skip auto follow-ups
         # Flag it on the captured data so it surfaces in the call's `extracted`.
         if isinstance(agent.get("_extracted_extra"), dict):
             agent["_extracted_extra"]["handoff_requested"] = True
@@ -2683,6 +2775,8 @@ async def run_agent_chat_session(
             # above; the human replies via the inject pump.
             if live is not None and live.human_control:
                 continue
+            turn_widget["shown"] = False      # reset per turn (set by any widget handler)
+            turn_seq["n"] += 1                 # newest turn id — cancels stale follow-ups
             try:
                 reply = await _run_model_turn(chat=chat, user_text=user_text,
                                               handlers=handlers, send_json=_send_json,
@@ -2697,6 +2791,21 @@ async def run_agent_chat_session(
                     live.mirror("model", reply.strip())
                 # Capture unanswered questions as a knowledge-gap worklist.
                 await _maybe_flag_knowledge_gap(agent, user_text, reply)
+                # Suggest 2-3 natural next questions as tappable chips so the
+                # visitor never hits a dead end (Build 349). Skipped when the
+                # agent already offered its own widget this turn, when the chat
+                # is ending, or when a human is driving. Runs in the background
+                # so it never delays the loop; a `turn_seq` guard drops the
+                # chips if the visitor sends another message first.
+                if (followups_on and not turn_widget["shown"] and not persisted["done"]
+                        and not (live is not None and live.human_control)):
+                    async def _emit_followups(_seq=turn_seq["n"], _reply=reply.strip()):
+                        qs = await _generate_followups(agent, memory, _reply)
+                        if qs and turn_seq["n"] == _seq:
+                            await _send_json({"type": "quick_replies", "options": qs})
+                    _t = asyncio.ensure_future(_emit_followups())
+                    _bg_tasks.add(_t)
+                    _t.add_done_callback(_bg_tasks.discard)
             if persisted["done"]:
                 await _finish_with_feedback()
                 break

@@ -5,7 +5,25 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 349**
+**Last updated: build 350**
+
+**Build 350 (grounded follow-up question chips after every reply):** the
+customer chat now suggests 2-3 natural next questions as tappable chips after
+each answer so the conversation flow is never lost. New `_generate_followups`
+(fast flash model, JSON out) is grounded in (a) the running conversation, (b)
+the agent's persona/scope — its goal, and (c) its guardrails: it is explicitly
+told never to lead the visitor toward anything the agent refuses/can't do, and
+already-asked questions are filtered out. Emitted as the existing
+`quick_replies` frame (reuses the `.chatembed-chips` render — tap sends the
+question), fired as a background task after `turn_complete` with a `turn_seq`
+guard that drops stale chips if the visitor types first, and **suppressed when
+the agent already showed its own widget** (quick_replies / form / cards /
+handoff) that turn. Operator toggle `chat_settings.followup_suggestions`
+(default on) in the Conversation & behaviour accordion. Verified end-to-end via
+an in-process WS client (temp local chat entitlement): "What is the ticket
+price?" → "Rs 500" → chips ['Tickets kaise khareedun?', 'Payment kaise hoga?',
+'Yeh event kab hai?'] — natural, in the conversation's language, within scope.
+Evidence: **Behavioral**.
 
 **Build 349 (Conversations: live chat in the right pane + date filter + XLSX export):**
 three changes to the Chat → Conversations tab:
