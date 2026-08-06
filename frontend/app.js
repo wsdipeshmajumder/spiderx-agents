@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 347;
+const SXAI_BUILD = 348;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -11967,12 +11967,24 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
         <div class="chatcfg-main">
         <div class="chatcfg">
           ${(() => {
-            // One collapsible section. `id` keys the open/closed state; `sub` is
-            // the muted one-liner shown under the title when collapsed.
+            // Monochrome line icons (stroke = currentColor) — one per section.
+            const _svg = (paths) => html`<svg class="chatcfg-acc-icon" viewBox="0 0 24 24" width="18" height="18"
+              fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+            const ICONS = {
+              brand: _svg(html`<circle cx="13.5" cy="6.5" r="1.5"/><circle cx="17.5" cy="10.5" r="1.5"/><circle cx="8.5" cy="7.5" r="1.5"/><circle cx="6.5" cy="12.5" r="1.5"/><path d="M12 2a10 10 0 1 0 0 20 2.5 2.5 0 0 0 2-4 2.5 2.5 0 0 1 2-4h1a3 3 0 0 0 3-3 9 9 0 0 0-10-9Z"/>`),
+              layout: _svg(html`<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>`),
+              identity: _svg(html`<path d="M20.59 13.41 13.42 20.6a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82Z"/><circle cx="7" cy="7" r="1.2"/>`),
+              convo: _svg(html`<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z"/>`),
+              nudge: _svg(html`<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>`),
+              privacy: _svg(html`<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="M9 12l2 2 4-4"/>`),
+            };
+            // One collapsible section. `id` keys the open/closed state + icon;
+            // `sub` is the muted one-liner shown under the title when collapsed.
             const Section = (id, title, sub, body) => html`
               <div class=${"chatcfg-acc" + (openSect[id] ? " open" : "")}>
                 <button type="button" class="chatcfg-acc-head" aria-expanded=${!!openSect[id]}
                         onClick=${() => toggleSect(id)}>
+                  ${ICONS[id]}
                   <span class="chatcfg-acc-titles">
                     <span class="chatcfg-acc-title">${title}</span>
                     <span class="chatcfg-acc-sub">${sub}</span>
@@ -11983,7 +11995,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
                 <div class="chatcfg-acc-body">${body}</div>
               </div>`;
             return html`
-            ${Section("brand", "🎨 Brand & colours", "Accent, gradient, bubble & starter-card colours, logo", html`
+            ${Section("brand", "Brand & colours", "Accent, gradient, bubble & starter-card colours, logo", html`
               <div class="chatcfg-grid">
                 <label class="db-form-field">
                   <span class="db-form-label">Accent colour</span>
@@ -12032,7 +12044,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
                 </label>
               </div>`)}
 
-            ${Section("layout", "📐 Layout & text", "How the widget opens, corner roundness, text size", html`
+            ${Section("layout", "Layout & text", "How the widget opens, corner roundness, text size", html`
               <div class="chatcfg-grid">
                 <label class="db-form-field">
                   <span class="db-form-label">Open as</span>
@@ -12069,7 +12081,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
                 </label>
               </div>`)}
 
-            ${Section("identity", "🏷️ Name, launcher & welcome", "Display name, launcher icon/text, welcome message", html`
+            ${Section("identity", "Name, launcher & welcome", "Display name, launcher icon/text, welcome message", html`
               <div class="chatcfg-grid">
                 <label class="db-form-field">
                   <span class="db-form-label">Chat display name <span class="db-form-opt">(overrides the agent name in chat only)</span></span>
@@ -12094,7 +12106,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
                 </label>
               </div>`)}
 
-            ${Section("convo", "💬 Conversation & behaviour", "Instructions, starter questions, language, human handoff", html`
+            ${Section("convo", "Conversation & behaviour", "Instructions, starter questions, language, human handoff", html`
               <div class="chatcfg-acc-toolbar">
                 <span class="db-form-label" style=${{ margin: 0 }}>Chat-only instructions — tone/rules layered on the shared brief</span>
                 <button type="button" class="db-btn-ghost db-btn-sm" onClick=${suggestInstructions} disabled=${suggesting}>
@@ -12154,7 +12166,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
                 </label>
               </div>`)}
 
-            ${Section("nudge", "👋 Proactive nudge", "Optional teaser bubble that invites visitors in", html`
+            ${Section("nudge", "Proactive nudge", "Optional teaser bubble that invites visitors in", html`
               <div class="chatcfg-grid">
                 <label class="db-form-field">
                   <span class="db-form-label">Proactive nudge <span class="db-form-opt">(optional)</span></span>
@@ -12173,7 +12185,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
                   </label>` : ""}
               </div>`)}
 
-            ${Section("privacy", "🔒 Trust & privacy", "Domain allow-list and the privacy note", html`
+            ${Section("privacy", "Trust & privacy", "Domain allow-list and the privacy note", html`
               <div class="chatcfg-grid">
                 <label class="db-form-field">
                   <span class="db-form-label">Allowed domains <span class="db-form-opt">(comma-separated)</span></span>

@@ -5,7 +5,14 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 347**
+**Last updated: build 348**
+
+**Build 348 (professional mono icons on the settings accordions):** replaced the
+emoji in the six chat-settings accordion headers with monochrome line icons
+(stroke `currentColor`, 1.8px, shared with the chevron style): palette, layout,
+tag, chat-bubble, bell, shield. Muted grey by default, darkening on hover/open
+(`.chatcfg-acc-icon`). Verified live in the dashboard: 6 SVG icons render with
+full shapes, titles emoji-free. Evidence: **Behavioral**.
 
 **Build 347 (chat-settings form accordion):** re-lands the collapsible-section
 refactor of the Chat → Appearance/behaviour settings form as its own complete

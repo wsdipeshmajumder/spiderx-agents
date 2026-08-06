@@ -11966,6 +11966,8 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
   color: var(--fg, #1a1c25); border-radius: 12px; transition: background .12s ease;
 }
 .chatcfg-acc-head:hover { background: var(--bg-1, #f6f7fb); }
+.chatcfg-acc-icon { flex: none; color: var(--fg-mute, #6b7080); transition: color .12s ease; }
+.chatcfg-acc-head:hover .chatcfg-acc-icon, .chatcfg-acc.open .chatcfg-acc-icon { color: var(--fg, #1a1c25); }
 .chatcfg-acc-titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .chatcfg-acc-title { font-size: 13.5px; font-weight: 700; }
 .chatcfg-acc-sub { font-size: 11.5px; color: var(--fg-mute, #6b7080); font-weight: 400; line-height: 1.3; }
