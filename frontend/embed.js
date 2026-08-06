@@ -122,6 +122,13 @@
     ".sxai-root[data-mode='drawer'] .sxai-panel{position:fixed;left:0;right:0;bottom:0;margin:0 auto;width:min(100%,540px);height:min(72vh,660px);border-radius:20px 20px 0 0;transform-origin:bottom center;transform:translateY(100%);}",
     ".sxai-root[data-mode='drawer'] .sxai-panel.open{transform:translateY(0);}",
     "@media (max-width:560px){.sxai-root[data-mode='drawer'] .sxai-panel{height:82vh;width:100%;border-radius:18px 18px 0 0;}}",
+    // Mobile popover: the desktop `bottom:74px + tall height` pushes the panel
+    // ABOVE the visible viewport, so the header got clipped behind the browser
+    // chrome (build 354). Anchor it to the actual viewport (top+bottom, safe-area
+    // aware) so the header is always visible, and drop the close button INSIDE
+    // the header top-right — there's no room for the outside-corner button on a
+    // full-height mobile panel (the iframe header reserves space for it).
+    "@media (max-width:560px){.sxai-root[data-mode='popover'] .sxai-panel{position:fixed;left:8px;right:8px;top:calc(env(safe-area-inset-top,0px) + 12px);bottom:calc(env(safe-area-inset-bottom,0px) + 10px);width:auto;height:auto;max-height:none;border-radius:16px;}.sxai-root[data-mode='popover'] .sxai-close{top:8px;right:8px;box-shadow:0 2px 8px rgba(0,0,0,0.20);}}",
     ".sxai-panel iframe{width:100%;height:100%;border:0;display:block;background:#0f1119;}",
     // Close button overlay
     // The close button now floats OUTSIDE the panel at the top-right corner

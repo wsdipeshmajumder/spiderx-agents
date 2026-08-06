@@ -1237,6 +1237,12 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
    collapses to an icon jammed in the rounded corner and became un-tappable
    (build 345). The operator preview has no close overlay, so it keeps 14px. */
 .chatembed:not(.chatembed-contained) .chatembed-head { padding-right: 30px; }
+/* On mobile the close button sits INSIDE the header top-right (embed.js moves it
+   there on full-height mobile panels), so reserve more room so "New chat" clears
+   it (build 354). */
+@media (max-width: 560px) {
+  .chatembed:not(.chatembed-contained) .chatembed-head { padding-right: 46px; }
+}
 .chatembed-avatar {
   width: 34px; height: 34px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;

@@ -7,6 +7,21 @@
 
 **Last updated: build 355**
 
+**Build 354 (mobile: chat panel header no longer clipped):** on mobile the
+popover panel used the desktop `bottom:74px` + `height:min(600px,100vh-100px)`,
+so on a phone (esp. an in-app browser like Instagram, where `100vh` spans behind
+the address bar) it extended above the visible viewport and the **header was
+clipped behind the browser chrome**; there was no mobile handling for popover
+(only drawer). Fix: at `≤560px` the popover is now `position:fixed`, anchored to
+the real viewport (`top`/`bottom` with `env(safe-area-inset-*)`), so the header
+is always visible; the "×" close moves INSIDE the header top-right (no room for
+the outside-corner button on a full-height panel), and the iframe header's
+mobile right inset grows to 46px so "New chat" clears it. Desktop/drawer/
+fullscreen untouched. Verified in 375px emulation: panel `position:fixed`, full
+header (avatar/name/New chat/×) visible, close inside + clear of New chat. Also
+strengthened build-351's return-to-home so an ended chat with an un-answered
+rating prompt still falls back to home after 15s. Evidence: **Behavioral**.
+
 **Build 355 ("Include full transcripts" export checkbox):** the Chat log
 transcript sheet (build 353) is now opt-in. A checkbox in the Conversations
 export toolbar adds `transcript=1` to the export URL; the endpoint only pulls
