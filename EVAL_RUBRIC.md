@@ -7,6 +7,22 @@
 
 **Last updated: build 353**
 
+**Build 353 (legible links on branded response bubbles + chat returns to home on end):**
+two embed polish items:
+- Link legibility: links inside a bot bubble were the bright accent on a pale
+  brand background (Moments: `#e45dbf` on `#f4e6fb` ≈ 2.6:1, fails WCAG). They
+  now use a DEEPER shade of the SAME accent via `color-mix(... 55%, #150512)` +
+  `font-weight:600` + clearer underline — brand hue preserved, contrast ≈ 6.3:1
+  (AA). Plain-accent fallback for no-`color-mix` browsers; dark-theme bubbles
+  keep the bright accent. Black body text unchanged (already high-contrast);
+  the lever for that is a lighter `bot_bubble_color` tint. Verified in-browser:
+  computed link `≈#873571`, contrast 2.6→6.3. Evidence: **Behavioral**.
+- On chat end the widget now returns to the fresh home (starter questions)
+  instead of a dead "chat ended" screen — a `useEffect` calls `newChat()` once
+  any post-chat rating is resolved (short delay for the goodbye). Verified: a
+  simulated `call_ended` reconnected and showed the home + 4 starters. (Shipped
+  in the build-351 sweep; recorded here.) Evidence: **Behavioral**.
+
 **Build 353 (full chat log sheet in the report):** the XLSX now has a third
 sheet, **Chat log**, with every message of every conversation in the window —
 grouped chat-by-chat under an accent header row (Chat N · date · outcome ·

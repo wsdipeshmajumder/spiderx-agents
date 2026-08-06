@@ -1278,6 +1278,20 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 /* Clickable links inside chat bubbles (build 321). */
 .chatembed-bubble a { color: var(--chat-accent, #4f46e5); text-decoration: underline; word-break: break-word; }
 .chatembed-msg-user .chatembed-bubble a { color: #fff; }
+/* Legibility on a light/tinted brand bubble (build 352): the bright accent is
+   low-contrast for links on a pale brand background, so links inside a bot
+   bubble use a DEEPER shade of the SAME accent (brand hue kept) + heavier weight
+   + clearer underline. Fallback = the plain accent for browsers without
+   color-mix. Dark-theme bubbles are dark, where the bright accent already reads
+   well, so it's left alone there. Body text keeps its dark colour. */
+.chatembed-msg-model .chatembed-bubble a {
+  color: var(--chat-accent, #4f46e5);
+  color: color-mix(in srgb, var(--chat-accent, #4f46e5) 55%, #150512);
+  font-weight: 600; text-decoration-thickness: 1.5px; text-underline-offset: 2px;
+}
+:root[data-theme="dark"] .chatembed-msg-model .chatembed-bubble a {
+  color: var(--chat-accent, #a78bfa);
+}
 /* Markdown rendered in chat bubbles (build 328): bold / italic / lists / code. */
 .chatembed-bubble strong { font-weight: 700; }
 .chatembed-bubble em { font-style: italic; }
