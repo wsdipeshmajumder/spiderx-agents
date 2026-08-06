@@ -121,6 +121,62 @@ calendar / CRM / KB / SMS / payments.
 Which connectors a given agent gets is decided by Eva during the build
 conversation — it picks 1-3 obviously-useful ones for the sector.
 
+## Chat delivery (web widget)
+
+The text-chat channel (the paid add-on) is delivered as a floating widget any
+site can drop in with one line:
+
+```html
+<script src="https://app.spiderx.ai/static/embed.js" data-agent="<slug>" data-channel="chat"></script>
+```
+
+Flow:
+
+```
+Host site ──①──► embed.js (FAB + iframe) ──②──► /embed/<slug>?channel=chat (our origin)
+                                                     │  React + htm chat UI (app.js)
+                                                     ▼
+                                  ③ WebSocket  wss://…/ws/session?mode=chat
+                                                     ▼
+                          FastAPI (uvicorn) ── chat_bridge.py ── Gemini ── Postgres
+```
+
+1. **Embed** — [`frontend/embed.js`](frontend/embed.js), dependency-free vanilla
+   JS, injects a launcher + a panel holding a sandboxed `<iframe>` pointed at our
+   own `/embed/<slug>` surface (same-origin to us, cross-origin to the host page
+   → no CSS/JS bleed). It fetches the agent's `chat_settings` from
+   `/api/agents/by-slug/<slug>` to brand the launcher.
+2. **UI** — the iframe loads `app.js`, a React 18 app written with **htm** (tagged
+   templates, no build step) served as a static file. Component: `AgentChatEmbed`.
+3. **Transport** — one **WebSocket** per conversation
+   (`/ws/session?mode=chat&agent_id=…&sid=…&locale=…`, `wss://` in prod) carrying
+   a bi-directional JSON frame protocol. Operator watch/join reuses the socket
+   with `mode=chat_observe`.
+
+| Layer     | Tech |
+|-----------|------|
+| Embed     | vanilla JS (`embed.js`) + sandboxed `<iframe>` |
+| Chat UI   | React 18 + htm (static `app.js`) |
+| Realtime  | WebSocket, JSON frames, `wss://` |
+| Server    | FastAPI (ASGI) on uvicorn `[standard]`, `--proxy-headers` |
+| Engine    | `backend/chat_bridge.py` (async per-session loop) |
+| LLM       | Google Gemini via `google-genai`, `gemini-2.5-flash`, streaming + function-calling |
+| Data      | PostgreSQL via asyncpg; Alembic migrations; chats in `calls` (transcript JSON, `extracted` JSONB, provenance) |
+| Hosting   | Railway (`alembic upgrade head && uvicorn backend.app:app`) |
+
+**WebSocket frames** (`type` field): `hello`/`ready` (handshake, resume) ·
+`msg`/`text`/`turn_complete` (streaming reply) · `quick_replies` (suggestion
+chips) · `form`/`cards` (generative UI) · `handoff`/`human_joined`/
+`human_message`/`control` (live operator takeover) · `transcript` ·
+`ended`/`call_ended` · `error`.
+
+Session is `sid`-based (resumable via `sessionStorage`); visitor provenance
+(device / OS / source domain) is read from the WS handshake headers. Abuse
+control via a per-agent domain allow-list (`allowed_domains`); the host page is
+reported through `?host=`. Card numbers are auto-masked in stored transcripts.
+Alongside the socket, REST serves the logs (`GET /api/agents/{id}/calls`) and
+the client-ready report (`GET /api/agents/{id}/chat/export.xlsx`).
+
 ## Files
 
 ```
