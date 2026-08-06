@@ -14,6 +14,7 @@ never 500 on one weird row.
 from __future__ import annotations
 
 import io
+import json
 import re
 from collections import Counter
 from datetime import datetime, timezone
@@ -30,6 +31,27 @@ _META_KEYS = {"csat", "csat_comment", "handoff_requested", "handoff_reason", "_p
 def _prov(ex: dict) -> dict:
     p = ex.get("_provenance")
     return p if isinstance(p, dict) else {}
+
+
+def _parse_transcript(raw) -> list[dict]:
+    """`calls.transcript` is a JSON string of {role, text} turns (or a legacy
+    plain string). Returns a clean list of {role, text}."""
+    if isinstance(raw, list):
+        seq = raw
+    elif isinstance(raw, str) and raw.strip():
+        try:
+            seq = json.loads(raw)
+        except Exception:  # noqa: BLE001
+            return [{"role": "model", "text": raw.strip()}]
+    else:
+        return []
+    out = []
+    if isinstance(seq, list):
+        for t in seq:
+            if isinstance(t, dict) and t.get("text"):
+                out.append({"role": (t.get("role") or "model").strip().lower(),
+                            "text": str(t.get("text")).strip()})
+    return out
 
 _HEX_RE = re.compile(r"^#?[0-9a-fA-F]{6}$")
 _DEFAULT_ACCENT = "4F46E5"   # indigo — matches the widget default
@@ -318,6 +340,53 @@ def build_chat_report_xlsx(
         r += 1
     if not calls:
         ws2.cell(row=2, column=1, value="No conversations in this period.").font = Font(italic=True, color="6B7080")
+
+    # ══ Sheet 3 · Full chat log ═══════════════════════════════════════════════
+    # Every message of every conversation, grouped chat-by-chat with a tinted
+    # header row (date · outcome · captured info) so it reads as a transcript.
+    ws3 = wb.create_sheet("Chat log")
+    ws3.sheet_view.showGridLines = False
+    ws3.column_dimensions["A"].width = 16
+    ws3.column_dimensions["B"].width = 96
+    speaker_font = Font(name="Calibri", bold=True, size=10, color="5B6070")
+    visitor_font = Font(name="Calibri", bold=True, size=10, color=accent)
+    msg_font = Font(name="Calibri", size=10.5, color="1A1C25")
+    grp_fill = PatternFill("solid", fgColor=accent)
+    grp_font = Font(name="Calibri", bold=True, size=11, color="FFFFFF")
+    r = 1
+    any_tx = False
+    for idx, c in enumerate(calls, start=1):
+        turns = _parse_transcript(c.get("transcript"))
+        if not turns:
+            continue
+        any_tx = True
+        st = c.get("started_at")
+        head = f"Chat {idx}  ·  {_fmt_dt(st)}  ·  {str(c.get('outcome') or 'unknown').replace('_', ' ')}"
+        cap = _flatten_captured(c.get("extracted") if isinstance(c.get("extracted"), dict) else {})
+        if cap:
+            head += f"  ·  {cap}"
+        ws3.merge_cells(f"A{r}:B{r}")
+        gc = ws3.cell(row=r, column=1, value=head)
+        gc.fill = grp_fill
+        gc.font = grp_font
+        gc.alignment = Alignment(vertical="center", horizontal="left", indent=1)
+        ws3.row_dimensions[r].height = 22
+        r += 1
+        for t in turns:
+            is_user = t["role"] in ("user", "caller", "human")
+            sp = ws3.cell(row=r, column=1, value="Visitor" if is_user else bot)
+            sp.font = visitor_font if is_user else speaker_font
+            sp.alignment = Alignment(vertical="top", horizontal="left")
+            mc = ws3.cell(row=r, column=2, value=t["text"])
+            mc.font = msg_font
+            mc.alignment = wrap_top
+            if not is_user:
+                for col in (1, 2):
+                    ws3.cell(row=r, column=col).fill = zebra
+            r += 1
+        r += 1   # blank row between chats
+    if not any_tx:
+        ws3.cell(row=1, column=1, value="No transcripts in this period.").font = Font(italic=True, color="6B7080")
 
     buf = io.BytesIO()
     wb.save(buf)

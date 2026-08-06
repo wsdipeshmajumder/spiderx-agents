@@ -119,7 +119,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 352
+APP_BUILD = 353
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1723,6 +1723,7 @@ async def agent_chat_export(agent_id: int, request: Request,
     df, dt = _parse_day(date_from), _parse_day(date_to, end=True)
     calls = await db.list_calls_for_agent(
         agent_id, limit=5000, channel="web_chat", date_from=df, date_to=dt,
+        include_transcript=True,
     )
     from . import chat_report
     data = chat_report.build_chat_report_xlsx(

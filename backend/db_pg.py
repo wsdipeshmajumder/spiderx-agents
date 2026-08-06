@@ -1098,7 +1098,8 @@ def _channel_filter(channel: Optional[str]) -> str:
 async def list_calls_for_agent(agent_id: int, limit: int = 50,
                                channel: Optional[str] = None,
                                date_from: Optional[datetime] = None,
-                               date_to: Optional[datetime] = None) -> list[dict[str, Any]]:
+                               date_to: Optional[datetime] = None,
+                               include_transcript: bool = False) -> list[dict[str, Any]]:
     """Build 217: include the `extracted` JSONB so the call log's
     Tags column can render per-industry chips (party_size, date,
     seating_pref, etc.) without an extra round-trip per row. Payload
@@ -1119,13 +1120,16 @@ async def list_calls_for_agent(agent_id: int, limit: int = 50,
         params.append(date_to)
         where_dates += f" AND started_at < ${len(params)}"
     params.append(limit)
+    # `transcript` is only pulled for the XLSX export (full chat log) — it's the
+    # heaviest column, so the UI list keeps omitting it.
+    tx_col = ", transcript" if include_transcript else ""
     pool = await get_pool()
     async with pool.acquire() as conn:
         rs = await conn.fetch(
             "SELECT id, agent_id, started_at, ended_at, duration_s, outcome, reason, summary, "
             "       sentiment, lead_quality, lead_signals, extracted, channel, "
             "       cost_paise, caller_number, "
-            "       recording_path, recording_size_bytes, recording_purged_at "
+            f"       recording_path, recording_size_bytes, recording_purged_at{tx_col} "
             f"FROM calls WHERE agent_id = $1 {chf}{where_dates} ORDER BY id DESC LIMIT ${len(params)}",
             *params,
         )

@@ -5,7 +5,17 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 352**
+**Last updated: build 353**
+
+**Build 353 (full chat log sheet in the report):** the XLSX now has a third
+sheet, **Chat log**, with every message of every conversation in the window —
+grouped chat-by-chat under an accent header row (Chat N · date · outcome ·
+captured info), Visitor vs agent speaker labels, agent turns zebra-shaded.
+`list_calls_for_agent(include_transcript=True)` pulls the `transcript` column
+only for the export (UI list still omits it); `_parse_transcript` handles the
+JSON-string turns + legacy plain text. Verified over HTTP: 3 sheets
+(Summary / Conversations / Chat log), transcripts render with full turns.
+Evidence: **Behavioral**.
 
 **Build 352 (provenance analytics on the report Summary):** the XLSX Summary
 sheet now carries two more breakdown tables below Outcome breakdown — **Visitor
