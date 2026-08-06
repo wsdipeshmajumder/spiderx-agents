@@ -5,7 +5,18 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 346**
+**Last updated: build 347**
+
+**Build 347 (chat-settings form accordion):** re-lands the collapsible-section
+refactor of the Chat → Appearance/behaviour settings form as its own complete
+commit (JS + CSS together, fixing the 345 split where the CSS was uncommitted).
+Six sections — Brand & colours, Layout & text, Name/launcher/welcome,
+Conversation & behaviour, Proactive nudge, Trust & privacy — each showing a
+one-line hint while collapsed; Brand opens first. Operator-facing only (no embed
+change). Evidence: **Code** — app.js passes ES-module syntax check, CSS braces
+balanced. NOT render-verified in the dashboard: the chat-settings form is gated
+behind chat entitlement and the local dev user is on the free plan (paywall),
+so the accordion UI needs a manual check on a chat-enabled account.
 
 **Build 346 (isolate the chat-settings accordion out of 345):** a chat-settings
 form accordion refactor (not part of the mobile fix) had landed on disk and got

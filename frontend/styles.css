@@ -11956,6 +11956,31 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
 @media (max-width: 560px) { .chatcfg-grid { grid-template-columns: 1fr; } }
 :root[data-theme="dark"] .chatcfg { border-color: #2a2e44; }
 
+/* Chat-settings accordions (build 345) — collapsible sections so the settings
+   form reads as a short list of topics instead of an overwhelming wall of
+   inputs. Each section shows a one-line hint while collapsed. */
+.chatcfg-acc { border: 1px solid var(--border, #e6e8ef); border-radius: 12px; margin-bottom: 10px; background: var(--bg-0, #fff); }
+.chatcfg-acc-head {
+  width: 100%; display: flex; align-items: center; gap: 12px; text-align: left;
+  padding: 13px 15px; background: none; border: 0; cursor: pointer; font: inherit;
+  color: var(--fg, #1a1c25); border-radius: 12px; transition: background .12s ease;
+}
+.chatcfg-acc-head:hover { background: var(--bg-1, #f6f7fb); }
+.chatcfg-acc-titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.chatcfg-acc-title { font-size: 13.5px; font-weight: 700; }
+.chatcfg-acc-sub { font-size: 11.5px; color: var(--fg-mute, #6b7080); font-weight: 400; line-height: 1.3; }
+.chatcfg-acc.open .chatcfg-acc-sub { display: none; }   /* the hint only helps while collapsed */
+.chatcfg-acc-chev { flex: none; color: var(--fg-dim, #9aa0ad); transition: transform .18s ease; }
+.chatcfg-acc.open .chatcfg-acc-chev { transform: rotate(180deg); }
+.chatcfg-acc-body { display: none; padding: 2px 15px 15px; }
+.chatcfg-acc.open .chatcfg-acc-body { display: block; }
+.chatcfg-acc-body .chatcfg-grid { margin-bottom: 0; }
+.chatcfg-acc-body .chatcfg-grid:not(:last-child) { margin-bottom: 14px; }
+.chatcfg-acc-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0 6px; }
+.chatcfg-acc-toolbar .db-form-label { flex: 1; min-width: 160px; }
+:root[data-theme="dark"] .chatcfg-acc { border-color: #2a2e44; background: #161a2b; }
+:root[data-theme="dark"] .chatcfg-acc-head:hover { background: #1c2135; }
+
 /* Chat config: settings (left) + live preview (right). */
 .chatcfg-layout { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.9fr); gap: 26px; align-items: start; }
 .chatcfg-main { min-width: 0; }
