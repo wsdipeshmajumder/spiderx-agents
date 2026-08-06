@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 342;
+const SXAI_BUILD = 343;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1990,7 +1990,10 @@ function AgentChatEmbed({ slug, contained, override }) {
   const botBubbleText = /^#[0-9a-fA-F]{3,8}$/.test(cs.bot_bubble_text || "") ? cs.bot_bubble_text : null;
   // Optional branding for the 4 starter-question cards on the chat home
   // (background / text / border). Blank → the default neutral card.
-  const cardBg = /^#[0-9a-fA-F]{3,8}$/.test(cs.card_bg_color || "") ? cs.card_bg_color : null;
+  // `card_brand_gradient` paints them with the accent → accent-2 brand gradient
+  // (matches the two-tone palette) and takes priority over a solid card colour.
+  const cardGradient = !!cs.card_brand_gradient;
+  const cardBg = !cardGradient && /^#[0-9a-fA-F]{3,8}$/.test(cs.card_bg_color || "") ? cs.card_bg_color : null;
   const cardText = /^#[0-9a-fA-F]{3,8}$/.test(cs.card_text_color || "") ? cs.card_text_color : null;
   const cardBorder = /^#[0-9a-fA-F]{3,8}$/.test(cs.card_border_color || "") ? cs.card_border_color : null;
   // Full-width responses — model bubbles span the log to cut scroll length.
@@ -2004,7 +2007,7 @@ function AgentChatEmbed({ slug, contained, override }) {
   if (botBubble) rootStyle["--chat-bot-bubble"] = botBubble;
   if (botBubbleText) rootStyle["--chat-bot-bubble-text"] = botBubbleText;
   if (cardBg) rootStyle["--chat-card-bg"] = cardBg;
-  if (cardText) rootStyle["--chat-card-text"] = cardText;
+  if (cardText) { rootStyle["--chat-card-text"] = cardText; rootStyle["--chat-card-arrow"] = cardText; }
   if (cardBorder) rootStyle["--chat-card-border"] = cardBorder;
   if (!isNaN(_radius) && _radius >= 0 && _radius <= 40) rootStyle["--chat-radius"] = _radius + "px";
   if (_sizePx) rootStyle["--chat-size"] = _sizePx;
@@ -2040,7 +2043,7 @@ function AgentChatEmbed({ slug, contained, override }) {
     && !hasUserMsg && !humanAgent && !csat && !activeForm && !quickReplies.length;
 
   return html`
-    <div class=${"chatembed" + (contained ? " chatembed-contained" : "") + (fullWidth ? " chatembed-fullwidth" : "") + (accent2 ? " chatembed-grad" : "")} style=${rootStyle}>
+    <div class=${"chatembed" + (contained ? " chatembed-contained" : "") + (fullWidth ? " chatembed-fullwidth" : "") + (accent2 ? " chatembed-grad" : "") + (cardGradient ? " chatembed-cardgrad" : "")} style=${rootStyle}>
       <header class="chatembed-head">
         ${avatarUrl
           ? html`<img class="chatembed-avatar chatembed-avatar-img" src=${avatarUrl} alt=${displayName} />`
@@ -11808,6 +11811,8 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
     bot_bubble_color: _cs0.bot_bubble_color || "",   // custom model-response bubble bg (blank = default)
     card_bg_color: _cs0.card_bg_color || "",     // starter-question card bg (blank = default)
     card_text_color: _cs0.card_text_color || "", // starter-question card text (blank = default)
+    card_brand_gradient: !!_cs0.card_brand_gradient,   // paint cards with the brand gradient
+
     display_name: _cs0.display_name || "",       // chat-only name override (e.g. "BlissBot")
     full_width_responses: !!_cs0.full_width_responses,   // model bubbles fill the width
     avatar_url: _cs0.avatar_url || "",
@@ -12031,6 +12036,12 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
                        onInput=${(e) => setChatField("card_text_color", e.target.value)} />
               </div>
             </label>
+            <label class="db-form-field db-form-span-2 chatcfg-check">
+              <input type="checkbox" checked=${!!chatCfg.card_brand_gradient}
+                     onChange=${(e) => setChatField("card_brand_gradient", e.target.checked)} />
+              <span><b>Brand-gradient starter cards</b><br/>
+                <span class="db-form-help" style=${{ margin: 0 }}>Paints the 4 question cards with the accent → second-colour gradient (matches the palette). Pair with a white card text colour. Overrides the solid card colour above.</span></span>
+            </label>
             <label class="db-form-field">
               <span class="db-form-label">Chat display name <span class="db-form-opt">(overrides the agent name in chat only)</span></span>
               <input class="db-input" type="text" placeholder=${agent.name} value=${chatCfg.display_name}
@@ -12175,6 +12186,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
                 bot_bubble_color: chatCfg.bot_bubble_color,
                 card_bg_color: chatCfg.card_bg_color,
                 card_text_color: chatCfg.card_text_color,
+                card_brand_gradient: chatCfg.card_brand_gradient,
                 display_name: chatCfg.display_name,
                 full_width_responses: chatCfg.full_width_responses,
                 avatar_url: chatCfg.avatar_url,

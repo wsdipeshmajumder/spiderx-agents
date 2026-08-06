@@ -109,7 +109,10 @@
     ".sxai-root[data-pos='bottom-left'] .sxai-tip{left:0;right:auto;}",
     ".sxai-fab:hover + .sxai-tip{opacity:1;transform:translateY(0);}",
     // Popover panel containing the iframe
-    ".sxai-panel{position:absolute;bottom:74px;right:0;width:min(380px,calc(100vw - 36px));height:min(600px,calc(100vh - 100px));border-radius:18px;overflow:hidden;background:#0f1119;box-shadow:0 24px 60px rgba(0,0,0,0.32),0 4px 14px rgba(0,0,0,0.18);transform-origin:bottom right;transform:scale(0.95) translateY(8px);opacity:0;pointer-events:none;transition:transform .22s cubic-bezier(.2,.9,.3,1),opacity .18s ease;}",
+    ".sxai-panel{position:absolute;bottom:74px;right:0;width:min(380px,calc(100vw - 36px));height:min(600px,calc(100vh - 100px));border-radius:18px;overflow:visible;background:#0f1119;box-shadow:0 24px 60px rgba(0,0,0,0.32),0 4px 14px rgba(0,0,0,0.18);transform-origin:bottom right;transform:scale(0.95) translateY(8px);opacity:0;pointer-events:none;transition:transform .22s cubic-bezier(.2,.9,.3,1),opacity .18s ease;}",
+    // Clip layer — rounds the iframe corners now that the panel is overflow:visible
+    // (so the close button can sit OUTSIDE the panel's top-right corner).
+    ".sxai-clip{position:absolute;inset:0;border-radius:inherit;overflow:hidden;}",
     ".sxai-root[data-pos='bottom-left'] .sxai-panel{left:0;right:auto;transform-origin:bottom left;}",
     ".sxai-panel.open{transform:scale(1) translateY(0);opacity:1;pointer-events:auto;}",
     // Fullscreen mode
@@ -121,11 +124,12 @@
     "@media (max-width:560px){.sxai-root[data-mode='drawer'] .sxai-panel{height:82vh;width:100%;border-radius:18px 18px 0 0;}}",
     ".sxai-panel iframe{width:100%;height:100%;border:0;display:block;background:#0f1119;}",
     // Close button overlay
-    // The button floats over the iframe's LIGHT chat header, so a white glyph
-    // washed out (build 339). Use a light chip + slate glyph + soft shadow so
-    // it reads clearly on the light header (and stays visible on dark).
-    ".sxai-close{position:absolute;top:10px;right:10px;width:28px;height:28px;border-radius:50%;border:1px solid rgba(0,0,0,0.08);background:rgba(255,255,255,0.92);color:#475569;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);box-shadow:0 1px 4px rgba(0,0,0,0.14);transition:background .12s,color .12s;}",
-    ".sxai-close:hover{background:#fff;color:#0f172a;}",
+    // The close button now floats OUTSIDE the panel at the top-right corner
+    // (build 343) — a white chip + slate glyph + shadow so it reads on any page.
+    ".sxai-close{position:absolute;top:-14px;right:-14px;z-index:3;width:30px;height:30px;border-radius:50%;border:1px solid rgba(0,0,0,0.08);background:#fff;color:#475569;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,0.22);transition:background .12s,color .12s,transform .12s;}",
+    ".sxai-close:hover{background:#fff;color:#0f172a;transform:scale(1.06);}",
+    // Drawer hugs the screen's right edge — keep the corner button on-screen.
+    ".sxai-root[data-mode='drawer'] .sxai-close{right:8px;top:-16px;}",
     ".sxai-close svg{width:14px;height:14px;}",
     // Proactive teaser bubble (Build 293)
     ".sxai-teaser{position:absolute;bottom:100%;right:0;margin-bottom:12px;max-width:260px;padding:12px 34px 12px 14px;border-radius:14px;background:#fff;color:#1a1c25;font-size:13.5px;line-height:1.4;box-shadow:0 10px 30px rgba(0,0,0,0.18);opacity:0;transform:translateY(8px) scale(.96);transition:opacity .25s ease,transform .25s ease;pointer-events:none;cursor:pointer;text-align:left;}",
@@ -184,7 +188,12 @@
   iframe.setAttribute("title", "SpiderX.AI — " + label);
   iframe.setAttribute("allow", "microphone; autoplay; clipboard-read; clipboard-write");
   iframe.setAttribute("loading", "lazy");
-  panel.appendChild(iframe);
+  // Clip layer rounds the iframe corners (panel is overflow:visible so the
+  // close button can escape the top-right corner).
+  var clip = document.createElement("div");
+  clip.className = "sxai-clip";
+  clip.appendChild(iframe);
+  panel.appendChild(clip);
 
   var closeBtn = document.createElement("button");
   closeBtn.className = "sxai-close";

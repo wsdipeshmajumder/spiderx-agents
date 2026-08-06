@@ -5,7 +5,21 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 342**
+**Last updated: build 343**
+
+**Build 343 (brand-gradient cards + close button moved outside the panel):**
+two changes to the chat embed:
+- Starter cards can now use the two-tone brand palette: `card_brand_gradient`
+  paints them with the `accent → accent-2` gradient (matches the Moments
+  `#e45dbf → #e5a3ff`), the card arrow follows the card text colour, and a soft
+  text-shadow keeps white text legible across the lighter end. Pair with
+  `card_text_color:"#ffffff"`. Exposed as a Chat → Appearance checkbox + live
+  preview. Verified: card bg = the gradient, text `rgb(255,255,255)`.
+- The "×" close button now floats OUTSIDE the panel at the top-right corner
+  (`.sxai-close` top/right:-14px; panel is `overflow:visible` with a new
+  `.sxai-clip` layer rounding the iframe; drawer mode keeps it on-screen). The
+  build-339 header padding reservation is removed — the header reclaims full
+  width (verified: `padding-right:14px`). Evidence: **Behavioral**.
 
 **Build 342 (brandable starter cards + unbold):** the 4 starter-question cards
 on the chat home are now brandable per-agent via two new `chat_settings` keys
