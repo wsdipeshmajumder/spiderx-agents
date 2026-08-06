@@ -1528,15 +1528,6 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   border-color: var(--chat-accent, #4f46e5); transform: translateY(-1px);
   box-shadow: 0 4px 14px rgba(0,0,0,0.06);
 }
-/* Brand-gradient starter cards (accent → accent-2) — matches the two-tone
-   palette; pair with white card text (build 343). The soft text-shadow keeps
-   white legible across the lighter end of the gradient without re-bolding. */
-.chatembed-cardgrad .chatembed-home-card {
-  background: linear-gradient(135deg, var(--chat-accent, #7c6cf6), var(--chat-accent-2, #c084fc));
-  border-color: transparent; text-shadow: 0 1px 2px rgba(0,0,0,0.16);
-}
-.chatembed-cardgrad .chatembed-home-card:hover { box-shadow: 0 6px 18px rgba(0,0,0,0.14); }
-.chatembed-cardgrad .chatembed-home-card svg { opacity: 0.9; }
 .chatembed-home-card:hover svg { opacity: 1; }
 /* Rich media cards (generative UI, Build 277) — horizontal carousel. */
 .chatembed-cards {

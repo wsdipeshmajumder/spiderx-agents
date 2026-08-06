@@ -5,7 +5,16 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 343**
+**Last updated: build 344**
+
+**Build 344 (drop the gradient card option — solid card colour only):** per
+feedback the brand-gradient starter cards weren't wanted; removed
+`card_brand_gradient` (state, checkbox, root class, `.chatembed-cardgrad` CSS).
+Starter-card branding stays solid via `card_bg_color` + `card_text_color`, with
+the card arrow following the text colour. Moments = `card_bg_color:"#e45dbf"` +
+`card_text_color:"#ffffff"`. Verified: card bg `rgb(228,93,191)`, text + arrow
+white, `font-weight:400`. Evidence: **Behavioral**. (The outside close button
+from 343 is unchanged.)
 
 **Build 343 (brand-gradient cards + close button moved outside the panel):**
 two changes to the chat embed:
