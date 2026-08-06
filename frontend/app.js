@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 341;
+const SXAI_BUILD = 342;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1988,6 +1988,11 @@ function AgentChatEmbed({ slug, contained, override }) {
   // Optional custom model-response bubble colour (background + text).
   const botBubble = /^#[0-9a-fA-F]{3,8}$/.test(cs.bot_bubble_color || "") ? cs.bot_bubble_color : null;
   const botBubbleText = /^#[0-9a-fA-F]{3,8}$/.test(cs.bot_bubble_text || "") ? cs.bot_bubble_text : null;
+  // Optional branding for the 4 starter-question cards on the chat home
+  // (background / text / border). Blank → the default neutral card.
+  const cardBg = /^#[0-9a-fA-F]{3,8}$/.test(cs.card_bg_color || "") ? cs.card_bg_color : null;
+  const cardText = /^#[0-9a-fA-F]{3,8}$/.test(cs.card_text_color || "") ? cs.card_text_color : null;
+  const cardBorder = /^#[0-9a-fA-F]{3,8}$/.test(cs.card_border_color || "") ? cs.card_border_color : null;
   // Full-width responses — model bubbles span the log to cut scroll length.
   const fullWidth = !!cs.full_width_responses;
   // Chat-only display name (e.g. "BlissBot") that never touches the voice agent's
@@ -1998,6 +2003,9 @@ function AgentChatEmbed({ slug, contained, override }) {
   if (accent2) rootStyle["--chat-accent-2"] = accent2;
   if (botBubble) rootStyle["--chat-bot-bubble"] = botBubble;
   if (botBubbleText) rootStyle["--chat-bot-bubble-text"] = botBubbleText;
+  if (cardBg) rootStyle["--chat-card-bg"] = cardBg;
+  if (cardText) rootStyle["--chat-card-text"] = cardText;
+  if (cardBorder) rootStyle["--chat-card-border"] = cardBorder;
   if (!isNaN(_radius) && _radius >= 0 && _radius <= 40) rootStyle["--chat-radius"] = _radius + "px";
   if (_sizePx) rootStyle["--chat-size"] = _sizePx;
 
@@ -11798,6 +11806,8 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
     accent_color: _cs0.accent_color || "",
     accent_color_2: _cs0.accent_color_2 || "",   // 2nd brand colour → gradient (blank = flat accent)
     bot_bubble_color: _cs0.bot_bubble_color || "",   // custom model-response bubble bg (blank = default)
+    card_bg_color: _cs0.card_bg_color || "",     // starter-question card bg (blank = default)
+    card_text_color: _cs0.card_text_color || "", // starter-question card text (blank = default)
     display_name: _cs0.display_name || "",       // chat-only name override (e.g. "BlissBot")
     full_width_responses: !!_cs0.full_width_responses,   // model bubbles fill the width
     avatar_url: _cs0.avatar_url || "",
@@ -12006,6 +12016,22 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
               </div>
             </label>
             <label class="db-form-field">
+              <span class="db-form-label">Starter card colour <span class="db-form-opt">(optional)</span></span>
+              <div class="chatcfg-color">
+                <input type="color" value=${chatCfg.card_bg_color || "#f1f2f7"} onInput=${(e) => setChatField("card_bg_color", e.target.value)} />
+                <input class="db-input" type="text" placeholder="blank = default grey" value=${chatCfg.card_bg_color}
+                       onInput=${(e) => setChatField("card_bg_color", e.target.value)} />
+              </div>
+            </label>
+            <label class="db-form-field">
+              <span class="db-form-label">Starter card text colour <span class="db-form-opt">(optional)</span></span>
+              <div class="chatcfg-color">
+                <input type="color" value=${chatCfg.card_text_color || "#1a1c25"} onInput=${(e) => setChatField("card_text_color", e.target.value)} />
+                <input class="db-input" type="text" placeholder="blank = default" value=${chatCfg.card_text_color}
+                       onInput=${(e) => setChatField("card_text_color", e.target.value)} />
+              </div>
+            </label>
+            <label class="db-form-field">
               <span class="db-form-label">Chat display name <span class="db-form-opt">(overrides the agent name in chat only)</span></span>
               <input class="db-input" type="text" placeholder=${agent.name} value=${chatCfg.display_name}
                      onInput=${(e) => setChatField("display_name", e.target.value)} />
@@ -12147,6 +12173,8 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
                 accent_color: chatCfg.accent_color,
                 accent_color_2: chatCfg.accent_color_2,
                 bot_bubble_color: chatCfg.bot_bubble_color,
+                card_bg_color: chatCfg.card_bg_color,
+                card_text_color: chatCfg.card_text_color,
                 display_name: chatCfg.display_name,
                 full_width_responses: chatCfg.full_width_responses,
                 avatar_url: chatCfg.avatar_url,

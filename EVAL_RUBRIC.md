@@ -5,7 +5,15 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 341**
+**Last updated: build 342**
+
+**Build 342 (brandable starter cards + unbold):** the 4 starter-question cards
+on the chat home are now brandable per-agent via two new `chat_settings` keys
+(`card_bg_color`, `card_text_color` → `--chat-card-bg` / `--chat-card-text`;
+`--chat-card-border` also honoured), exposed in Chat → Appearance and wired
+through the live preview. Card text weight dropped 600 → 400 (unbold) per the
+Moments feedback. Verified live: computed `--chat-card-bg` `#fbeef8`, text
+`#3a1230`, `font-weight:400`. Evidence: **Behavioral**.
 
 **Build 341 (per-agent chat brand kit — for Moments/BlissBot):** five new
 `chat_settings` keys make the embed brandable without code per-agent, all
