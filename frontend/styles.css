@@ -1231,9 +1231,12 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   padding: 12px 14px; border-bottom: 1px solid var(--border, #e6e8ef);
   flex-shrink: 0;
 }
-/* (Build 343) The embed's "×" close button now floats OUTSIDE the panel's
-   top-right corner (embed.js), so the header no longer needs to reserve room
-   for it — the actions cluster uses the full width again. */
+/* The embed's "×" close button floats just outside the panel's top-right
+   corner (embed.js). Keep the header actions inset from that corner so
+   "New chat" never sits under the close — critical on mobile, where New chat
+   collapses to an icon jammed in the rounded corner and became un-tappable
+   (build 345). The operator preview has no close overlay, so it keeps 14px. */
+.chatembed:not(.chatembed-contained) .chatembed-head { padding-right: 30px; }
 .chatembed-avatar {
   width: 34px; height: 34px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
@@ -1264,8 +1267,14 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 .chatembed-newchat svg { flex: none; }
 .chatembed-newchat:hover { background: var(--bg-1, #eef0f6); color: var(--chat-accent, #4f46e5); border-color: var(--chat-accent, #4f46e5); }
 /* On the narrowest widgets, drop the label back to just the icon so the header
-   doesn't crowd next to "Talk to a human". */
-@media (max-width: 360px) { .chatembed-newchat-label { display: none; } .chatembed-newchat { padding: 6px; } }
+   doesn't crowd next to "Talk to a human". Give the icon a full ~38px round tap
+   target (was a cramped ~26px that was hard to hit on phones — build 345), and
+   keep the human button a comfortable touch height too. */
+@media (max-width: 360px) {
+  .chatembed-newchat-label { display: none; }
+  .chatembed-newchat { padding: 0; width: 38px; height: 38px; justify-content: center; }
+  .chatembed-human { min-height: 38px; padding: 6px 12px; }
+}
 /* Clickable links inside chat bubbles (build 321). */
 .chatembed-bubble a { color: var(--chat-accent, #4f46e5); text-decoration: underline; word-break: break-word; }
 .chatembed-msg-user .chatembed-bubble a { color: #fff; }

@@ -5,7 +5,22 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 344**
+**Last updated: build 345**
+
+**Build 345 (fix: "New chat" un-tappable on mobile):** regression from build 343
+— removing the header's right-padding reservation and floating the "×" close at
+the panel's top-right corner left the "New chat" control (which collapses to a
+bare ~26px icon when the panel iframe is <360px, i.e. essentially every phone)
+jammed into the rounded corner directly under the close button, so it was very
+hard to tap and mis-taps hit the close. Diagnosis: the `newChat()` handler
+itself works (native click fires it; the button centre hit-tests to the iframe)
+— it was purely a tap-target/geometry problem. Fix: (1) restore a 30px right
+inset on the real-embed header so the actions stay clear of the corner + close
+(`.chatembed:not(.chatembed-contained) .chatembed-head`), and (2) enlarge the
+icon-only New chat to a full 38×38 target (+ 38px min on the human button) in
+the `max-width:360px` query. Verified in the real embed.js widget at 375px: New
+chat 38×38, 14px clear of the close, centre hit-tests to the iframe. Evidence:
+**Behavioral**.
 
 **Build 344 (drop the gradient card option — solid card colour only):** per
 feedback the brand-gradient starter cards weren't wanted; removed
