@@ -1,0 +1,297 @@
+"""Client-ready XLSX performance report for the Chat channel (Conversations tab
+→ Export). Two sheets:
+
+  • Summary       — a branded, one-page KPI overview an operator can forward to
+                    a client as-is (period, volumes, resolution, satisfaction,
+                    leads captured, outcome breakdown).
+  • Conversations — one styled row per chat (date, outcome, duration, rating,
+                    handoff, captured lead info, summary).
+
+Pure-Python via openpyxl (no system libs). The generator is defensive: any
+missing/odd field degrades to a blank cell rather than raising — an export must
+never 500 on one weird row.
+"""
+from __future__ import annotations
+
+import io
+import re
+from collections import Counter
+from datetime import datetime, timezone
+from typing import Any, Optional
+
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
+
+# Fields inside `extracted` that are meta, not captured lead info.
+_META_KEYS = {"csat", "csat_comment", "handoff_requested", "handoff_reason"}
+
+_HEX_RE = re.compile(r"^#?[0-9a-fA-F]{6}$")
+_DEFAULT_ACCENT = "4F46E5"   # indigo — matches the widget default
+
+
+def _accent(agent: dict) -> str:
+    """Brand colour (ARGB-friendly 6-hex, no #) from chat_settings.accent_color."""
+    cs = agent.get("chat_settings") if isinstance(agent.get("chat_settings"), dict) else {}
+    raw = (cs.get("accent_color") or "").strip()
+    if _HEX_RE.match(raw):
+        return raw.lstrip("#").upper()
+    return _DEFAULT_ACCENT
+
+
+def _display_name(agent: dict) -> str:
+    cs = agent.get("chat_settings") if isinstance(agent.get("chat_settings"), dict) else {}
+    return (cs.get("display_name") or "").strip() or (agent.get("name") or "Assistant")
+
+
+def _business(agent: dict) -> str:
+    v = agent.get("variables") if isinstance(agent.get("variables"), dict) else {}
+    return (v.get("business_name") or "").strip() or (agent.get("name") or "")
+
+
+def _fmt_dt(dt: Any) -> str:
+    if not isinstance(dt, datetime):
+        return ""
+    return dt.strftime("%d %b %Y, %H:%M")
+
+
+def _fmt_date(dt: Any) -> str:
+    if not isinstance(dt, datetime):
+        return ""
+    return dt.strftime("%d %b %Y")
+
+
+def _fmt_dur(sec: Any) -> str:
+    try:
+        s = int(round(float(sec)))
+    except (TypeError, ValueError):
+        return ""
+    if s <= 0:
+        return ""
+    m, r = divmod(s, 60)
+    return f"{m}m {r:02d}s" if m else f"{r}s"
+
+
+def _captured(ex: dict) -> dict:
+    return {k: v for k, v in ex.items() if k not in _META_KEYS and v not in (None, "", [])}
+
+
+def _flatten_captured(ex: dict) -> str:
+    parts = []
+    for k, v in _captured(ex).items():
+        label = str(k).replace("_", " ").strip()
+        val = ", ".join(map(str, v)) if isinstance(v, list) else (
+            str(v) if not isinstance(v, dict) else "; ".join(f"{a}: {b}" for a, b in v.items())
+        )
+        parts.append(f"{label}: {val}")
+    return "  •  ".join(parts)
+
+
+def _rating(ex: dict) -> str:
+    c = ex.get("csat")
+    return {"up": "Positive", "down": "Needs work"}.get(c, "")
+
+
+def build_chat_report_xlsx(
+    agent: dict,
+    calls: list[dict],
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+    generated_at: Optional[datetime] = None,
+) -> bytes:
+    """Render the two-sheet report and return the .xlsx bytes."""
+    generated_at = generated_at or datetime.now(timezone.utc)
+    accent = _accent(agent)
+    business = _business(agent)
+    bot = _display_name(agent)
+
+    # ── styles ──────────────────────────────────────────────────────────────
+    white = Font(name="Calibri", color="FFFFFF", bold=True, size=11)
+    title_font = Font(name="Calibri", color="FFFFFF", bold=True, size=18)
+    sub_font = Font(name="Calibri", color="FFFFFF", size=11)
+    label_font = Font(name="Calibri", color="5B6070", size=10, bold=True)
+    metric_font = Font(name="Calibri", color="1A1C25", size=20, bold=True)
+    small = Font(name="Calibri", color="6B7080", size=9)
+    accent_fill = PatternFill("solid", fgColor=accent)
+    card_fill = PatternFill("solid", fgColor="F5F6FA")
+    zebra = PatternFill("solid", fgColor="F7F8FC")
+    thin = Side(style="thin", color="E6E8EF")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    wrap_top = Alignment(vertical="top", wrap_text=True)
+    center = Alignment(horizontal="center", vertical="center")
+    left_mid = Alignment(horizontal="left", vertical="center")
+
+    # ── KPIs ────────────────────────────────────────────────────────────────
+    total = len(calls)
+    handoffs = 0
+    csat_up = csat_down = 0
+    leads = 0
+    durations = []
+    outcomes: Counter = Counter()
+    period_min = period_max = None
+    for c in calls:
+        ex = c.get("extracted") if isinstance(c.get("extracted"), dict) else {}
+        if ex.get("handoff_requested") or c.get("outcome") == "transferred_human":
+            handoffs += 1
+        if ex.get("csat") == "up":
+            csat_up += 1
+        elif ex.get("csat") == "down":
+            csat_down += 1
+        if _captured(ex):
+            leads += 1
+        d = c.get("duration_s")
+        if isinstance(d, (int, float)) and d > 0:
+            durations.append(d)
+        outcomes[(c.get("outcome") or "unknown")] += 1
+        st = c.get("started_at")
+        if isinstance(st, datetime):
+            period_min = st if period_min is None or st < period_min else period_min
+            period_max = st if period_max is None or st > period_max else period_max
+
+    rated = csat_up + csat_down
+    resolved_ai = total - handoffs
+    avg_dur = (sum(durations) / len(durations)) if durations else 0
+    period_lo = date_from or period_min
+    period_hi = date_to or period_max
+    period_str = (
+        f"{_fmt_date(period_lo)} – {_fmt_date(period_hi)}"
+        if period_lo and period_hi else "All time"
+    )
+
+    wb = Workbook()
+
+    # ══ Sheet 1 · Summary ═════════════════════════════════════════════════════
+    ws = wb.active
+    ws.title = "Summary"
+    ws.sheet_view.showGridLines = False
+    widths = [3, 24, 22, 22, 22, 3]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    # Banner (rows 1-3, cols B..E)
+    ws.merge_cells("B1:E1")
+    ws["B1"] = f"{business or bot} — Chat Performance Report"
+    ws["B1"].font = title_font
+    ws["B1"].alignment = Alignment(vertical="center", horizontal="left")
+    ws.merge_cells("B2:E2")
+    ws["B2"] = f"AI assistant: {bot}    ·    Period: {period_str}"
+    ws["B2"].font = sub_font
+    ws.merge_cells("B3:E3")
+    ws["B3"] = f"Generated {generated_at.strftime('%d %b %Y')}    ·    Powered by SpiderX.AI"
+    ws["B3"].font = sub_font
+    for r in (1, 2, 3):
+        for col in range(1, 7):
+            ws.cell(row=r, column=col).fill = accent_fill
+    ws.row_dimensions[1].height = 34
+    ws.row_dimensions[2].height = 18
+    ws.row_dimensions[3].height = 18
+
+    # KPI cards (2 rows × 3). (label, value)
+    sat = f"{round(100 * csat_up / rated)}%" if rated else "—"
+    cards = [
+        ("Total conversations", str(total)),
+        ("Resolved by AI", str(resolved_ai)),
+        ("Human handoffs", str(handoffs)),
+        ("Positive rating", sat),
+        ("Leads / info captured", str(leads)),
+        ("Avg conversation length", _fmt_dur(avg_dur) or "—"),
+    ]
+    start_row = 5
+    positions = [("B", "C"), ("C", "C"), ("D", "D")]  # placeholder; compute below
+    col_pairs = [("B",), ("C",), ("D",), ("E",)]
+    # Lay 3 cards per row across B,C,D (E is spacer-narrow) — use B, C, D, and
+    # wrap; simplest: map card index → (row, col) over cols B,C,D.
+    grid_cols = ["B", "C", "D"]
+    for idx, (label, value) in enumerate(cards):
+        gr = start_row + (idx // 3) * 4
+        gc = grid_cols[idx % 3]
+        lab = ws[f"{gc}{gr}"]
+        lab.value = label.upper()
+        lab.font = label_font
+        lab.fill = card_fill
+        lab.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+        val = ws[f"{gc}{gr + 1}"]
+        val.value = value
+        val.font = metric_font
+        val.fill = card_fill
+        val.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+        ws.row_dimensions[gr].height = 20
+        ws.row_dimensions[gr + 1].height = 30
+        for rr in (gr, gr + 1):
+            ws[f"{gc}{rr}"].border = border
+
+    # Outcome breakdown table
+    tbl_row = start_row + 8
+    ws[f"B{tbl_row}"] = "Outcome breakdown"
+    ws[f"B{tbl_row}"].font = Font(name="Calibri", bold=True, size=12, color="1A1C25")
+    hdr = tbl_row + 1
+    for col, name in zip(("B", "C", "D"), ("Outcome", "Count", "Share")):
+        cell = ws[f"{col}{hdr}"]
+        cell.value = name
+        cell.font = white
+        cell.fill = accent_fill
+        cell.alignment = left_mid if col == "B" else center
+        cell.border = border
+    ri = hdr + 1
+    for outcome, n in outcomes.most_common():
+        ws[f"B{ri}"] = str(outcome).replace("_", " ")
+        ws[f"C{ri}"] = n
+        ws[f"D{ri}"] = (n / total) if total else 0
+        ws[f"D{ri}"].number_format = "0%"
+        ws[f"B{ri}"].alignment = left_mid
+        ws[f"C{ri}"].alignment = center
+        ws[f"D{ri}"].alignment = center
+        for col in ("B", "C", "D"):
+            ws[f"{col}{ri}"].border = border
+            if (ri - hdr) % 2 == 0:
+                ws[f"{col}{ri}"].fill = zebra
+        ri += 1
+
+    note = ws.cell(row=ri + 1, column=2)
+    note.value = ("“Resolved by AI” = conversations handled end-to-end without a human handoff.  "
+                  "“Positive rating” = share of rated chats the visitor marked 👍.")
+    note.font = small
+
+    # ══ Sheet 2 · Conversations ═══════════════════════════════════════════════
+    ws2 = wb.create_sheet("Conversations")
+    ws2.sheet_view.showGridLines = False
+    headers = ["Date", "Time", "Outcome", "Duration", "Rating", "Handoff", "Captured info", "Summary"]
+    cwidths = [14, 8, 20, 11, 12, 10, 42, 60]
+    for i, w in enumerate(cwidths, start=1):
+        ws2.column_dimensions[get_column_letter(i)].width = w
+    for i, h in enumerate(headers, start=1):
+        cell = ws2.cell(row=1, column=i, value=h)
+        cell.font = white
+        cell.fill = accent_fill
+        cell.alignment = center if h in ("Duration", "Rating", "Handoff") else left_mid
+        cell.border = border
+    ws2.row_dimensions[1].height = 22
+    ws2.freeze_panes = "A2"
+
+    r = 2
+    for c in calls:
+        ex = c.get("extracted") if isinstance(c.get("extracted"), dict) else {}
+        st = c.get("started_at")
+        row_vals = [
+            _fmt_date(st),
+            st.strftime("%H:%M") if isinstance(st, datetime) else "",
+            str(c.get("outcome") or "unknown").replace("_", " "),
+            _fmt_dur(c.get("duration_s")),
+            _rating(ex),
+            "Yes" if (ex.get("handoff_requested") or c.get("outcome") == "transferred_human") else "",
+            _flatten_captured(ex),
+            (c.get("summary") or "").strip(),
+        ]
+        for i, v in enumerate(row_vals, start=1):
+            cell = ws2.cell(row=r, column=i, value=v)
+            cell.border = border
+            cell.alignment = center if i in (4, 5, 6) else wrap_top
+            if r % 2 == 0:
+                cell.fill = zebra
+        r += 1
+    if not calls:
+        ws2.cell(row=2, column=1, value="No conversations in this period.").font = Font(italic=True, color="6B7080")
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()

@@ -6,13 +6,13 @@ import logging
 import os
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -119,7 +119,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 348
+APP_BUILD = 349
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1666,12 +1666,31 @@ async def agent_stats(agent_id: int, request: Request, channel: Optional[str] = 
     return await db.call_stats_for_agent(agent_id, channel=channel)
 
 
+def _parse_day(s: Optional[str], *, end: bool = False) -> Optional[datetime]:
+    """Parse a YYYY-MM-DD query param into a UTC datetime. `end=True` returns
+    the start of the NEXT day so the range can be used as an exclusive upper
+    bound (i.e. the whole `to` day is included)."""
+    if not s:
+        return None
+    try:
+        d = datetime.strptime(s.strip()[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+    return d + timedelta(days=1) if end else d
+
+
 @app.get("/api/agents/{agent_id}/calls")
-async def agent_calls(agent_id: int, limit: int = 50, channel: Optional[str] = None, request: Request = None) -> list[dict]:
+async def agent_calls(agent_id: int, limit: int = 50, channel: Optional[str] = None,
+                      date_from: Optional[str] = None, date_to: Optional[str] = None,
+                      request: Request = None) -> list[dict]:
     """Default: voice + phone (Call logs). `?channel=web_chat` → chat sessions
-    (Chat-widget page)."""
+    (Chat-widget page). `date_from`/`date_to` (YYYY-MM-DD, inclusive) filter the
+    window — powers the Conversations date filter."""
     await _require_agent_owned(agent_id, await current_user(request))
-    rows = await db.list_calls_for_agent(agent_id, limit=limit, channel=channel)
+    rows = await db.list_calls_for_agent(
+        agent_id, limit=limit, channel=channel,
+        date_from=_parse_day(date_from), date_to=_parse_day(date_to, end=True),
+    )
     # Surface recording playback in the LIST too (not just the detail modal) so an
     # operator can spot + play a call's audio straight from the log. Gated on the
     # file actually being on disk (same check as the detail view) so a wiped/absent
@@ -1692,6 +1711,31 @@ async def agent_live_chats(agent_id: int, request: Request) -> dict:
     await _require_agent_owned(agent_id, await current_user(request))
     from . import chat_bridge
     return {"live": chat_bridge.live_chats_for_agent(agent_id)}
+
+
+@app.get("/api/agents/{agent_id}/chat/export.xlsx")
+async def agent_chat_export(agent_id: int, request: Request,
+                            date_from: Optional[str] = None,
+                            date_to: Optional[str] = None) -> Response:
+    """Download a client-ready XLSX performance report for the Chat channel
+    (Conversations tab → Export). Honours the same date window as the list."""
+    agent = await _require_agent_owned(agent_id, await current_user(request))
+    df, dt = _parse_day(date_from), _parse_day(date_to, end=True)
+    calls = await db.list_calls_for_agent(
+        agent_id, limit=5000, channel="web_chat", date_from=df, date_to=dt,
+    )
+    from . import chat_report
+    data = chat_report.build_chat_report_xlsx(
+        agent, calls, date_from=df, date_to=(dt - timedelta(days=1)) if dt else None,
+    )
+    slug = (agent.get("slug") or str(agent_id)).replace("/", "-")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+    fname = f"chat-report-{slug}-{stamp}.xlsx"
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
 
 
 _CONNECTOR_LABELS = {

@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 348;
+const SXAI_BUILD = 349;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -11704,7 +11704,7 @@ function ChatDetailDrawer({ loading, data, agent, onClose }) {
 
 // LiveChatModal — operator watches a live visitor chat in real time and can
 // JOIN as a human (pausing the AI) via /ws/session?mode=chat_observe (Build 290).
-function LiveChatModal({ agent, sid, onClose }) {
+function LiveChatModal({ agent, sid, onClose, inline }) {
   const [msgs, setMsgs] = useState([]);
   const [status, setStatus] = useState("connecting");  // connecting | live | ended | error
   const [joined, setJoined] = useState(false);
@@ -11748,12 +11748,10 @@ function LiveChatModal({ agent, sid, onClose }) {
   const sendMsg = (e) => { e?.preventDefault(); const t = input.trim(); if (!t) return; send({ type: "message", text: t }); setInput(""); };
 
   const live = status === "live";
-  return html`
-    <div class="db-modal-backdrop" onClick=${onClose}>
-      <div class="db-modal livechat-modal" onClick=${(e) => e.stopPropagation()}>
-        <header class="db-modal-head">
+  const inner = html`
+        <header class="db-modal-head livechat-head">
           <h2>Live chat ${live ? html`<span class=${"db-pill-soft " + (joined ? "livechat-pill-join" : "")}>${joined ? "you're in control" : "watching"}</span>` : ""}</h2>
-          <button class="db-modal-close" onClick=${onClose}>×</button>
+          <button class="db-modal-close" onClick=${onClose} aria-label=${inline ? "Close live chat" : "Close"}>×</button>
         </header>
         <div class="livechat-log" ref=${logRef}>
           ${msgs.length === 0 && status === "connecting" ? html`<div class="livechat-sys">Connecting to the live chat…</div>` : ""}
@@ -11781,7 +11779,12 @@ function LiveChatModal({ agent, sid, onClose }) {
             <button class="db-btn-primary db-btn-sm" type="submit" disabled=${!input.trim() || !live}>Send</button>
           </form>
         `}
-      </div>
+  `;
+  // Inline (Conversations right pane) vs the standalone modal overlay.
+  if (inline) return html`<div class="livechat-inline">${inner}</div>`;
+  return html`
+    <div class="db-modal-backdrop" onClick=${onClose}>
+      <div class="db-modal livechat-modal" onClick=${(e) => e.stopPropagation()}>${inner}</div>
     </div>
   `;
 }
@@ -11857,12 +11860,37 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   const [chatTab, setChatTab] = useState("settings");
   // Chat conversation logs live here (separate from voice/phone Call logs).
   const [chatLogs, setChatLogs] = useState(null);
+  // Date-range filter (YYYY-MM-DD, inclusive) — drives the list AND the export.
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const chatLogQuery = () => {
+    const p = new URLSearchParams({ channel: "web_chat", limit: "500" });
+    if (dateFrom) p.set("date_from", dateFrom);
+    if (dateTo) p.set("date_to", dateTo);
+    return p.toString();
+  };
   const loadChatLogs = () => {
-    fetch(`/api/agents/${agent.id}/calls?channel=web_chat&limit=25`)
+    setChatLogs(null);
+    fetch(`/api/agents/${agent.id}/calls?${chatLogQuery()}`)
       .then((r) => r.json()).then((d) => setChatLogs(Array.isArray(d) ? d : []))
       .catch(() => setChatLogs([]));
   };
   useEffect(() => { if (hasChat) loadChatLogs(); }, [hasChat]);
+  // Re-query when the date window changes (debounced a touch so typing a date
+  // doesn't fire mid-keystroke).
+  useEffect(() => {
+    if (!hasChat) return;
+    const t = setTimeout(loadChatLogs, 250);
+    return () => clearTimeout(t);
+  }, [dateFrom, dateTo]);
+  // Export the current (filtered) window as the client-ready XLSX report.
+  const exportChatReport = () => {
+    const p = new URLSearchParams();
+    if (dateFrom) p.set("date_from", dateFrom);
+    if (dateTo) p.set("date_to", dateTo);
+    const qs = p.toString();
+    window.open(`/api/agents/${agent.id}/chat/export.xlsx${qs ? "?" + qs : ""}`, "_blank");
+  };
 
   // Open a past chat's full transcript (reuses the Call Details modal).
   const [detailId, setDetailId] = useState(null);
@@ -12260,7 +12288,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
         </div>
         <ul class="call-log livechat-list">
           ${liveChats.map((lc) => html`
-            <li key=${lc.sid} class="call-row livechat-live-row" onClick=${() => setLiveSid(lc.sid)}>
+            <li key=${lc.sid} class=${"call-row livechat-live-row" + (liveSid === lc.sid ? " is-selected" : "")} onClick=${() => { setLiveSid(lc.sid); setDetailId(null); }}>
               <div class="call-row-head">
                 <span class="call-channel call-channel-web_chat">💬 Live</span>
                 ${lc.human_control ? html`<span class="db-pill-soft livechat-pill-join">${lc.operator_name || "human"} in control</span>` : ""}
@@ -12281,11 +12309,24 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
         </div>
         <button class="db-btn-ghost db-btn-sm" onClick=${loadChatLogs}>↻ Refresh</button>
       </div>
+      <div class="chatconv-toolbar">
+        <label class="chatconv-datefld">From<input type="date" class="db-input" value=${dateFrom} max=${dateTo || undefined}
+                 onInput=${(e) => setDateFrom(e.target.value)} /></label>
+        <label class="chatconv-datefld">To<input type="date" class="db-input" value=${dateTo} min=${dateFrom || undefined}
+                 onInput=${(e) => setDateTo(e.target.value)} /></label>
+        ${(dateFrom || dateTo) ? html`<button class="db-btn-ghost db-btn-sm" onClick=${() => { setDateFrom(""); setDateTo(""); }}>Clear</button>` : ""}
+        <span class="chatconv-toolbar-spacer"></span>
+        <button class="db-btn-primary db-btn-sm" onClick=${exportChatReport} disabled=${!chatLogs || chatLogs.length === 0}
+                title="Download a client-ready XLSX performance report for the selected dates">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+          <span>Export report</span>
+        </button>
+      </div>
       ${chatLogs === null ? html`<div class="db-loading-sm">Loading…</div>`
         : chatLogs.length === 0 ? html`<div class="db-form-help" style=${{ padding: "10px 0" }}>No chats yet — conversations appear here once visitors start chatting.</div>`
         : html`<ul class="call-log">
             ${chatLogs.map((c) => html`
-              <li key=${c.id} class=${"call-row call-row-clickable" + (detailId === c.id ? " is-selected" : "")} onClick=${() => setDetailId(c.id)}>
+              <li key=${c.id} class=${"call-row call-row-clickable" + (detailId === c.id ? " is-selected" : "")} onClick=${() => { setDetailId(c.id); setLiveSid(null); }}>
                 <div class="call-row-head">
                   <span class=${"call-outcome call-outcome-" + (c.outcome || "unknown")}>${(c.outcome || "unknown").replace(/_/g, " ")}</span>
                   <span class="call-channel call-channel-web_chat">💬 Chat</span>
@@ -12298,17 +12339,22 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
           </ul>`}
     </section>
     <section class="db-panel chatconv-detail">
-      <header class="chatdrawer-head chatconv-detail-head">
-        <div class="chatdrawer-head-meta">
-          <div class="chatdrawer-title">Chat details</div>
-          ${detailId && detail && !detail._err && !detailLoading ? chatDetailHeadRow(detail) : ""}
-        </div>
-      </header>
-      <div class="chatdrawer-body chatconv-detail-body">
-        ${!detailId
-          ? html`<div class="chatconv-empty"><span class="chatconv-empty-glyph" aria-hidden="true">💬</span><div>Select a conversation on the left to read its full transcript here.</div></div>`
-          : chatDetailBody(detailLoading, detail, agent)}
-      </div>
+      ${liveSid
+        ? html`<${LiveChatModal} inline=${true} agent=${agent} sid=${liveSid}
+                  onClose=${() => { setLiveSid(null); loadChatLogs(); }} />`
+        : html`
+          <header class="chatdrawer-head chatconv-detail-head">
+            <div class="chatdrawer-head-meta">
+              <div class="chatdrawer-title">Chat details</div>
+              ${detailId && detail && !detail._err && !detailLoading ? chatDetailHeadRow(detail) : ""}
+            </div>
+          </header>
+          <div class="chatdrawer-body chatconv-detail-body">
+            ${!detailId
+              ? html`<div class="chatconv-empty"><span class="chatconv-empty-glyph" aria-hidden="true">💬</span><div>Select a conversation on the left to read its full transcript here — or a live chat to watch it in real time.</div></div>`
+              : chatDetailBody(detailLoading, detail, agent)}
+          </div>
+        `}
     </section>
     </div>
   ` : "";
@@ -12419,7 +12465,6 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
           : chatPanel}
       </div>
     </div>
-    ${liveSid ? html`<${LiveChatModal} agent=${agent} sid=${liveSid} onClose=${() => { setLiveSid(null); loadChatLogs(); }} />` : ""}
     ${instrFull ? html`
       <div class="db-modal-backdrop" onClick=${() => setInstrFull(false)}>
         <div class="db-modal chatinstr-modal" onClick=${(e) => e.stopPropagation()}>

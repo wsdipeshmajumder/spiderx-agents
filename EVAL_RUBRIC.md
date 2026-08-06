@@ -5,7 +5,26 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 348**
+**Last updated: build 349**
+
+**Build 349 (Conversations: live chat in the right pane + date filter + XLSX export):**
+three changes to the Chat → Conversations tab:
+- The live-chat watch/join view now opens INLINE in the right pane (a new
+  `LiveChatModal({inline})` variant / `.livechat-inline`) instead of a modal
+  overlay; recent chats already used the pane. Clicking a live row clears the
+  recorded selection and vice-versa. Verified live: clicking a live chat shows
+  it in `.chatconv-detail` with no `.db-modal-backdrop`; clicking a recent chat
+  swaps the pane to its transcript.
+- Date-range filter (From/To) above the list → `date_from`/`date_to`
+  (YYYY-MM-DD, inclusive) on `GET /api/agents/{id}/calls` and the export.
+  Verified: full window 26 rows, one-day filter 11 rows.
+- Client-ready XLSX export (`GET /api/agents/{id}/chat/export.xlsx`, new
+  `backend/chat_report.py` via openpyxl): Sheet 1 branded KPI summary (period,
+  total, resolved-by-AI, handoffs, positive-rating %, leads captured, avg
+  length, outcome breakdown), Sheet 2 one styled row per chat. Verified: valid
+  .xlsx, 2 sheets, correct KPIs (80% = 4/5 rated, avg 2m30s), honours the date
+  window. Evidence: **Behavioral** (dashboard render-tested with a temp local
+  chat entitlement; export validated over HTTP + reopened with openpyxl).
 
 **Build 348 (professional mono icons on the settings accordions):** replaced the
 emoji in the six chat-settings accordion headers with monochrome line icons

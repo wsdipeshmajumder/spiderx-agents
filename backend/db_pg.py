@@ -1096,15 +1096,29 @@ def _channel_filter(channel: Optional[str]) -> str:
 
 
 async def list_calls_for_agent(agent_id: int, limit: int = 50,
-                               channel: Optional[str] = None) -> list[dict[str, Any]]:
+                               channel: Optional[str] = None,
+                               date_from: Optional[datetime] = None,
+                               date_to: Optional[datetime] = None) -> list[dict[str, Any]]:
     """Build 217: include the `extracted` JSONB so the call log's
     Tags column can render per-industry chips (party_size, date,
     seating_pref, etc.) without an extra round-trip per row. Payload
     grows ~150 B per call — trivial at any reasonable list size.
 
     `channel='web_chat'` returns only chat sessions (Chat page); the default
-    returns voice + phone (Call logs), keeping the two surfaces separate."""
+    returns voice + phone (Call logs), keeping the two surfaces separate.
+
+    `date_from` / `date_to` (inclusive lower, exclusive upper) filter on
+    `started_at` — powers the Conversations date filter + XLSX export."""
     chf = _channel_filter(channel)
+    params: list[Any] = [agent_id]
+    where_dates = ""
+    if date_from is not None:
+        params.append(date_from)
+        where_dates += f" AND started_at >= ${len(params)}"
+    if date_to is not None:
+        params.append(date_to)
+        where_dates += f" AND started_at < ${len(params)}"
+    params.append(limit)
     pool = await get_pool()
     async with pool.acquire() as conn:
         rs = await conn.fetch(
@@ -1112,8 +1126,8 @@ async def list_calls_for_agent(agent_id: int, limit: int = 50,
             "       sentiment, lead_quality, lead_signals, extracted, channel, "
             "       cost_paise, caller_number, "
             "       recording_path, recording_size_bytes, recording_purged_at "
-            f"FROM calls WHERE agent_id = $1 {chf} ORDER BY id DESC LIMIT $2",
-            agent_id, limit,
+            f"FROM calls WHERE agent_id = $1 {chf}{where_dates} ORDER BY id DESC LIMIT ${len(params)}",
+            *params,
         )
     return _records_to_list(rs)
 

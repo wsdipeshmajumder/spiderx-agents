@@ -31,3 +31,7 @@ PyYAML>=6.0
 # same API. Railpack resolves Python 3.13 by default on Railway, so
 # this pin is mandatory; on local Python 3.9-3.12 it's a no-op.
 audioop-lts>=0.2; python_version >= "3.13"
+
+# XLSX export of the chat performance report (Conversations tab → Export).
+# Pure-Python, no system libs; used by backend/chat_report.py.
+openpyxl>=3.1

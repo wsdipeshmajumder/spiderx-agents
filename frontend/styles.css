@@ -1412,6 +1412,22 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 .chatconv-empty { display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center; gap: 10px; padding: 48px 24px; color: var(--fg-dim, #9aa0ad); font-size: 13.5px; min-height: 220px; }
 .chatconv-empty-glyph { font-size: 30px; opacity: 0.6; }
+/* Date-filter + export toolbar above the recent-chats list (build 349). */
+.chatconv-toolbar { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin: 4px 0 12px; }
+.chatconv-datefld { display: flex; flex-direction: column; gap: 3px; font-size: 11px; font-weight: 600;
+  color: var(--fg-mute, #6b7080); text-transform: uppercase; letter-spacing: 0.02em; }
+.chatconv-datefld .db-input { padding: 6px 8px; font-size: 12.5px; min-width: 132px; text-transform: none; letter-spacing: 0; }
+.chatconv-toolbar-spacer { flex: 1 1 auto; }
+.chatconv-toolbar .db-btn-primary { display: inline-flex; align-items: center; gap: 6px; }
+.chatconv-toolbar .db-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Live chat rendered INLINE in the right pane (build 349) instead of a modal —
+   fills the pane, its own header/log/controls scroll within it. */
+.livechat-inline { display: flex; flex-direction: column; min-height: 0; max-height: calc(100vh - 150px); }
+.livechat-inline .db-modal-head { padding: 4px 4px 12px; border-bottom: 1px solid var(--border, #e6e8ef); }
+.livechat-inline .db-modal-head h2 { font-size: 15px; }
+.livechat-inline .livechat-log { flex: 1; min-height: 160px; overflow-y: auto; padding: 12px 2px; }
+.livechat-inline .livechat-controls,
+.livechat-inline .livechat-input { padding-left: 2px; padding-right: 2px; }
 .call-row.is-selected { background: #eef0ff; box-shadow: inset 3px 0 0 #4f46e5; }
 :root[data-theme="dark"] .call-row.is-selected { background: #1e2233; box-shadow: inset 3px 0 0 #6366f1; }
 @media (max-width: 860px) { .chatconv-layout { grid-template-columns: 1fr; } .chatconv-detail { position: static; max-height: none; } }
