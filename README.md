@@ -7,10 +7,13 @@ want (sector, language, persona, guardrails, what callers usually need), and it
 saves the agent and immediately hands the live call over to the new persona —
 so you're testing exactly what you just designed, in the same breath.
 
-There is no other UI. No forms, no dropdowns, no buttons. Eva handles every
-configuration decision conversationally and chooses sensible defaults
-silently. Connectors fire as real Gemini function tools during a test call.
-Real inbound phone calls work through the Twilio Media Streams bridge.
+The voice blob is the *builder* surface: Eva handles agent creation
+conversationally and chooses sensible defaults silently. Beyond it there's now a
+full web dashboard (agent settings, call & chat analytics, conversations,
+connectors, pricing) and an embeddable **text-chat channel** for any website
+(see **Chat delivery** below). Connectors fire as real Gemini function tools
+during a test call; real inbound phone calls work through the Twilio Media
+Streams bridge.
 
 ```
           ┌─────────────────┐    PCM16 / 16 kHz mic    ┌──────────────┐
@@ -56,13 +59,15 @@ then it's a different voice in your ear.
 ```bash
 cd /Users/dipeshmajumder/phone_ai
 cp .env.example .env
-# paste your Gemini key (ipi-gemini-api-key) into .env
+# set GEMINI_API_KEY and DATABASE_URL (a Postgres connection) in .env
 ./run.sh
 # open http://127.0.0.1:8765 in Chrome / Safari, allow microphone
 ```
 
-No Node build step. The single-page React app loads via `esm.sh` import maps;
-the AudioWorklet runs natively.
+Needs a Postgres database (`DATABASE_URL` / `PG_URL`); the schema is
+migration-managed — `run.sh` applies `alembic upgrade head` on boot. No Node
+build step: the React app loads via `esm.sh` import maps and the AudioWorklet
+runs natively.
 
 ## Inbound phone calls (Twilio)
 
@@ -181,40 +186,50 @@ the client-ready report (`GET /api/agents/{id}/chat/export.xlsx`).
 
 ```
 backend/
-  app.py             FastAPI routes (REST + ws/session + twilio + static)
-  gemini_bridge.py   Unified session loop with builder→test handoff
+  app.py             FastAPI routes (REST + ws/session + ws/twilio + static)
+  gemini_bridge.py   Voice Live session loop (builder→test handoff)
+  chat_bridge.py     Text-chat session loop (web widget) + live operator takeover
   twilio_bridge.py   µ-law ↔ PCM bridge for Twilio Media Streams
-  connectors.py      10 Gemini function declarations + stub handlers
-  db.py              SQLite (one table: agents)
-  presets.py         sectors / locales / voices / guardrails / sip / connectors
+  connectors.py      Gemini function declarations + stub handlers
+  db_pg.py           Postgres (asyncpg) — agents, calls, orgs, events, …
+  db.py              thin async re-export shim over db_pg (SQLite retired at Phase 6)
+  chat_report.py     client-ready XLSX export (openpyxl)
+  recordings.py      stereo call-recording capture + retention
+  events.py          canonical event ledger (emit / read)
+  auth.py · pricing.py · scheduler.py · eod_digest.py · presets.py · …
+  alembic/           schema migrations (migration-managed)
 frontend/
   index.html
-  app.js             React shell (one component, ~140 lines)
+  app.js             React 18 + htm — dashboard & chat UI (large, many components)
+  embed.js           drop-in web-chat / voice widget (dependency-free)
   voice-blob.js      Iridescent blob: SVG layers + sparkle canvas + audio reactivity
   audio-engine.js    Mic capture (16 kHz) + speaker playback (24 kHz) + meters
   recorder-worklet.js
   styles.css
-data/eva.db        auto-created
 .env.example
 run.sh
 ```
 
 ## Configuration knobs
 
-| Env var               | Default                                        |
-|-----------------------|------------------------------------------------|
-| `GEMINI_API_KEY`      | required                                       |
-| `GEMINI_LIVE_MODEL`   | `gemini-2.5-flash-native-audio-latest`         |
-| `PUBLIC_HOST`         | empty (Twilio routing disabled until set)      |
-| `WEBHOOK_URL`         | empty (used by the `http_webhook` connector)   |
-| `LOG_LEVEL`           | `INFO`                                         |
+| Env var                          | Default                                     |
+|----------------------------------|---------------------------------------------|
+| `GEMINI_API_KEY`                 | required                                     |
+| `DATABASE_URL` / `PG_URL`        | required — Postgres connection              |
+| `GEMINI_LIVE_MODEL`              | `gemini-3.1-flash-live-preview` (voice)      |
+| `PUBLIC_HOST` / `PUBLIC_BASE_URL`| empty (Twilio / SIP routing until set)      |
+| `RECORDING_DIR` / `RAILWAY_VOLUME_MOUNT_PATH` | recordings root (prod volume)  |
+| `WEBHOOK_URL`                    | empty (used by the `http_webhook` connector) |
+| `LOG_LEVEL`                      | `INFO`                                       |
 
-The bridge auto-falls back through known Live model names if the configured
-one is unavailable to your key. To pin a specific model, set
-`GEMINI_LIVE_MODEL` in `.env`.
+The voice bridge auto-falls back through known Live model names if the
+configured one is unavailable to your key; pin one via `GEMINI_LIVE_MODEL`. The
+text-chat channel uses `gemini-2.5-flash` (set in `backend/chat_bridge.py`).
 
 ## Browser notes
 
 - Chrome / Edge / Safari 17+ on macOS work.
 - The page must run on `localhost` or HTTPS for `getUserMedia` to grant the microphone.
-- For a fresh start (clear all saved agents), delete `data/eva.db`.
+- For a fresh start, reset the Postgres database (drop/recreate the DB in
+  `DATABASE_URL` — locally `sxai_dev`). The old SQLite `data/eva.db` path was
+  retired at Phase 6.
