@@ -2267,6 +2267,83 @@ async def _email_form_submission(agent: dict, title: str, fdata: dict) -> None:
     log.info("form-submit email sent to=%s cc=%s form=%r", admin_email, _FORM_CC_ADDRESS, title)
 
 
+def _parse_ua(ua: str) -> dict[str, str]:
+    """Best-effort device / browser / OS from a User-Agent string (no external
+    dependency). Returns only the fields it can identify."""
+    low = (ua or "").lower()
+    if not low:
+        return {}
+    if "ipad" in low or "tablet" in low or ("android" in low and "mobile" not in low):
+        device = "Tablet"
+    elif "mobi" in low or "iphone" in low or "ipod" in low or "android" in low:
+        device = "Mobile"
+    else:
+        device = "Desktop"
+    if "iphone" in low or "ipad" in low or "ipod" in low:
+        os_ = "iOS"
+    elif "android" in low:
+        os_ = "Android"
+    elif "windows" in low:
+        os_ = "Windows"
+    elif "mac os" in low or "macintosh" in low:
+        os_ = "macOS"
+    elif "cros" in low:
+        os_ = "ChromeOS"
+    elif "linux" in low:
+        os_ = "Linux"
+    else:
+        os_ = ""
+    if "edg/" in low or "edgios/" in low or "edga/" in low:
+        browser = "Edge"
+    elif "opr/" in low or "opera" in low:
+        browser = "Opera"
+    elif "samsungbrowser" in low:
+        browser = "Samsung Internet"
+    elif "fxios" in low or "firefox" in low:
+        browser = "Firefox"
+    elif "crios" in low or "chrome" in low or "chromium" in low:
+        browser = "Chrome"
+    elif "safari" in low:
+        browser = "Safari"
+    else:
+        browser = ""
+    out = {"device": device}
+    if os_:
+        out["os"] = os_
+    if browser:
+        out["browser"] = browser
+    return out
+
+
+def _chat_provenance(ws, client_locale: str) -> dict[str, str]:
+    """Where the visitor came from, read off the WS handshake headers so no
+    frontend plumbing is needed. The embed iframe URL (the WS `referer`) carries
+    embed.js's `?host=<parent-page domain>`; the User-Agent gives device/OS/
+    browser. Stored under `extracted._provenance` for the operator's chat detail
+    labels + later analytics. Best-effort — never raises."""
+    import urllib.parse as _u
+    ua = ref = ""
+    try:
+        ua = ws.headers.get("user-agent") or ""
+        ref = ws.headers.get("referer") or ws.headers.get("origin") or ""
+    except Exception:  # noqa: BLE001
+        pass
+    prov = _parse_ua(ua)
+    source = ""
+    try:
+        parsed = _u.urlparse(ref)
+        source = (_u.parse_qs(parsed.query).get("host") or [""])[0] or parsed.netloc
+    except Exception:  # noqa: BLE001
+        pass
+    if source:
+        prov["source"] = source
+    if client_locale:
+        prov["locale"] = client_locale
+    if ua:
+        prov["ua"] = ua[:300]
+    return prov
+
+
 async def run_agent_chat_session(
     ws: WebSocket,
     agent_id: int,
@@ -2302,6 +2379,11 @@ async def run_agent_chat_session(
     agent["_transcript"] = []
     agent["_extracted_extra"] = {}
     agent["_channel"] = "web_chat"
+    # Visitor provenance (device / browser / OS / source domain) from the WS
+    # handshake — surfaced as labels in the operator's chat detail + analytics.
+    _prov = _chat_provenance(ws, client_locale)
+    if _prov:
+        agent["_extracted_extra"]["_provenance"] = _prov
 
     connector_ids = agent.get("connectors") or []
     tool_ids = list(connector_ids) + (["end_call"] if "end_call" not in connector_ids else [])

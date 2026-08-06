@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 350;
+const SXAI_BUILD = 351;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1924,6 +1924,17 @@ function AgentChatEmbed({ slug, contained, override }) {
     setThinking(false); setCsat(null); setStatus("connecting");
     setRestartN((n) => n + 1);   // re-runs the connection effect → fresh sid, no resume
   };
+
+  // When a chat ends, return to the fresh "home" (starter questions) instead of
+  // leaving the visitor on a dead "chat ended" screen — but only once any
+  // post-chat rating prompt has been answered (or there is none). A short delay
+  // lets the agent's goodbye / "thanks for the feedback" linger first. Build 351.
+  useEffect(() => {
+    if (status !== "ended") return;
+    if (csat === "asking" || csat === "up" || csat === "down") return;  // wait for the rating to resolve
+    const t = setTimeout(newChat, csat === "done" ? 2200 : 1400);
+    return () => clearTimeout(t);
+  }, [status, csat]);
 
   // Link hover-preview: fetch the target's OG title/image/description once (server
   // -side, cached), show an unfurl card above the link. Delegated on the log so it
@@ -11643,8 +11654,20 @@ function chatDetailBody(loading, data, agent) {
   if (!data) return "";
   const ex = (data.extracted && typeof data.extracted === "object") ? data.extracted : {};
   const csat = ex.csat;
-  const fields = Object.entries(ex).filter(([k]) => k !== "csat" && k !== "csat_comment" && k !== "handoff_requested" && k !== "handoff_reason");
+  const META = ["csat", "csat_comment", "handoff_requested", "handoff_reason", "_provenance"];
+  const fields = Object.entries(ex).filter(([k]) => !META.includes(k));
+  // Visitor provenance — where they came from (device / browser / OS / source).
+  const prov = (ex._provenance && typeof ex._provenance === "object") ? ex._provenance : null;
+  const devIcon = { Mobile: "📱", Tablet: "📲", Desktop: "🖥️" };
   return html`
+    ${prov ? html`
+      <div class="chatdrawer-prov">
+        ${prov.device ? html`<span class="chatdrawer-provchip">${devIcon[prov.device] || "💻"} ${prov.device}</span>` : ""}
+        ${prov.browser ? html`<span class="chatdrawer-provchip">🌐 ${prov.browser}</span>` : ""}
+        ${prov.os ? html`<span class="chatdrawer-provchip">${prov.os}</span>` : ""}
+        ${prov.source ? html`<span class="chatdrawer-provchip" title=${"Came from " + prov.source}>🔗 ${prov.source}</span>` : ""}
+        ${prov.locale ? html`<span class="chatdrawer-provchip">🗣️ ${prov.locale}</span>` : ""}
+      </div>` : ""}
     ${csat ? html`
       <div class=${"chatdrawer-csat chatdrawer-csat-" + csat}>
         ${csat === "up" ? "👍 Visitor rated this Good" : "👎 Visitor said it could be better"}
@@ -11862,8 +11885,10 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   // Chat conversation logs live here (separate from voice/phone Call logs).
   const [chatLogs, setChatLogs] = useState(null);
   // Date-range filter (YYYY-MM-DD, inclusive) — drives the list AND the export.
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  // Default the window to the last 30 days (inclusive of today).
+  const _ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 29); return _ymd(d); });
+  const [dateTo, setDateTo] = useState(() => _ymd(new Date()));
   const chatLogQuery = () => {
     const p = new URLSearchParams({ channel: "web_chat", limit: "500" });
     if (dateFrom) p.set("date_from", dateFrom);

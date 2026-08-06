@@ -5,7 +5,23 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 350**
+**Last updated: build 351**
+
+**Build 351 (visitor provenance labels + Conversations UX polish):** three
+changes to the Chat → Conversations tab:
+- Visitor provenance: the chat detail now shows where the visitor came from as
+  nice chips (device / browser / OS / source domain / locale). Captured
+  backend-only from the WS handshake — `_parse_ua()` reads the User-Agent, and
+  the source domain comes from embed.js's `?host=` on the iframe URL (the WS
+  `referer`); stored under `extracted._provenance` (`_chat_provenance`). No
+  frontend WS plumbing. Verified: parser handles iOS/Android/Windows/macOS/iPad
+  correctly; label chips render 📱 Mobile · Safari · iOS · 🔗 moments-shop.com ·
+  en-GB. Excluded from lead "captured info"; surfaced as **Device** + **Source**
+  columns in the XLSX Conversations sheet for analytics.
+- Date filter now defaults to the **last 30 days** (From/To pre-filled).
+- The From/To toolbar is **sticky** (position:sticky; top:0) so it stays put
+  when the list scrolls. Verified live in the dashboard (temp chat entitlement).
+Evidence: **Behavioral**.
 
 **Build 350 (grounded follow-up question chips after every reply):** the
 customer chat now suggests 2-3 natural next questions as tappable chips after

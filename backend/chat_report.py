@@ -24,7 +24,12 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 # Fields inside `extracted` that are meta, not captured lead info.
-_META_KEYS = {"csat", "csat_comment", "handoff_requested", "handoff_reason"}
+_META_KEYS = {"csat", "csat_comment", "handoff_requested", "handoff_reason", "_provenance"}
+
+
+def _prov(ex: dict) -> dict:
+    p = ex.get("_provenance")
+    return p if isinstance(p, dict) else {}
 
 _HEX_RE = re.compile(r"^#?[0-9a-fA-F]{6}$")
 _DEFAULT_ACCENT = "4F46E5"   # indigo — matches the widget default
@@ -255,15 +260,15 @@ def build_chat_report_xlsx(
     # ══ Sheet 2 · Conversations ═══════════════════════════════════════════════
     ws2 = wb.create_sheet("Conversations")
     ws2.sheet_view.showGridLines = False
-    headers = ["Date", "Time", "Outcome", "Duration", "Rating", "Handoff", "Captured info", "Summary"]
-    cwidths = [14, 8, 20, 11, 12, 10, 42, 60]
+    headers = ["Date", "Time", "Outcome", "Duration", "Rating", "Handoff", "Device", "Source", "Captured info", "Summary"]
+    cwidths = [14, 8, 20, 11, 12, 10, 12, 22, 40, 56]
     for i, w in enumerate(cwidths, start=1):
         ws2.column_dimensions[get_column_letter(i)].width = w
     for i, h in enumerate(headers, start=1):
         cell = ws2.cell(row=1, column=i, value=h)
         cell.font = white
         cell.fill = accent_fill
-        cell.alignment = center if h in ("Duration", "Rating", "Handoff") else left_mid
+        cell.alignment = center if h in ("Duration", "Rating", "Handoff", "Device") else left_mid
         cell.border = border
     ws2.row_dimensions[1].height = 22
     ws2.freeze_panes = "A2"
@@ -271,6 +276,7 @@ def build_chat_report_xlsx(
     r = 2
     for c in calls:
         ex = c.get("extracted") if isinstance(c.get("extracted"), dict) else {}
+        pv = _prov(ex)
         st = c.get("started_at")
         row_vals = [
             _fmt_date(st),
@@ -279,13 +285,15 @@ def build_chat_report_xlsx(
             _fmt_dur(c.get("duration_s")),
             _rating(ex),
             "Yes" if (ex.get("handoff_requested") or c.get("outcome") == "transferred_human") else "",
+            pv.get("device", ""),
+            pv.get("source", ""),
             _flatten_captured(ex),
             (c.get("summary") or "").strip(),
         ]
         for i, v in enumerate(row_vals, start=1):
             cell = ws2.cell(row=r, column=i, value=v)
             cell.border = border
-            cell.alignment = center if i in (4, 5, 6) else wrap_top
+            cell.alignment = center if i in (4, 5, 6, 7) else wrap_top
             if r % 2 == 0:
                 cell.fill = zebra
         r += 1
