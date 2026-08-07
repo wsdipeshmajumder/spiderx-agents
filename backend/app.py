@@ -103,6 +103,14 @@ async def _startup() -> None:
     except Exception as e:  # noqa: BLE001
         log.exception("scheduler.boot_failed: %s", e)
 
+    # Live guardrail push (SSE) — one Postgres LISTEN connection per process so
+    # a policy save on any instance reaches every operator's open dashboard.
+    try:
+        from . import policy_stream
+        asyncio.create_task(policy_stream.start_listener())
+    except Exception as e:  # noqa: BLE001
+        log.exception("policy_stream.listener_boot_failed: %s", e)
+
 
 @app.on_event("shutdown")
 async def _shutdown() -> None:
@@ -112,6 +120,11 @@ async def _shutdown() -> None:
         await scheduler.stop()
     except Exception:  # noqa: BLE001
         pass
+    try:
+        from . import policy_stream
+        await policy_stream.stop_listener()
+    except Exception:  # noqa: BLE001
+        pass
     await db.shutdown()
 
 # Canonical SPA bundle version. Bump this on EVERY frontend change that the
@@ -119,7 +132,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 361
+APP_BUILD = 362
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -2303,7 +2316,7 @@ async def patch_agent(agent_id: int, request: Request) -> dict:
     if "policy" in patch:
         try:
             from . import policy_stream
-            policy_stream.publish(agent_id, {
+            await policy_stream.publish(agent_id, {
                 "policy": updated.get("policy"),
                 "origin": request.headers.get("X-Client-Id") or "",
             })

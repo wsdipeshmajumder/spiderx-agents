@@ -5,7 +5,24 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 361**
+**Last updated: build 362**
+
+**Build 362 (multi-instance guardrail sync via Postgres LISTEN/NOTIFY):**
+build 361's SSE fan-out was in-process only — a policy save on instance A
+wouldn't reach SSE clients on instance B. Now `policy_stream.publish()` fires
+`pg_notify('sxai_policy', <json>)` (reaches every instance), and each process
+runs one dedicated, auto-reconnecting `LISTEN` connection (started as a
+background task at app startup, closed on shutdown) whose callback fans out to
+that process's SSE subscribers. Payloads over ~7.5 KB (custom-rule blobs) fall
+back to a `refetch` notify + DB re-read to stay under Postgres' 8000-byte NOTIFY
+cap; a NOTIFY failure falls back to same-process fan-out. SSE endpoint contract
+unchanged. Verified against the live DB: (1) a clean boot logs
+`LISTEN sxai_policy established`; (2) a policy PATCH delivered `event: policy`
+to an API SSE client AND a raw NOTIFY to a **separate standalone LISTEN
+process** — proving cross-process delivery. (Single-worker dev-server needed a
+manual restart mid-test: an open SSE stream had blocked uvicorn --reload's
+graceful shutdown; unrelated to the code, which boots clean.) Evidence:
+**Behavioral**.
 
 **Build 361 (server push for cross-device guardrail sync):** build 360's live
 sync was same-browser only (BroadcastChannel). Now it also crosses devices/users
