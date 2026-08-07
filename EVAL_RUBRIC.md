@@ -5,7 +5,19 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 358**
+**Last updated: build 359**
+
+**Build 359 (edit Do's & Don'ts inline on the "What it knows" tab):** the
+read-only guardrails card is now a full inline editor — the same 5 Do's / 5
+Don'ts preset toggles + custom-rule textareas as the Guardrails page, saving to
+the same `agent.policy` via `PATCH {policy}`. Extracted the preset catalogue to
+module scope (`GUARDRAIL_DOS`/`GUARDRAIL_DONTS` + `guardrailPolicyFrom`) so the
+Guardrails page and this tab share ONE source of truth (no drift). Always-on
+safety rules stay implicit with a link to the full Guardrails page. Verified
+live (temp entitlement): 5+5 toggles reflect Rohan's saved policy; toggling
+`offer_transcript` + Save round-tripped to `agent.policy` (false→true→restored),
+"✓ Saved"; the standalone Guardrails page still renders 10 toggles + saves
+(refactor intact). Evidence: **Behavioral**.
 
 **Security: public by-slug endpoint no longer leaks operator IP (backend-only,
 no build bump):** `GET /api/agents/by-slug/<slug>` is the UNAUTHENTICATED read

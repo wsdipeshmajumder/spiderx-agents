@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 358;
+const SXAI_BUILD = 359;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -9942,6 +9942,35 @@ function PhoneAIConventionsPanel({ agent }) {
   `;
 }
 
+// Guardrail catalogue — module scope so both the Guardrails page AND the chat
+// "What it knows" tab edit the SAME presets (stored on agent.policy).
+const GUARDRAIL_DOS = [
+  { id: "confirm_booking",   label: "Repeat back the booking time before confirming",     help: "Tightens accuracy — \"so that's Friday 3 PM, is that right?\"" },
+  { id: "sms_recap",         label: "Send an SMS recap after every booking",              help: "Caller gets a thread to refer back to." },
+  { id: "language_match",    label: "Switch to the caller's language if detected",        help: "Hindi caller on a Hindi-English agent? The agent switches mid-call." },
+  { id: "offer_transcript",  label: "Offer to email a transcript at end of call",         help: "Especially useful for support / intake calls." },
+  { id: "name_caller",       label: "Use the caller's name once captured",                help: "Small thing, big warmth boost." },
+];
+const GUARDRAIL_DONTS = [
+  { id: "no_price_promise",  label: "Don't quote prices that aren't in the knowledge base", help: "She'll say \"let me have someone get back to you\" instead." },
+  { id: "no_delivery_eta",   label: "Don't promise specific delivery / arrival times",      help: "Avoids one of the top reasons callers get angry later." },
+  { id: "no_competitors",    label: "Don't discuss competitors by name",                    help: "Neutral redirect to your own services." },
+  { id: "no_after_hours",    label: "Don't accept bookings outside business hours",         help: "She'll offer the next available slot in-hours." },
+  { id: "no_phone_payment",  label: "Don't process payments over the phone",                help: "She'll text a secure payment link instead." },
+];
+const GUARDRAIL_DOS_ON = ["confirm_booking", "sms_recap", "language_match"];
+const GUARDRAIL_DONTS_ON = ["no_price_promise", "no_phone_payment"];
+// Build a fresh policy state from the agent's stored `policy` JSON.
+function guardrailPolicyFrom(agent) {
+  const stored = (typeof agent.policy === "object" && agent.policy) ? agent.policy : {};
+  return {
+    dos: Object.fromEntries(GUARDRAIL_DOS.map((d) => [d.id, stored?.dos?.[d.id] ?? GUARDRAIL_DOS_ON.includes(d.id)])),
+    donts: Object.fromEntries(GUARDRAIL_DONTS.map((d) => [d.id, stored?.donts?.[d.id] ?? GUARDRAIL_DONTS_ON.includes(d.id)])),
+    custom_dos:   stored?.custom_dos   || "",
+    custom_donts: stored?.custom_donts || "",
+  };
+}
+
 function AgentGuardrailsPage({ agent, agents, presets, plan, onNav, refreshAgent }) {
   // Catalogue — single source of truth. Each item has a stable id, a short
   // label, an explanation, and a per-section bucket.
@@ -9954,31 +9983,12 @@ function AgentGuardrailsPage({ agent, agents, presets, plan, onNav, refreshAgent
     { id: "no_pii_aloud",      label: "Won't read card numbers, OTPs or passwords aloud", help: "Hard rule. Also won't ask the caller to read theirs back." },
     { id: "human_handoff",     label: "Hands off to a human if the caller asks twice", help: "Offers to text you on WhatsApp / leave a callback." },
   ];
-  const DOS = [
-    { id: "confirm_booking",   label: "Repeat back the booking time before confirming",     help: "Tightens accuracy — \"so that's Friday 3 PM, is that right?\"" },
-    { id: "sms_recap",         label: "Send an SMS recap after every booking",              help: "Caller gets a thread to refer back to." },
-    { id: "language_match",    label: "Switch to the caller's language if detected",        help: "Hindi caller on a Hindi-English agent? The agent switches mid-call." },
-    { id: "offer_transcript",  label: "Offer to email a transcript at end of call",         help: "Especially useful for support / intake calls." },
-    { id: "name_caller",       label: "Use the caller's name once captured",                help: "Small thing, big warmth boost." },
-  ];
-  const DONTS = [
-    { id: "no_price_promise",  label: "Don't quote prices that aren't in the knowledge base", help: "She'll say \"let me have someone get back to you\" instead." },
-    { id: "no_delivery_eta",   label: "Don't promise specific delivery / arrival times",      help: "Avoids one of the top reasons callers get angry later." },
-    { id: "no_competitors",    label: "Don't discuss competitors by name",                    help: "Neutral redirect to your own services." },
-    { id: "no_after_hours",    label: "Don't accept bookings outside business hours",         help: "She'll offer the next available slot in-hours." },
-    { id: "no_phone_payment",  label: "Don't process payments over the phone",                help: "She'll text a secure payment link instead." },
-  ];
+  const DOS = GUARDRAIL_DOS;
+  const DONTS = GUARDRAIL_DONTS;
 
   // Initial state — pulled off `agent.policy` (existing JSON column). Defaults
   // are always on regardless of stored state.
-  const stored = (typeof agent.policy === "object" && agent.policy) ? agent.policy : {};
-  const initial = {
-    dos: Object.fromEntries(DOS.map((d) => [d.id, stored?.dos?.[d.id] ?? ["confirm_booking", "sms_recap", "language_match"].includes(d.id)])),
-    donts: Object.fromEntries(DONTS.map((d) => [d.id, stored?.donts?.[d.id] ?? ["no_price_promise", "no_phone_payment"].includes(d.id)])),
-    custom_dos:   stored?.custom_dos   || "",
-    custom_donts: stored?.custom_donts || "",
-  };
-  const [policy, setPolicy] = useState(initial);
+  const [policy, setPolicy] = useState(() => guardrailPolicyFrom(agent));
   const [saveState, setSaveState] = useState({ msg: "", cls: "" });
 
   const toggle = (bucket, id) => setPolicy((p) => ({
@@ -11995,11 +12005,26 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   const [instrFull, setInstrFull] = useState(false);   // fullscreen instructions editor
   // "What this chat knows" disclosure — exactly the brain the chat draws on.
   const [kbInfo, setKbInfo] = useState(null);
-  useEffect(() => {
-    if (!hasChat) return;
-    fetch(`/api/agents/${agent.id}/chat/knowledge`).then((r) => r.ok ? r.json() : null)
+  const reloadKb = () => fetch(`/api/agents/${agent.id}/chat/knowledge`).then((r) => r.ok ? r.json() : null)
       .then((d) => setKbInfo(d)).catch(() => setKbInfo(null));
-  }, [hasChat, chatCfgSaved]);
+  useEffect(() => { if (hasChat) reloadKb(); }, [hasChat, chatCfgSaved]);
+  // Do's & Don'ts (guardrails) editable inline on the "What it knows" tab — the
+  // SAME agent.policy the Guardrails page edits.
+  const [gpolicy, setGpolicy] = useState(() => guardrailPolicyFrom(agent));
+  const [gSaving, setGSaving] = useState(false);
+  const [gSaved, setGSaved] = useState(false);
+  const gToggle = (bucket, id) => { setGpolicy((p) => ({ ...p, [bucket]: { ...p[bucket], [id]: !p[bucket][id] } })); setGSaved(false); };
+  const gSetCustom = (k, v) => { setGpolicy((p) => ({ ...p, [k]: v })); setGSaved(false); };
+  const saveGuardrails = async () => {
+    setGSaving(true);
+    try {
+      const r = await fetch(`/api/agents/${agent.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ policy: gpolicy }),
+      });
+      if (r.ok) { setGSaved(true); setTimeout(() => setGSaved(false), 2200); refreshAgent && refreshAgent(); reloadKb(); }
+    } finally { setGSaving(false); }
+  };
   const autoTriedRef = useRef(false);
   const suggestInstructions = async () => {
     setSuggesting(true);
@@ -12517,18 +12542,43 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
             <div class="chatkb-card-h">🗣 Language</div>
             <div class="chatkb-line">${kbInfo.language}</div>
           </div>
-          <div class="chatkb-card chatkb-card-guard">
+          <div class="chatkb-card chatkb-card-guard chatkb-guard-edit">
             <div class="chatkb-card-h">🚦 Do's & Don'ts (guardrails)
-              <button type="button" class="chatkb-edit" onClick=${() => onNav && onNav(`/agent/${agent.slug || agent.id}/guardrails`)}>Edit →</button>
+              <button type="button" class=${"db-btn-primary db-btn-sm chatkb-guard-save " + (gSaved ? "is-copied" : "")} onClick=${saveGuardrails} disabled=${gSaving}>
+                ${gSaving ? "Saving…" : gSaved ? "✓ Saved" : "Save guardrails"}
+              </button>
             </div>
-            ${(kbInfo.dos && kbInfo.dos.length)
-              ? html`<ul class="chatkb-list chatkb-dos">${kbInfo.dos.slice(0, 6).map((d, i) => html`<li key=${i}>${d}</li>`)}</ul>` : ""}
-            ${(kbInfo.donts && kbInfo.donts.length)
-              ? html`<ul class="chatkb-list chatkb-donts">${kbInfo.donts.slice(0, 6).map((d, i) => html`<li key=${i}>${d}</li>`)}</ul>` : ""}
-            ${(kbInfo.guardrails && kbInfo.guardrails.length)
-              ? html`<ul class="chatkb-list">${kbInfo.guardrails.slice(0, 4).map((g, i) => html`<li key=${i}>🚧 ${g}</li>`)}</ul>` : ""}
-            ${!((kbInfo.dos || []).length || (kbInfo.donts || []).length || (kbInfo.guardrails || []).length)
-              ? html`<div class="chatkb-empty">No Do's or Don'ts set yet — add them on the Guardrails page so the chat stays on-policy.</div>` : ""}
+            <div class="chatkb-guard-cols">
+              <div class="chatkb-guard-col">
+                <div class="chatkb-guard-h">✅ Do's</div>
+                <ul class="db-rules db-rules-compact">
+                  ${GUARDRAIL_DOS.map((d) => html`
+                    <li key=${d.id} class=${gpolicy.dos[d.id] ? "is-on" : ""}>
+                      <button class="db-rule-toggle" type="button" role="switch" aria-checked=${gpolicy.dos[d.id]} aria-label=${d.label} onClick=${() => gToggle("dos", d.id)}>
+                        <span class="db-rule-toggle-thumb"></span>
+                      </button>
+                      <div class="db-rule-body"><div class="db-rule-label">${d.label}</div></div>
+                    </li>`)}
+                </ul>
+                <textarea class="db-input chatkb-guard-custom" rows="2" placeholder="Add your own Do's — one per line"
+                          value=${gpolicy.custom_dos} onInput=${(e) => gSetCustom("custom_dos", e.target.value)}></textarea>
+              </div>
+              <div class="chatkb-guard-col">
+                <div class="chatkb-guard-h">⛔ Don'ts</div>
+                <ul class="db-rules db-rules-compact">
+                  ${GUARDRAIL_DONTS.map((d) => html`
+                    <li key=${d.id} class=${gpolicy.donts[d.id] ? "is-on" : ""}>
+                      <button class="db-rule-toggle" type="button" role="switch" aria-checked=${gpolicy.donts[d.id]} aria-label=${d.label} onClick=${() => gToggle("donts", d.id)}>
+                        <span class="db-rule-toggle-thumb"></span>
+                      </button>
+                      <div class="db-rule-body"><div class="db-rule-label">${d.label}</div></div>
+                    </li>`)}
+                </ul>
+                <textarea class="db-input chatkb-guard-custom" rows="2" placeholder="Add your own Don'ts — one per line"
+                          value=${gpolicy.custom_donts} onInput=${(e) => gSetCustom("custom_donts", e.target.value)}></textarea>
+              </div>
+            </div>
+            <div class="db-form-help" style=${{ marginTop: "8px" }}>Always-on safety rules (no medical/legal/financial advice, never read secrets aloud, hand off to a human on request) apply automatically. Full context on the <a href=${`/agent/${agent.slug || agent.id}/guardrails`} onClick=${(e) => { e.preventDefault(); onNav && onNav(`/agent/${agent.slug || agent.id}/guardrails`); }}>Guardrails page →</a></div>
           </div>
         </div>
       `}
