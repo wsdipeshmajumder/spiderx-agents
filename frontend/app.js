@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 355;
+const SXAI_BUILD = 356;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1707,6 +1707,7 @@ function AgentChatEmbed({ slug, contained, override }) {
   const logRef = useRef(null);
   const sidRef = useRef(null);                         // stable per-session id (for resume)
   const resumeKeyRef = useRef(null);                   // sessionStorage key, null in preview
+  const errRetryRef = useRef(false);                   // one silent auto-reconnect per error episode
 
   useEffect(() => {
     if (!slug) return;
@@ -1940,6 +1941,30 @@ function AgentChatEmbed({ slug, contained, override }) {
     const t = setTimeout(newChat, delay);
     return () => clearTimeout(t);
   }, [status, csat]);
+
+  // Reconnect after a dropped connection WITHOUT wiping the conversation — the
+  // transcript is still in sessionStorage on an error (only cleared on a clean
+  // end), so the fresh WS resumes it. Distinct from newChat (which starts over).
+  const reconnect = () => {
+    try { wsRef.current && wsRef.current.close(); } catch {}
+    streamingRef.current = false;
+    setThinking(false); setErr(null); setStatus("connecting");
+    setRestartN((n) => n + 1);   // re-runs the connection effect → resumes from sessionStorage
+  };
+
+  // Handle a "connection issue" (error) gracefully instead of a dead screen:
+  // silently auto-reconnect ONCE for a transient drop (server blip, network
+  // hiccup); if it's still down after that, the visitor gets a manual Reconnect
+  // button (below). The ref guard prevents a tight reconnect loop against a
+  // genuinely-down server, and resets on a healthy connection. Build 356.
+  useEffect(() => {
+    if (status === "ready") { errRetryRef.current = false; return; }  // healthy → re-arm one retry
+    if (status !== "error" || contained) return;   // ignore "connecting"; skip operator preview
+    if (errRetryRef.current) return;                // already spent this episode's silent retry
+    errRetryRef.current = true;
+    const t = setTimeout(reconnect, 2500);
+    return () => clearTimeout(t);
+  }, [status, contained]);
 
   // Link hover-preview: fetch the target's OG title/image/description once (server
   // -side, cached), show an unfurl card above the link. Delegated on the log so it
@@ -2191,6 +2216,15 @@ function AgentChatEmbed({ slug, contained, override }) {
                 <div class="chatembed-linkcard-site">🔗 ${(linkPreview.data && linkPreview.data.site) || linkPreview.href}</div>
                 ${linkPreview.data && linkPreview.data.description ? html`<div class="chatembed-linkcard-desc">${linkPreview.data.description}</div>` : ""}
               </div>`}
+        </div>
+      ` : ""}
+      ${status === "error" ? html`
+        <div class="chatembed-reconnect" role="alert">
+          <span class="chatembed-reconnect-msg">${err || "Connection lost."}</span>
+          <button type="button" class="chatembed-reconnect-btn" onClick=${reconnect}>
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+            Reconnect
+          </button>
         </div>
       ` : ""}
       <form class="chatembed-input" onSubmit=${send}>

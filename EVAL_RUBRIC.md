@@ -5,7 +5,22 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 355**
+**Last updated: build 356**
+
+**Build 356 (graceful "connection issue" recovery):** a dropped socket no longer
+leaves the visitor on a dead "connection issue" screen. Two-part handling:
+- **Silent auto-reconnect once** per error episode (2.5s) via a new `reconnect()`
+  that keeps the transcript (it's still in sessionStorage on error — only cleared
+  on a clean end — so the fresh WS *resumes* the conversation, doesn't wipe it).
+  An `errRetryRef` guard spends exactly one retry and only re-arms on a healthy
+  `ready`, so a genuinely-down server can't cause a reconnect loop. Skipped in
+  the operator preview.
+- **Manual Reconnect bar** (`.chatembed-reconnect`) shown on the error state with
+  the message + a Reconnect button, so if the auto-retry doesn't fix it the
+  visitor has a clear one-tap recovery instead of a dead screen.
+Verified in a live embed: a transient socket error auto-reconnected (socket count
+1→2, status back to "online", no loop); a persistent error (chat-not-entitled)
+showed a stable Reconnect bar with no reconnect loop. Evidence: **Behavioral**.
 
 **Build 354 (mobile: chat panel header no longer clipped):** on mobile the
 popover panel used the desktop `bottom:74px` + `height:min(600px,100vh-100px)`,
