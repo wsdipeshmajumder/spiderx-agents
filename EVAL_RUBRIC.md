@@ -7,6 +7,20 @@
 
 **Last updated: build 357**
 
+**Voice agents: stop repeating the previous topic in the next answer (prompt
+fix, no build bump — backend-only):** reported on the prod Gajraj/Kavya agent
+(ID 2) — caller asked the showroom address (agent offered to text it), then
+switched to the Verna, and the Verna answer *re-raised* the "text you the
+address" offer. Root cause: the shared phone-agent conventions
+(`phone_ai_conventions._silence_and_turn_taking`, injected into every call
+agent's prompt via `_agent_system_prompt`) had turn-taking rules but no
+"stay on the current question / say each thing once / don't re-raise an
+unanswered offer" rule (the text-chat path already had one). Added a
+"One topic at a time — don't drag the last one forward" block. Platform-wide
+for all voice agents; takes effect on the next call. Verified: composes into
+the conventions block and is wired into the customer call prompt (line 1309).
+Evidence: **Code** (prompt-only — not call-tested; requires a live call).
+
 **Mobile end-to-end flow — verification (build 357, no code change):** drove the
 whole chat flow in the real embed.js widget at 375px on a host page: open →
 home + 4 starters (header fully visible, not clipped); send "What are the ticket
