@@ -5,7 +5,20 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 357**
+**Last updated: build 358**
+
+**Build 358 (chat instructions move to the "What it knows" tab):** the prompt /
+instructions editor was extracted from the Chat → Settings accordion and placed
+on the **"What it knows"** tab, which now frames the agent's brain as three
+things: what it's **pre-trained on** (existing knowledge/tools/goals/captures
+cards) · what **you instruct** it (the moved editor, with ✨Suggest/Regenerate,
+⤢Expand, and its own Save) · the **Do's & Don'ts** guardrails. The old
+read-only "Guardrails" card became a full-width **Do's & Don'ts** card (✅ dos /
+⛔ don'ts from the knowledge endpoint) with an **Edit →** link to the Guardrails
+page. Settings' "Conversation & behaviour" section keeps starters/language/
+handoff and shows a pointer note. Verified live (temp entitlement): editor
+renders + Save PATCHes chat_settings ("✓ Saved"); Settings no longer holds the
+textarea; dos/don'ts render (3 dos / 2 don'ts for Rohan). Evidence: **Behavioral**.
 
 **Voice agents: stop repeating the previous topic in the next answer (prompt
 fix, no build bump — backend-only):** reported on the prod Gajraj/Kavya agent

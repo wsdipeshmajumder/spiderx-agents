@@ -12012,6 +12012,22 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
 .chatkb-foot { font-size: 11.5px; color: #047857; margin-top: 8px; font-weight: 600; }
 :root[data-theme="dark"] .chatkb-card { background: #161a26; border-color: #2a2e44; }
 :root[data-theme="dark"] .chatkb-tag { background: #1b1f33; border-color: #2a2e44; color: #cbd2e0; }
+/* Instructions editor moved onto the "What it knows" tab (build 358). */
+.chatknow-instr { border: 1px solid var(--border, #e6e8ef); border-radius: 12px; padding: 12px 14px; margin: 4px 0 6px;
+  background: var(--bg-0, #fff); display: flex; flex-direction: column; gap: 10px; }
+.chatknow-instr .chatcfg-instr { resize: vertical; }
+.chatknow-instr-foot { display: flex; align-items: center; gap: 12px; }
+.chatknow-instr-foot .db-form-help { flex: 1; }
+:root[data-theme="dark"] .chatknow-instr { background: #12141f; border-color: #2a2e44; }
+/* Do's & Don'ts card — span the row, with an inline "Edit →" link. */
+.chatkb-card-guard { grid-column: 1 / -1; }
+.chatkb-card-guard .chatkb-card-h { display: flex; align-items: center; gap: 8px; }
+.chatkb-edit { margin-left: auto; background: none; border: 0; cursor: pointer; font: inherit;
+  font-size: 12px; font-weight: 600; color: var(--chat-accent, #4f46e5); padding: 2px 4px; }
+.chatkb-edit:hover { text-decoration: underline; }
+.chatkb-dos { margin-bottom: 6px; }
+.chatkb-dos li::before { content: "✅ "; }
+.chatkb-donts li::before { content: "⛔ "; }
 
 /* Fullscreen chat-instructions editor (Build 292) */
 .chatinstr-modal { width: min(760px, 94vw); display: flex; flex-direction: column; max-height: 88vh; }

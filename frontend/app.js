@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 357;
+const SXAI_BUILD = 358;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -12202,21 +12202,8 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
                 </label>
               </div>`)}
 
-            ${Section("convo", "Conversation & behaviour", "Instructions, starter questions, language, human handoff", html`
-              <div class="chatcfg-acc-toolbar">
-                <span class="db-form-label" style=${{ margin: 0 }}>Chat-only instructions — tone/rules layered on the shared brief</span>
-                <button type="button" class="db-btn-ghost db-btn-sm" onClick=${suggestInstructions} disabled=${suggesting}>
-                  ${suggesting ? "✨ Drafting…" : (chatCfg.instructions || "").trim() ? "✨ Regenerate" : "✨ Suggest"}
-                </button>
-                <button type="button" class="db-btn-ghost db-btn-sm" onClick=${() => setInstrFull(true)}>⤢ Expand</button>
-              </div>
-              <label class="db-form-field">
-                <textarea class="db-input chatcfg-instr" rows="10"
-                          placeholder=${suggesting ? "Drafting from your industry & knowledge…" : `e.g. Be a touch more playful than the phone line. Always mention free home delivery. Offer a brochure link before booking.`}
-                          value=${chatCfg.instructions}
-                          onInput=${(e) => setChatField("instructions", e.target.value)}></textarea>
-                <span class="db-form-help">✨ Auto-drafted from your industry, business context and what this agent captures — edit or clear it freely. ${(chatCfg.instructions || "").length} characters.</span>
-              </label>
+            ${Section("convo", "Conversation & behaviour", "Starter questions, language, human handoff", html`
+              <p class="db-form-help" style=${{ marginTop: 0 }}>The agent's instructions (what to do / how to sound) now live on the <b>“What it knows”</b> tab, alongside its knowledge and guardrails.</p>
               <label class="db-form-field">
                 <span class="db-form-label" style=${{ display: "flex", alignItems: "center", gap: "8px" }}>
                   <span>Suggested questions <span class="db-form-opt">(shown as tappable chips on open — one per line, up to 4)</span></span>
@@ -12474,10 +12461,31 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
     <section class="db-panel">
       <div class="db-panel-head">
         <div>
-          <h3 class="db-panel-title">What this chat knows</h3>
-          <p class="db-panel-sub">Exactly what ${agent.name} draws on to answer in chat — the same brain as the phone line. Edit these on the Knowledge, Outcomes and Voice & behaviour pages; changes apply to every channel.</p>
+          <h3 class="db-panel-title">What ${agent.name} knows & how it behaves</h3>
+          <p class="db-panel-sub">Three things shape every chat reply: what it's <b>pre-trained on</b> (your knowledge, below) · what <b>you instruct</b> it (here) · the <b>Do's & Don'ts</b> it must follow.</p>
         </div>
       </div>
+
+      <div class="chatknow-instr">
+        <div class="chatcfg-acc-toolbar">
+          <span class="db-form-label" style=${{ margin: 0 }}>Your instructions — what to do & how to sound (layered on the shared brief)</span>
+          <button type="button" class="db-btn-ghost db-btn-sm" onClick=${suggestInstructions} disabled=${suggesting}>
+            ${suggesting ? "✨ Drafting…" : (chatCfg.instructions || "").trim() ? "✨ Regenerate" : "✨ Suggest"}
+          </button>
+          <button type="button" class="db-btn-ghost db-btn-sm" onClick=${() => setInstrFull(true)}>⤢ Expand</button>
+        </div>
+        <textarea class="db-input chatcfg-instr" rows="8"
+                  placeholder=${suggesting ? "Drafting from your industry & knowledge…" : `e.g. Be a touch more playful than the phone line. Always mention free home delivery. Offer a brochure link before booking.`}
+                  value=${chatCfg.instructions}
+                  onInput=${(e) => setChatField("instructions", e.target.value)}></textarea>
+        <div class="chatknow-instr-foot">
+          <span class="db-form-help" style=${{ margin: 0 }}>✨ Auto-drafted from your industry, business context and what this agent captures — edit or clear it freely. ${(chatCfg.instructions || "").length} characters.</span>
+          <button type="button" class=${"db-btn-primary db-btn-sm " + (chatCfgSaved ? "is-copied" : "")} onClick=${saveChatCfg} disabled=${chatCfgSaving}>
+            ${chatCfgSaving ? "Saving…" : chatCfgSaved ? "✓ Saved" : "Save instructions"}
+          </button>
+        </div>
+      </div>
+
       ${kbInfo === null ? html`<div class="db-loading-sm">Loading…</div>` : html`
         <div class="chatkb-grid">
           <div class="chatkb-card">
@@ -12509,11 +12517,19 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
             <div class="chatkb-card-h">🗣 Language</div>
             <div class="chatkb-line">${kbInfo.language}</div>
           </div>
-          ${(kbInfo.guardrails && kbInfo.guardrails.length) || (kbInfo.donts && kbInfo.donts.length) ? html`
-          <div class="chatkb-card">
-            <div class="chatkb-card-h">🚧 Guardrails</div>
-            <ul class="chatkb-list">${[...(kbInfo.guardrails || []), ...((kbInfo.donts || []).map((d) => /^don'?t/i.test(String(d).trim()) ? d : "Don't " + d))].slice(0, 6).map((g, i) => html`<li key=${i}>${g}</li>`)}</ul>
-          </div>` : ""}
+          <div class="chatkb-card chatkb-card-guard">
+            <div class="chatkb-card-h">🚦 Do's & Don'ts (guardrails)
+              <button type="button" class="chatkb-edit" onClick=${() => onNav && onNav(`/agent/${agent.slug || agent.id}/guardrails`)}>Edit →</button>
+            </div>
+            ${(kbInfo.dos && kbInfo.dos.length)
+              ? html`<ul class="chatkb-list chatkb-dos">${kbInfo.dos.slice(0, 6).map((d, i) => html`<li key=${i}>${d}</li>`)}</ul>` : ""}
+            ${(kbInfo.donts && kbInfo.donts.length)
+              ? html`<ul class="chatkb-list chatkb-donts">${kbInfo.donts.slice(0, 6).map((d, i) => html`<li key=${i}>${d}</li>`)}</ul>` : ""}
+            ${(kbInfo.guardrails && kbInfo.guardrails.length)
+              ? html`<ul class="chatkb-list">${kbInfo.guardrails.slice(0, 4).map((g, i) => html`<li key=${i}>🚧 ${g}</li>`)}</ul>` : ""}
+            ${!((kbInfo.dos || []).length || (kbInfo.donts || []).length || (kbInfo.guardrails || []).length)
+              ? html`<div class="chatkb-empty">No Do's or Don'ts set yet — add them on the Guardrails page so the chat stays on-policy.</div>` : ""}
+          </div>
         </div>
       `}
     </section>
