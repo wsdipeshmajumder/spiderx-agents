@@ -7,6 +7,16 @@
 
 **Last updated: build 357**
 
+**Mobile end-to-end flow — verification (build 357, no code change):** drove the
+whole chat flow in the real embed.js widget at 375px on a host page: open →
+home + 4 starters (header fully visible, not clipped); send "What are the ticket
+prices?" → user + model bubbles render correctly; **3 grounded follow-up chips**
+appeared (in-language) and tapping one continued the conversation; **New chat**
+cleared the transcript and returned to the fresh home. Combined with the
+separately-verified connection-issue recovery (auto-reconnect + 36px Reconnect
+bar) and return-to-home on end, the mobile experience is confirmed working
+end-to-end across builds 351/354/356/357. Evidence: **Behavioral**.
+
 **Build 357 (mobile tap target for the Reconnect button):** the connection-issue
 Reconnect button was 28px tall — under the ~44px mobile ideal. At `≤560px` it now
 gets `min-height:36px` + roomier padding. Verified in 375px emulation: rendered
