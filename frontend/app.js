@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 359;
+const SXAI_BUILD = 360;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -9971,6 +9971,29 @@ function guardrailPolicyFrom(agent) {
   };
 }
 
+// Live cross-tab sync for agent.policy — saving guardrails on one surface (the
+// Guardrails page OR the chat "What it knows" tab) pushes the new policy to
+// every OTHER open tab showing the same agent, so both stay in sync with no
+// reload. BroadcastChannel doesn't echo to the posting tab (which already has
+// the state); absent BroadcastChannel it's a graceful no-op (remount-on-nav
+// sync still applies). Named per session, one module-scope bus.
+const _policyBus = (typeof BroadcastChannel !== "undefined") ? new BroadcastChannel("sxai-agent-policy") : null;
+function broadcastPolicy(agentId, policy) {
+  try { _policyBus && _policyBus.postMessage({ agentId, policy }); } catch (e) { /* channel closed */ }
+}
+// Subscribe a component to live policy pushes for one agent. `onPolicy(policy)`
+// fires when another tab saves this agent's guardrails.
+function usePolicySync(agentId, onPolicy) {
+  const cb = useRef(onPolicy);
+  cb.current = onPolicy;
+  useEffect(() => {
+    if (!_policyBus) return;
+    const h = (e) => { const d = e.data; if (d && d.agentId === agentId && d.policy) cb.current(d.policy); };
+    _policyBus.addEventListener("message", h);
+    return () => _policyBus.removeEventListener("message", h);
+  }, [agentId]);
+}
+
 function AgentGuardrailsPage({ agent, agents, presets, plan, onNav, refreshAgent }) {
   // Catalogue — single source of truth. Each item has a stable id, a short
   // label, an explanation, and a per-section bucket.
@@ -9990,6 +10013,8 @@ function AgentGuardrailsPage({ agent, agents, presets, plan, onNav, refreshAgent
   // are always on regardless of stored state.
   const [policy, setPolicy] = useState(() => guardrailPolicyFrom(agent));
   const [saveState, setSaveState] = useState({ msg: "", cls: "" });
+  // Live-update if another tab (e.g. the chat "What it knows" editor) saves.
+  usePolicySync(agent.id, (p) => { setPolicy(p); setSaveState({ msg: "Updated from another tab", cls: "dim" }); setTimeout(() => setSaveState({ msg: "", cls: "" }), 2000); });
 
   const toggle = (bucket, id) => setPolicy((p) => ({
     ...p,
@@ -10006,6 +10031,7 @@ function AgentGuardrailsPage({ agent, agents, presets, plan, onNav, refreshAgent
       });
       if (!r.ok) throw new Error("server " + r.status);
       setSaveState({ msg: "Saved ✓", cls: "ok" });
+      broadcastPolicy(agent.id, policy);
       refreshAgent && refreshAgent();
       setTimeout(() => setSaveState({ msg: "", cls: "" }), 2200);
     } catch {
@@ -12013,6 +12039,9 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   const [gpolicy, setGpolicy] = useState(() => guardrailPolicyFrom(agent));
   const [gSaving, setGSaving] = useState(false);
   const [gSaved, setGSaved] = useState(false);
+  const [gSynced, setGSynced] = useState(false);   // "updated from another tab" flash
+  // Live-update if another tab (e.g. the Guardrails page) saves this policy.
+  usePolicySync(agent.id, (p) => { setGpolicy(p); setGSynced(true); setTimeout(() => setGSynced(false), 2000); reloadKb(); });
   const gToggle = (bucket, id) => { setGpolicy((p) => ({ ...p, [bucket]: { ...p[bucket], [id]: !p[bucket][id] } })); setGSaved(false); };
   const gSetCustom = (k, v) => { setGpolicy((p) => ({ ...p, [k]: v })); setGSaved(false); };
   const saveGuardrails = async () => {
@@ -12022,7 +12051,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ policy: gpolicy }),
       });
-      if (r.ok) { setGSaved(true); setTimeout(() => setGSaved(false), 2200); refreshAgent && refreshAgent(); reloadKb(); }
+      if (r.ok) { setGSaved(true); setTimeout(() => setGSaved(false), 2200); broadcastPolicy(agent.id, gpolicy); refreshAgent && refreshAgent(); reloadKb(); }
     } finally { setGSaving(false); }
   };
   const autoTriedRef = useRef(false);
@@ -12544,6 +12573,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
           </div>
           <div class="chatkb-card chatkb-card-guard chatkb-guard-edit">
             <div class="chatkb-card-h">🚦 Do's & Don'ts (guardrails)
+              ${gSynced ? html`<span class="chatkb-guard-synced">⟳ updated from another tab</span>` : ""}
               <button type="button" class=${"db-btn-primary db-btn-sm chatkb-guard-save " + (gSaved ? "is-copied" : "")} onClick=${saveGuardrails} disabled=${gSaving}>
                 ${gSaving ? "Saving…" : gSaved ? "✓ Saved" : "Save guardrails"}
               </button>

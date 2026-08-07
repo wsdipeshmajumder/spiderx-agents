@@ -5,7 +5,20 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 359**
+**Last updated: build 360**
+
+**Build 360 (live cross-tab sync of guardrails — no reload):** saving Do's &
+Don'ts on either surface (the Guardrails page OR the chat "What it knows" tab)
+now pushes the new `agent.policy` to every OTHER open tab of the same agent via
+a module-scope `BroadcastChannel("sxai-agent-policy")` + a `usePolicySync`
+hook; the receiving surface calls `setPolicy`/`setGpolicy` (+ `reloadKb`) so it
+updates instantly with no reload/navigation. Graceful no-op where
+BroadcastChannel is absent (remount-on-nav sync still applies). The chat tab
+shows a brief "⟳ updated from another tab" flash. Verified live with TWO tabs
+(Guardrails page + chat tab): toggling `name_caller` on the Guardrails page
+flipped it ON in the chat tab with the URL unchanged; toggling `no_competitors`
+on the chat tab flipped it ON on the Guardrails page — both directions, no
+reload, changes coexisting. Evidence: **Behavioral**.
 
 **Build 359 (edit Do's & Don'ts inline on the "What it knows" tab):** the
 read-only guardrails card is now a full inline editor — the same 5 Do's / 5
