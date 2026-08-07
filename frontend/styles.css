@@ -1361,6 +1361,10 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   transition: background .12s, color .12s;
 }
 .chatembed-reconnect-btn:hover { background: var(--chat-accent, #4f46e5); color: #fff; }
+/* Comfortable tap target on mobile (build 357). */
+@media (max-width: 560px) {
+  .chatembed-reconnect-btn { min-height: 36px; padding: 6px 14px; }
+}
 :root[data-theme="dark"] .chatembed-reconnect {
   background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.35); color: #f7b8ae;
 }

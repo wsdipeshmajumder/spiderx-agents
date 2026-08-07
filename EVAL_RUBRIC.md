@@ -5,7 +5,13 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 356**
+**Last updated: build 357**
+
+**Build 357 (mobile tap target for the Reconnect button):** the connection-issue
+Reconnect button was 28px tall — under the ~44px mobile ideal. At `≤560px` it now
+gets `min-height:36px` + roomier padding. Verified in 375px emulation: rendered
+112×36 (was 112×28). Evidence: **Behavioral**.
+
 
 **Build 356 (graceful "connection issue" recovery):** a dropped socket no longer
 leaves the visitor on a dead "connection issue" screen. Two-part handling:
