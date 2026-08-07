@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 360;
+const SXAI_BUILD = 361;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -289,6 +289,13 @@ function pronouns(agent) {
   };
 }
 
+// Per-tab client id — lets a live-push echo (SSE) be traced back to the tab
+// that made the change so it can ignore its own save.
+const SXAI_CLIENT_ID = (() => {
+  try { return (crypto.randomUUID && crypto.randomUUID()) || String(Math.random()).slice(2); }
+  catch { return String(Math.random()).slice(2); }
+})();
+
 (function patchFetch() {
   if (typeof window === "undefined" || !window.fetch || window.__sxaiFetchPatched) return;
   const original = window.fetch.bind(window);
@@ -297,11 +304,10 @@ function pronouns(agent) {
     // Only stamp our own API routes; leave esm.sh / static assets alone.
     if (url.startsWith("/api/") || url.startsWith(location.origin + "/api/")) {
       const uid = currentUserId();
-      if (uid) {
-        const headers = new Headers(init.headers || (input?.headers) || {});
-        if (!headers.has("X-User-Id")) headers.set("X-User-Id", String(uid));
-        init = { ...init, headers };
-      }
+      const headers = new Headers(init.headers || (input?.headers) || {});
+      if (uid && !headers.has("X-User-Id")) headers.set("X-User-Id", String(uid));
+      if (!headers.has("X-Client-Id")) headers.set("X-Client-Id", SXAI_CLIENT_ID);
+      init = { ...init, headers };
     }
     return original(input, init);
   };
@@ -9982,15 +9988,38 @@ function broadcastPolicy(agentId, policy) {
   try { _policyBus && _policyBus.postMessage({ agentId, policy }); } catch (e) { /* channel closed */ }
 }
 // Subscribe a component to live policy pushes for one agent. `onPolicy(policy)`
-// fires when another tab saves this agent's guardrails.
+// fires when this agent's guardrails are saved elsewhere — instantly in the
+// SAME browser (BroadcastChannel) and across DEVICES/users (SSE from the
+// server). The server echoes the saver's `origin` so its own tab ignores it.
 function usePolicySync(agentId, onPolicy) {
   const cb = useRef(onPolicy);
   cb.current = onPolicy;
   useEffect(() => {
-    if (!_policyBus) return;
-    const h = (e) => { const d = e.data; if (d && d.agentId === agentId && d.policy) cb.current(d.policy); };
-    _policyBus.addEventListener("message", h);
-    return () => _policyBus.removeEventListener("message", h);
+    if (!agentId) return;
+    // 1) Same-browser, instant.
+    let bcH = null;
+    if (_policyBus) {
+      bcH = (e) => { const d = e.data; if (d && d.agentId === agentId && d.policy) cb.current(d.policy); };
+      _policyBus.addEventListener("message", bcH);
+    }
+    // 2) Cross-device via server push (SSE). `?u=` authenticates the stream —
+    // EventSource can't set the X-User-Id header. Auto-reconnects on drop.
+    let es = null;
+    if (typeof EventSource !== "undefined") {
+      try {
+        es = new EventSource(withUser(`/api/agents/${agentId}/policy-stream`));
+        es.addEventListener("policy", (e) => {
+          try {
+            const d = JSON.parse(e.data);
+            if (d && d.policy && d.origin !== SXAI_CLIENT_ID) cb.current(d.policy);
+          } catch (err) { /* ignore malformed frame */ }
+        });
+      } catch (err) { /* SSE unavailable — BroadcastChannel + remount-on-nav still cover */ }
+    }
+    return () => {
+      if (_policyBus && bcH) _policyBus.removeEventListener("message", bcH);
+      if (es) es.close();
+    };
   }, [agentId]);
 }
 

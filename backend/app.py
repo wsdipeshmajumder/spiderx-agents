@@ -12,7 +12,7 @@ from typing import Any, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -119,7 +119,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 360
+APP_BUILD = 361
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1745,6 +1745,38 @@ async def agent_live_chats(agent_id: int, request: Request) -> dict:
     return {"live": chat_bridge.live_chats_for_agent(agent_id)}
 
 
+@app.get("/api/agents/{agent_id}/policy-stream")
+async def agent_policy_stream(agent_id: int, request: Request) -> StreamingResponse:
+    """SSE stream that pushes guardrail (agent.policy) changes to dashboard
+    clients, so two operators on different devices stay in sync without a
+    reload. Auth via `?u=<user id>` (EventSource can't set the X-User-Id
+    header). Heartbeats every 25s keep proxies from dropping the connection."""
+    await _require_agent_owned(agent_id, await current_user(request))
+    from . import policy_stream
+
+    async def _gen():
+        q = policy_stream.subscribe(agent_id)
+        try:
+            yield ": connected\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    payload = await asyncio.wait_for(q.get(), timeout=25.0)
+                    yield f"event: policy\ndata: {json.dumps(payload, default=str)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"   # heartbeat
+        finally:
+            policy_stream.unsubscribe(agent_id, q)
+
+    return StreamingResponse(
+        _gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
+                 "X-Accel-Buffering": "no"},
+    )
+
+
 @app.get("/api/agents/{agent_id}/chat/export.xlsx")
 async def agent_chat_export(agent_id: int, request: Request,
                             date_from: Optional[str] = None,
@@ -2266,6 +2298,17 @@ async def patch_agent(agent_id: int, request: Request) -> dict:
     updated = await db.update_agent(agent_id, patch)
     if not updated:
         raise HTTPException(status_code=404, detail="agent not found")
+    # Live-push guardrail changes to other operators' open dashboards (SSE).
+    # `origin` (a per-tab client id) lets the saver's own tab ignore its echo.
+    if "policy" in patch:
+        try:
+            from . import policy_stream
+            policy_stream.publish(agent_id, {
+                "policy": updated.get("policy"),
+                "origin": request.headers.get("X-Client-Id") or "",
+            })
+        except Exception as _e:  # noqa: BLE001
+            log.debug("policy_stream.publish failed: %s", _e)
     # Build 198: emit lifecycle events. We diff old vs new on published
     # (because that's the most operationally important state transition)
     # and a few other high-signal fields. purpose, knowledge, info_groups

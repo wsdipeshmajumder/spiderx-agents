@@ -5,7 +5,21 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 360**
+**Last updated: build 361**
+
+**Build 361 (server push for cross-device guardrail sync):** build 360's live
+sync was same-browser only (BroadcastChannel). Now it also crosses devices/users
+via SSE: new `backend/policy_stream.py` (in-process pub/sub) + a
+`GET /api/agents/{id}/policy-stream` endpoint (auth via `?u=<uid>` since
+EventSource can't set headers; 25s heartbeats). `patch_agent` publishes the new
+`agent.policy` on any policy PATCH, tagging the saver's `origin` (a per-tab
+`X-Client-Id` stamped by the global fetch patch). `usePolicySync` now also opens
+an EventSource and applies incoming policies whose `origin` isn't this tab's, so
+the saver never echoes to itself. Single-process fan-out (current deployment);
+noted to swap for Redis/LISTEN-NOTIFY if scaled to multiple instances. Verified:
+(1) curl SSE stream received `event: policy` after a PATCH; (2) an external curl
+PATCH — NOT a BroadcastChannel participant — live-updated the open dashboard tab
+via SSE alone (`name_caller` false→true, URL unchanged). Evidence: **Behavioral**.
 
 **Build 360 (live cross-tab sync of guardrails — no reload):** saving Do's &
 Don'ts on either surface (the Guardrails page OR the chat "What it knows" tab)
