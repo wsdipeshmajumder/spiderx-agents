@@ -1601,6 +1601,28 @@ def _public_agent(agent: dict) -> dict:
     return out
 
 
+# The only fields the public chat/voice embed actually renders. Everything else
+# — system_prompt, guardrails, variables (transfer numbers, prices, addresses),
+# connectors, knowledge, outcomes, pricing — is operator IP that must NEVER
+# reach an unauthenticated `by-slug` read (build 358 security fix). Allowlist,
+# not denylist, so new agent columns don't silently start leaking.
+_EMBED_PUBLIC_FIELDS = ("id", "slug", "name", "persona", "locale", "chat_settings")
+
+
+def _public_agent_embed(agent: dict) -> dict:
+    """Strictly-public agent shape for the UNAUTHENTICATED embed — only what the
+    widget shows. Also drops `chat_settings.instructions` (the chat-only prompt)
+    and `allowed_domains` (internal config); keeps the look/starters."""
+    if not isinstance(agent, dict):
+        return {}
+    out = {k: agent.get(k) for k in _EMBED_PUBLIC_FIELDS if k in agent}
+    cs = out.get("chat_settings")
+    if isinstance(cs, dict):
+        out["chat_settings"] = {k: v for k, v in cs.items()
+                                if k not in ("instructions", "allowed_domains")}
+    return out
+
+
 @app.get("/api/agents/{agent_id}")
 async def get_agent(agent_id: int, request: Request) -> dict:
     return _public_agent(await _require_agent_owned(agent_id, await current_user(request)))
@@ -1615,26 +1637,36 @@ async def get_agent_by_slug(slug: str, request: Request, response: Response) -> 
     # The embed widget's script runs on the customer's OWN domain and fetches
     # this endpoint cross-origin to read the agent's public look (chat_settings:
     # teaser, launcher icon, colours…). Allow any origin — the payload is the
-    # public shape only (no secrets, see _public_agent) and auth here is via a
+    # public shape only (see _public_agent_embed) and auth here is via a
     # client-set header, not an ambient cookie, so `*` carries no CSRF risk.
     response.headers["Access-Control-Allow-Origin"] = "*"
     from . import auth
+    # `current_user` falls back to the founder for header-less requests, so an
+    # anonymous embed read would otherwise look "authenticated" and, if the agent
+    # sits in the founder's org, get the FULL (secret) shape. Gate the full shape
+    # on a real client-supplied identity (build 358 — plugged a public leak of
+    # system_prompt / guardrails / business variables).
+    authed = bool(request.headers.get("X-User-Id")
+                  or request.query_params.get("u") or request.query_params.get("user_id"))
     user = await current_user(request)
     org_id = await auth.primary_org_id(user["id"])
     a = await db.get_agent_by_slug(slug, org_id=org_id)
+    if a and authed:
+        # Authenticated caller reading an agent in their own org (the dashboard
+        # opening /agent/<slug> to edit it) → full shape, minus carrier secrets.
+        try:
+            await _require_agent_owned(a["id"], user)
+            return _public_agent(a)
+        except HTTPException:
+            pass  # not actually theirs — fall through to the public shape
+    # Public / embed / non-owner path. The widget on a customer's site loads
+    # UNAUTHENTICATED, so resolve the slug GLOBALLY and return ONLY the embed's
+    # public look — never the prompt, guardrails, or business internals. Publish
+    # + chat-entitlement are still enforced when the WS actually connects.
+    if a is None:
+        a = await db.get_agent_by_slug(slug, org_id=None)
     if a:
-        await _require_agent_owned(a["id"], user)
-        return _public_agent(a)
-    # Public embed fallback. The chat/voice widget on a customer's own site loads
-    # UNAUTHENTICATED (a native <script>/iframe can't send X-User-Id), so the
-    # caller resolves as the founder and their org won't contain a non-founder's
-    # agent — the widget then 404s and "doesn't work". Resolve the slug GLOBALLY
-    # and return the PUBLIC shape only (name / persona / sector — never secrets,
-    # see _public_agent). Publish + chat-entitlement are still enforced when the
-    # chat/voice WS actually connects, so this only exposes public identity.
-    a = await db.get_agent_by_slug(slug, org_id=None)
-    if a:
-        return _public_agent(a)
+        return _public_agent_embed(a)
     raise HTTPException(status_code=404, detail="agent not found")
 
 

@@ -7,6 +7,22 @@
 
 **Last updated: build 358**
 
+**Security: public by-slug endpoint no longer leaks operator IP (backend-only,
+no build bump):** `GET /api/agents/by-slug/<slug>` is the UNAUTHENTICATED read
+the embed uses, but `_public_agent()` only stripped carrier secrets — so it
+returned the agent's full `system_prompt`, `guardrails`, and `variables`
+(transfer numbers, prices, addresses) to anyone who knew a slug (confirmed live
+on prod: Kavya's 987-char prompt was readable). Root cause: `current_user()`
+falls back to the founder for header-less requests, so an anonymous read looked
+authenticated and, if the agent sat in the founder's org, got the full shape.
+Fix: gate the full shape on a real client-supplied identity (`X-User-Id` header
+or `?u=`); everyone else gets a new allowlist-only `_public_agent_embed()` —
+`id/slug/name/persona/locale/chat_settings` (minus `chat_settings.instructions`
+and `allowed_domains`). Verified locally: anon read → 6 keys, no
+`system_prompt`/`guardrails`/`variables`, `chat_settings` keeps starters+colours
+(embed still works); `X-User-Id:1` owner read → full shape (dashboard editor
+still works). Evidence: **Behavioral**.
+
 **Build 358 (chat instructions move to the "What it knows" tab):** the prompt /
 instructions editor was extracted from the Chat → Settings accordion and placed
 on the **"What it knows"** tab, which now frames the agent's brain as three
