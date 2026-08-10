@@ -5,7 +5,23 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 362**
+**Last updated: build 363**
+
+**Build 363 ("What it knows" tab → "System prompt", polished):** four changes to
+the Chat widget tab (renamed from build 358's "What it knows"):
+- Tab **renamed to "System prompt"** and the three chat tabs (Settings / System
+  prompt / Conversations) are now **equal width** (`.chatpage-tabs .db-tab{flex:1}`).
+  Verified: all three 315px.
+- The **"what it knows" summary cards moved to the top** of the tab (above the
+  system-prompt editor, which now sits at the bottom). Verified: grid precedes
+  `.chatknow-instr` in the DOM.
+- The info-card grid is now **5 columns in one row** (`repeat(5,minmax(0,1fr))`,
+  wraps below 1080px); the Do's & Don'ts card still spans full width. Verified:
+  5 columns, 5 info cards.
+- **Emoji → professional mono line icons** in every card header (book / wrench /
+  target / clipboard / globe; shield + check/x on Do's & Don'ts). Verified: 6
+  header SVGs, no emoji in headers (per-group data emoji in the Knowledge-topics
+  list are content, left as-is). Evidence: **Behavioral**.
 
 **Build 362 (multi-instance guardrail sync via Postgres LISTEN/NOTIFY):**
 build 361's SSE fan-out was in-process only — a policy save on instance A

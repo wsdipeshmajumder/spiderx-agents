@@ -11927,6 +11927,8 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
    two-pane preview. Stretch so the tabs span full width and both panes breathe. */
 .chatpage .golive-focus-wide { max-width: 1440px; align-items: stretch; }
 .chatpage .chatpage-tabs { align-self: stretch; }
+/* Equal-width chat tabs (Settings / System prompt / Conversations) — build 359. */
+.chatpage-tabs .db-tab { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-align: center; }
 .golive-tabs {
   display: inline-flex; gap: 4px;
   padding: 4px; margin: 0 auto 18px;
@@ -11998,10 +12000,14 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
 
 /* "What this chat knows" disclosure panel (Build 292) */
 .chatkb { margin-top: 6px; }
-.chatkb-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 12px; }
+/* Five info cards in a single row (build 359); the guardrails card spans full
+   width below (.chatkb-card-guard { grid-column: 1 / -1 }). Wraps on narrow. */
+.chatkb-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+@media (max-width: 1080px) { .chatkb-grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); } }
 .chatkb-card { background: var(--bg-1, #f7f8fa); border: 1px solid var(--border, #e6e8ef);
   border-radius: 10px; padding: 12px 14px; }
-.chatkb-card-h { font-size: 12.5px; font-weight: 700; color: var(--fg, #1a1c25); margin-bottom: 8px; }
+.chatkb-card-h { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: var(--fg, #1a1c25); margin-bottom: 8px; }
+.chatkb-ico { flex: none; color: var(--fg-mute, #6b7080); }
 .chatkb-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
 .chatkb-list li { font-size: 13px; color: var(--fg, #1a1c25); line-height: 1.35; }
 .chatkb-tags { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -12028,7 +12034,7 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
 .chatkb-guard-synced + .chatkb-guard-save { margin-left: 10px; }
 .chatkb-guard-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 6px; }
 @media (max-width: 720px) { .chatkb-guard-cols { grid-template-columns: 1fr; } }
-.chatkb-guard-h { font-size: 12px; font-weight: 700; color: var(--fg-mute, #5b6070); margin-bottom: 6px; }
+.chatkb-guard-h { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; color: var(--fg-mute, #5b6070); margin-bottom: 6px; }
 .chatkb-guard-custom { margin-top: 8px; resize: vertical; font-size: 12.5px; }
 /* Compact toggle rows (no help text) for the inline guardrails editor. */
 .db-rules-compact { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }

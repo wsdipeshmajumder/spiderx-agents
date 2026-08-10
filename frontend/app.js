@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 362;
+const SXAI_BUILD = 363;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -12532,76 +12532,69 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   const chatTabs = hasChat ? html`
     <div class="db-tabs chatpage-tabs">
       <button class=${"db-tab" + (chatTab === "settings" ? " is-active" : "")} onClick=${() => setChatTab("settings")}>Settings</button>
-      <button class=${"db-tab" + (chatTab === "knowledge" ? " is-active" : "")} onClick=${() => setChatTab("knowledge")}>What it knows</button>
+      <button class=${"db-tab" + (chatTab === "knowledge" ? " is-active" : "")} onClick=${() => setChatTab("knowledge")}>System prompt</button>
       <button class=${"db-tab" + (chatTab === "conversations" ? " is-active" : "")} onClick=${() => setChatTab("conversations")}>
         Conversations${liveChats.length > 0 ? html` <span class="db-pill-live">🟢 ${liveChats.length}</span>` : ""}
       </button>
     </div>
   ` : "";
 
+  // Monochrome line icons for the "what it knows" cards (stroke = currentColor).
+  const _kbIcon = (paths) => html`<svg class="chatkb-ico" viewBox="0 0 24 24" width="15" height="15"
+    fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+  const KB_ICONS = {
+    knowledge: _kbIcon(html`<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/>`),
+    actions: _kbIcon(html`<path d="M14.7 6.3a4 4 0 0 0-5.6 5.6L3 18l3 3 6.1-6.1a4 4 0 0 0 5.6-5.6l-2.9 2.9-2.1-.6-.6-2.1 2.9-2.9Z"/>`),
+    goals: _kbIcon(html`<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/>`),
+    captures: _kbIcon(html`<rect x="8" y="3" width="8" height="4" rx="1"/><path d="M8 5H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><path d="M8 11h8M8 15h6"/>`),
+    language: _kbIcon(html`<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/>`),
+    guard: _kbIcon(html`<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="M9 12l2 2 4-4"/>`),
+    dos: _kbIcon(html`<circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/>`),
+    donts: _kbIcon(html`<circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6M9 9l6 6"/>`),
+  };
   // Read-only disclosure of the shared brain the chat draws on — its own tab.
   const knowledgePanel = hasChat ? html`
     <section class="db-panel">
       <div class="db-panel-head">
         <div>
           <h3 class="db-panel-title">What ${agent.name} knows & how it behaves</h3>
-          <p class="db-panel-sub">Three things shape every chat reply: what it's <b>pre-trained on</b> (your knowledge, below) · what <b>you instruct</b> it (here) · the <b>Do's & Don'ts</b> it must follow.</p>
-        </div>
-      </div>
-
-      <div class="chatknow-instr">
-        <div class="chatcfg-acc-toolbar">
-          <span class="db-form-label" style=${{ margin: 0 }}>Your instructions — what to do & how to sound (layered on the shared brief)</span>
-          <button type="button" class="db-btn-ghost db-btn-sm" onClick=${suggestInstructions} disabled=${suggesting}>
-            ${suggesting ? "✨ Drafting…" : (chatCfg.instructions || "").trim() ? "✨ Regenerate" : "✨ Suggest"}
-          </button>
-          <button type="button" class="db-btn-ghost db-btn-sm" onClick=${() => setInstrFull(true)}>⤢ Expand</button>
-        </div>
-        <textarea class="db-input chatcfg-instr" rows="8"
-                  placeholder=${suggesting ? "Drafting from your industry & knowledge…" : `e.g. Be a touch more playful than the phone line. Always mention free home delivery. Offer a brochure link before booking.`}
-                  value=${chatCfg.instructions}
-                  onInput=${(e) => setChatField("instructions", e.target.value)}></textarea>
-        <div class="chatknow-instr-foot">
-          <span class="db-form-help" style=${{ margin: 0 }}>✨ Auto-drafted from your industry, business context and what this agent captures — edit or clear it freely. ${(chatCfg.instructions || "").length} characters.</span>
-          <button type="button" class=${"db-btn-primary db-btn-sm " + (chatCfgSaved ? "is-copied" : "")} onClick=${saveChatCfg} disabled=${chatCfgSaving}>
-            ${chatCfgSaving ? "Saving…" : chatCfgSaved ? "✓ Saved" : "Save instructions"}
-          </button>
+          <p class="db-panel-sub">Three things shape every chat reply: what it's <b>pre-trained on</b> (its knowledge, below) · the <b>Do's & Don'ts</b> it must follow · and the <b>system prompt</b> you write.</p>
         </div>
       </div>
 
       ${kbInfo === null ? html`<div class="db-loading-sm">Loading…</div>` : html`
         <div class="chatkb-grid">
           <div class="chatkb-card">
-            <div class="chatkb-card-h">📚 Knowledge topics</div>
+            <div class="chatkb-card-h">${KB_ICONS.knowledge} Knowledge topics</div>
             ${kbInfo.knowledge_groups && kbInfo.knowledge_groups.length
               ? html`<ul class="chatkb-list">${kbInfo.knowledge_groups.map((g, i) => html`<li key=${i}>${g.emoji} ${g.label}</li>`)}</ul>`
               : html`<div class="chatkb-empty">No reference knowledge groups yet — add them on the Knowledge page so the chat can answer from your content.</div>`}
             ${kbInfo.business_facts_present ? html`<div class="chatkb-foot">✓ Business facts filled in</div>` : ""}
           </div>
           <div class="chatkb-card">
-            <div class="chatkb-card-h">🛠 Actions it can take</div>
+            <div class="chatkb-card-h">${KB_ICONS.actions} Actions it can take</div>
             ${kbInfo.tools && kbInfo.tools.length
               ? html`<ul class="chatkb-list">${kbInfo.tools.map((t, i) => html`<li key=${i}>${t.label}</li>`)}</ul>`
               : html`<div class="chatkb-empty">No tools connected — it can answer + capture leads, but can't book/look-up yet.</div>`}
           </div>
           <div class="chatkb-card">
-            <div class="chatkb-card-h">🎯 Goals it works toward</div>
+            <div class="chatkb-card-h">${KB_ICONS.goals} Goals it works toward</div>
             ${kbInfo.outcomes && kbInfo.outcomes.length
               ? html`<div class="chatkb-tags">${kbInfo.outcomes.map((o, i) => html`<span key=${i} class="chatkb-tag">${String(o).replace(/_/g, " ")}</span>`)}</div>`
               : html`<div class="chatkb-empty">—</div>`}
           </div>
           <div class="chatkb-card">
-            <div class="chatkb-card-h">📝 Info it captures</div>
+            <div class="chatkb-card-h">${KB_ICONS.captures} Info it captures</div>
             ${kbInfo.captured_fields && kbInfo.captured_fields.length
               ? html`<div class="chatkb-tags">${kbInfo.captured_fields.slice(0, 20).map((f, i) => html`<span key=${i} class="chatkb-tag">${f.label || f.field}</span>`)}</div>`
               : html`<div class="chatkb-empty">—</div>`}
           </div>
           <div class="chatkb-card">
-            <div class="chatkb-card-h">🗣 Language</div>
+            <div class="chatkb-card-h">${KB_ICONS.language} Language</div>
             <div class="chatkb-line">${kbInfo.language}</div>
           </div>
           <div class="chatkb-card chatkb-card-guard chatkb-guard-edit">
-            <div class="chatkb-card-h">🚦 Do's & Don'ts (guardrails)
+            <div class="chatkb-card-h">${KB_ICONS.guard} Do's & Don'ts (guardrails)
               ${gSynced ? html`<span class="chatkb-guard-synced">⟳ updated from another tab</span>` : ""}
               <button type="button" class=${"db-btn-primary db-btn-sm chatkb-guard-save " + (gSaved ? "is-copied" : "")} onClick=${saveGuardrails} disabled=${gSaving}>
                 ${gSaving ? "Saving…" : gSaved ? "✓ Saved" : "Save guardrails"}
@@ -12609,7 +12602,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
             </div>
             <div class="chatkb-guard-cols">
               <div class="chatkb-guard-col">
-                <div class="chatkb-guard-h">✅ Do's</div>
+                <div class="chatkb-guard-h">${KB_ICONS.dos} Do's</div>
                 <ul class="db-rules db-rules-compact">
                   ${GUARDRAIL_DOS.map((d) => html`
                     <li key=${d.id} class=${gpolicy.dos[d.id] ? "is-on" : ""}>
@@ -12623,7 +12616,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
                           value=${gpolicy.custom_dos} onInput=${(e) => gSetCustom("custom_dos", e.target.value)}></textarea>
               </div>
               <div class="chatkb-guard-col">
-                <div class="chatkb-guard-h">⛔ Don'ts</div>
+                <div class="chatkb-guard-h">${KB_ICONS.donts} Don'ts</div>
                 <ul class="db-rules db-rules-compact">
                   ${GUARDRAIL_DONTS.map((d) => html`
                     <li key=${d.id} class=${gpolicy.donts[d.id] ? "is-on" : ""}>
@@ -12641,6 +12634,26 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
           </div>
         </div>
       `}
+
+      <div class="chatknow-instr">
+        <div class="chatcfg-acc-toolbar">
+          <span class="db-form-label" style=${{ margin: 0 }}>System prompt — what to do & how to sound (layered on the shared brief)</span>
+          <button type="button" class="db-btn-ghost db-btn-sm" onClick=${suggestInstructions} disabled=${suggesting}>
+            ${suggesting ? "✨ Drafting…" : (chatCfg.instructions || "").trim() ? "✨ Regenerate" : "✨ Suggest"}
+          </button>
+          <button type="button" class="db-btn-ghost db-btn-sm" onClick=${() => setInstrFull(true)}>⤢ Expand</button>
+        </div>
+        <textarea class="db-input chatcfg-instr" rows="8"
+                  placeholder=${suggesting ? "Drafting from your industry & knowledge…" : `e.g. Be a touch more playful than the phone line. Always mention free home delivery. Offer a brochure link before booking.`}
+                  value=${chatCfg.instructions}
+                  onInput=${(e) => setChatField("instructions", e.target.value)}></textarea>
+        <div class="chatknow-instr-foot">
+          <span class="db-form-help" style=${{ margin: 0 }}>✨ Auto-drafted from your industry, business context and what this agent captures — edit or clear it freely. ${(chatCfg.instructions || "").length} characters.</span>
+          <button type="button" class=${"db-btn-primary db-btn-sm " + (chatCfgSaved ? "is-copied" : "")} onClick=${saveChatCfg} disabled=${chatCfgSaving}>
+            ${chatCfgSaving ? "Saving…" : chatCfgSaved ? "✓ Saved" : "Save instructions"}
+          </button>
+        </div>
+      </div>
     </section>
   ` : "";
 
