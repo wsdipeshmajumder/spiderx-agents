@@ -5,7 +5,14 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 365**
+**Last updated: build 366**
+
+**Security follow-up: `/api/admin/storage-health` now super-admin gated.** The
+one `/api/admin/*` route that wasn't super-admin gated (it exposed server paths
++ recording totals to any signed-in user). Now `current_user()` (401 for anon,
+from the build-365 fix) + `db.is_super_admin(user["id"])` → 403 otherwise.
+Verified on a fresh local server: anon → 401, founder (super-admin) → 200.
+Evidence: **Behavioral**.
 
 **SECURITY (critical): closed the systemic anonymous-founder auth bypass.**
 `current_user()` fell back to `db.get_founder()` for any header-less request, so

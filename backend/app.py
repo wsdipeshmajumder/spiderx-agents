@@ -132,7 +132,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 365
+APP_BUILD = 366
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -2100,8 +2100,11 @@ async def storage_health(request: Request) -> dict:
     """Diagnostic (tester #13): WHERE call recordings are stored, and whether that
     path is the persistent Railway volume + actually writable. If `ephemeral_fallback`
     is true or `writable` is false, recordings won't survive/land — fix the volume
-    mount or set RECORDING_DIR. Any signed-in user can read it; paths only, no secrets."""
-    await current_user(request)
+    mount or set RECORDING_DIR. Super-admin only — it lives under /api/admin and
+    exposes server paths, so gate it like every other admin route."""
+    user = await current_user(request)
+    if not await db.is_super_admin(user["id"]):
+        raise HTTPException(status_code=403, detail="super-admin only")
     from . import recordings as _rec
     root = _rec.RECORDING_ROOT
     info: dict[str, Any] = {
