@@ -11927,8 +11927,9 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
    two-pane preview. Stretch so the tabs span full width and both panes breathe. */
 .chatpage .golive-focus-wide { max-width: 1440px; align-items: stretch; }
 .chatpage .chatpage-tabs { align-self: stretch; }
-/* Equal-width chat tabs (Settings / System prompt / Conversations) — build 359. */
-.chatpage-tabs .db-tab { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-align: center; }
+/* Left-aligned chat tabs (Settings / System prompt / Conversations) — natural
+   width, packed to the left instead of stretched equal-width (build 364). */
+.chatpage-tabs .db-tab { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; }
 .golive-tabs {
   display: inline-flex; gap: 4px;
   padding: 4px; margin: 0 auto 18px;

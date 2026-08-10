@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 363;
+const SXAI_BUILD = 365;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -12558,7 +12558,27 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
       <div class="db-panel-head">
         <div>
           <h3 class="db-panel-title">What ${agent.name} knows & how it behaves</h3>
-          <p class="db-panel-sub">Three things shape every chat reply: what it's <b>pre-trained on</b> (its knowledge, below) · the <b>Do's & Don'ts</b> it must follow · and the <b>system prompt</b> you write.</p>
+          <p class="db-panel-sub">Three things shape every chat reply: the <b>system prompt</b> you write (below) · what it's <b>pre-trained on</b> (its knowledge) · and the <b>Do's & Don'ts</b> it must follow.</p>
+        </div>
+      </div>
+
+      <div class="chatknow-instr">
+        <div class="chatcfg-acc-toolbar">
+          <span class="db-form-label" style=${{ margin: 0 }}>System prompt — what to do & how to sound (layered on the shared brief)</span>
+          <button type="button" class="db-btn-ghost db-btn-sm" onClick=${suggestInstructions} disabled=${suggesting}>
+            ${suggesting ? "✨ Drafting…" : (chatCfg.instructions || "").trim() ? "✨ Regenerate" : "✨ Suggest"}
+          </button>
+          <button type="button" class="db-btn-ghost db-btn-sm" onClick=${() => setInstrFull(true)}>⤢ Expand</button>
+        </div>
+        <textarea class="db-input chatcfg-instr" rows="8"
+                  placeholder=${suggesting ? "Drafting from your industry & knowledge…" : `e.g. Be a touch more playful than the phone line. Always mention free home delivery. Offer a brochure link before booking.`}
+                  value=${chatCfg.instructions}
+                  onInput=${(e) => setChatField("instructions", e.target.value)}></textarea>
+        <div class="chatknow-instr-foot">
+          <span class="db-form-help" style=${{ margin: 0 }}>✨ Auto-drafted from your industry, business context and what this agent captures — edit or clear it freely. ${(chatCfg.instructions || "").length} characters.</span>
+          <button type="button" class=${"db-btn-primary db-btn-sm " + (chatCfgSaved ? "is-copied" : "")} onClick=${saveChatCfg} disabled=${chatCfgSaving}>
+            ${chatCfgSaving ? "Saving…" : chatCfgSaved ? "✓ Saved" : "Save instructions"}
+          </button>
         </div>
       </div>
 
@@ -12634,26 +12654,6 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
           </div>
         </div>
       `}
-
-      <div class="chatknow-instr">
-        <div class="chatcfg-acc-toolbar">
-          <span class="db-form-label" style=${{ margin: 0 }}>System prompt — what to do & how to sound (layered on the shared brief)</span>
-          <button type="button" class="db-btn-ghost db-btn-sm" onClick=${suggestInstructions} disabled=${suggesting}>
-            ${suggesting ? "✨ Drafting…" : (chatCfg.instructions || "").trim() ? "✨ Regenerate" : "✨ Suggest"}
-          </button>
-          <button type="button" class="db-btn-ghost db-btn-sm" onClick=${() => setInstrFull(true)}>⤢ Expand</button>
-        </div>
-        <textarea class="db-input chatcfg-instr" rows="8"
-                  placeholder=${suggesting ? "Drafting from your industry & knowledge…" : `e.g. Be a touch more playful than the phone line. Always mention free home delivery. Offer a brochure link before booking.`}
-                  value=${chatCfg.instructions}
-                  onInput=${(e) => setChatField("instructions", e.target.value)}></textarea>
-        <div class="chatknow-instr-foot">
-          <span class="db-form-help" style=${{ margin: 0 }}>✨ Auto-drafted from your industry, business context and what this agent captures — edit or clear it freely. ${(chatCfg.instructions || "").length} characters.</span>
-          <button type="button" class=${"db-btn-primary db-btn-sm " + (chatCfgSaved ? "is-copied" : "")} onClick=${saveChatCfg} disabled=${chatCfgSaving}>
-            ${chatCfgSaving ? "Saving…" : chatCfgSaved ? "✓ Saved" : "Save instructions"}
-          </button>
-        </div>
-      </div>
     </section>
   ` : "";
 

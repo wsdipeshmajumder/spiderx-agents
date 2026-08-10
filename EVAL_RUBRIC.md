@@ -5,7 +5,20 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 363**
+**Last updated: build 365**
+
+**Build 365 (chat tabs left-aligned + system-prompt editor to the top):** two
+tweaks reversing part of 363's layout per feedback:
+- The three chat tabs (Settings / System prompt / Conversations) are now
+  **left-aligned** at natural width (`.chatpage-tabs .db-tab{flex:0 0 auto}`)
+  instead of stretched equal-width. Verified live: widths 84/131/125px, packed
+  left in a 952px bar.
+- On the **System prompt** tab, the system-prompt **text area moved to the top**
+  (directly under the panel header), with the knowledge cards + Do's & Don'ts
+  below it. Verified: `.chatknow-instr` precedes `.chatkb-grid` in the DOM.
+Frontend-only; `APP_BUILD` staged in isolation (a concurrent session's
+`current_user` auth-hardening in app.py was left untouched/unstaged). Lands as
+365 to avoid colliding with that pending build. Evidence: **Behavioral**.
 
 **Build 363 ("What it knows" tab → "System prompt", polished):** four changes to
 the Chat widget tab (renamed from build 358's "What it knows"):
