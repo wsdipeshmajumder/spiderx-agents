@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 371;
+const SXAI_BUILD = 372;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -5031,8 +5031,8 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
             ` : ""}
 
             ${groups.map((g, i) => html`
-              ${g.division && i > 0 && !(groups[i - 1] && groups[i - 1].division)
-                ? html`<div class="db-nav-divider" role="separator"><span>Workspace & add-ons</span></div>` : ""}
+              ${g.division
+                ? html`<div class=${"db-nav-divider" + (i > 0 && !(groups[i - 1] && groups[i - 1].division) ? " db-nav-divider-lead" : "")} role="separator"><span>${g.label}</span></div>` : ""}
               ${g.division
                 ? html`
                   <div class="db-nav-group-items db-nav-flat">
@@ -5080,22 +5080,17 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
             `)}
 
             <div class="db-nav-foot">
-              <span class="db-nav-foot-plan">${plan?.label || "Free"} plan</span>
-              ${/* Build 237 — Upgrade pill only on the free plan. Paid users
-                    were seeing "Pro plan · Upgrade" because the button was
-                    rendered unconditionally — visually nagging a customer
-                    who already paid us. Paid plans now show just the plan
-                    label; billing is still one click away via Account →
-                    Billing & plan. */ ""}
+              ${/* Build 372 — free plan nudges an Upgrade; paid plans get a
+                    stylized plan chip + a proper "Manage" button (billing). */ ""}
               ${(plan?.plan?.slug || "free") === "free" ? html`
+                <span class="db-nav-foot-plan">Free plan</span>
                 <button class="db-nav-upgrade" type="button" onClick=${() => navTo("/account/billing")}>
                   <svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M13 2L4 14h6l-1 8 10-14h-7z"/></svg>
                   Upgrade
                 </button>
               ` : html`
-                <button class="db-nav-foot-link" type="button" onClick=${() => navTo("/account/billing")}>
-                  Manage
-                </button>
+                <span class="db-nav-foot-plan db-nav-foot-plan-paid">${plan?.plan?.label || plan?.label || "Plan"}</span>
+                <button class="db-nav-foot-manage" type="button" onClick=${() => navTo("/account/billing")}>Manage</button>
               `}
             </div>
           </aside>

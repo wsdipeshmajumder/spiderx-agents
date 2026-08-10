@@ -5,7 +5,21 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 371**
+**Last updated: build 372**
+
+**Build 372 (split Add-ons vs Workspace sections + stylized paid footer):**
+- The single "Workspace & add-ons" header is replaced by a **per-group section
+  header** — Add-ons / Developer / Account each get their own labelled
+  `.db-nav-divider` (the first, `.db-nav-divider-lead`, keeps the 28px gap from
+  the agent-config groups above). Verified live: 3 headers — Add-ons (lead,
+  margin-top 28px) · Developer · Account.
+- The paid-plan nav footer is stylized: instead of plain grey "Starter plan" +
+  a text "Manage" link, it's now a **brand-tinted plan chip** ("● Starter",
+  gradient dot, `.db-nav-foot-plan-paid`) + a **bordered pill "Manage" button**
+  (`.db-nav-foot-manage`). Reads the plan label from `plan.plan.label`. Verified
+  live on a temp Starter plan: chip "Starter" with gradient bg, Manage button
+  border `rgba(124,108,246,0.32)`, pill radius; free plan still shows
+  Free + Upgrade. Evidence: **Behavioral**.
 
 **Build 371 (division = flat direct items + more separation):** two follow-ups
 to 370's nav division:
