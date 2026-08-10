@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 365;
+const SXAI_BUILD = 367;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -4873,7 +4873,17 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
         // Pre-launch ACTIONS only — try her, publish her.
         { key: "test-call", label: "Get a test call", icon: "headset_mic", route: `/agent/${agentSlug}/test-call` },
         { key: "live",      label: "Go live",         icon: "bolt",        route: `/agent/${agentSlug}/go-live`, statusBadge: agent.published ? "live" : "draft" },
-        { key: "chat",      label: "Chat widget",     icon: "chat",        route: `/agent/${agentSlug}/chat` },
+      ],
+    } : null,
+    // Chat widget is a paid ADD-ON — a separate text channel, not part of the
+    // voice agent's config. Broken out into its own group (build 366) so it
+    // reads as an add-on rather than a core voice feature.
+    agent ? {
+      key: "addons",
+      label: "Add-ons",
+      icon: "extension",
+      items: [
+        { key: "chat", label: "Chat widget", icon: "chat", route: `/agent/${agentSlug}/chat`, addon: true },
       ],
     } : null,
     agent ? {
@@ -5040,6 +5050,7 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
                         <span class="db-nav-item-label">${it.label}</span>
                         ${it.statusBadge === "live" ? html`<span class="db-nav-item-badge is-live">Live</span>` : ""}
                         ${it.statusBadge === "draft" ? html`<span class="db-nav-item-badge is-draft">Draft</span>` : ""}
+                        ${it.addon ? html`<span class="db-nav-item-badge is-addon">Add-on</span>` : ""}
                       </button>
                     `)}
                   </div>

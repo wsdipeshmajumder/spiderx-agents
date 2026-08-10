@@ -6699,6 +6699,9 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 .db-nav-item-badge.is-live { background: #16a34a; color: #ffffff; }
 .db-nav-item-badge.is-draft { background: #e6e8ef; color: #6b7080; }
 :root[data-theme="dark"] .db-nav-item-badge.is-draft { background: #2a2e44; color: #8a91a4; }
+/* Paid add-on marker (Chat widget) — build 366. */
+.db-nav-item-badge.is-addon { background: #f3e8ff; color: #7c3aed; }
+:root[data-theme="dark"] .db-nav-item-badge.is-addon { background: #2e2450; color: #c4b5fd; }
 .db-nav-foot {
   margin-top: auto;
   /* Build 243 — make the plan footer ALWAYS VISIBLE inside the

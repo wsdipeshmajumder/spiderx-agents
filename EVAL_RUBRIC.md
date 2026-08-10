@@ -5,7 +5,16 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 366**
+**Last updated: build 367**
+
+**Build 367 (Chat widget presented as a paid add-on in the nav):** the
+"Chat widget" nav item was inside the voice agent's "Test & launch" group. Moved
+it out into its own top-level **"Add-ons"** group (icon `extension`, positioned
+after Voice & behaviour), with a purple **"Add-on" badge** on the item
+(`.db-nav-item-badge.is-addon`) so it reads as a separate paid channel, not a
+core voice feature. Verified live: Chat widget renders under "Add-ons" with the
+badge and is no longer in "Test & launch". (Part 2 — recording the add-on in the
+admin subscription table — pending a clarification.) Evidence: **Behavioral**.
 
 **Security follow-up: `/api/admin/storage-health` now super-admin gated.** The
 one `/api/admin/*` route that wasn't super-admin gated (it exposed server paths
