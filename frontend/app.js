@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 374;
+const SXAI_BUILD = 375;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -9586,9 +9586,16 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
       temperature: agent.voice_tweaks?.temperature ?? 0.7,
       top_p: agent.voice_tweaks?.top_p ?? 0.9,
       sensitivity: agent.voice_tweaks?.sensitivity ?? "balanced",
+      voice_provider: agent.voice_tweaks?.voice_provider || "gemini",   // gemini native audio (default) | fish
+      fish_voice_id: agent.voice_tweaks?.fish_voice_id || "",
       ...(agent.voice_tweaks || {}),
     },
   });
+  // Fish Audio (Phase 1 voice engine) — voices + preview state.
+  const [fishVoices, setFishVoices] = useState([]);
+  const [fishBusy, setFishBusy] = useState(false);
+  const [fishError, setFishError] = useState(null);
+  const fishAudioRef = useRef(null);
   const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
   const [state, setState] = useState({ msg: "", cls: "" });
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -9632,6 +9639,41 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
   };
   // Stop audio on unmount + when the user navigates away mid-preview.
   useEffect(() => () => stopPreview(), []);
+
+  // Fish Audio (Phase 1): load voices when the Fish engine is picked, and
+  // preview the selected voice by synthesizing server-side + playing the audio.
+  useEffect(() => {
+    if (draft.voice_tweaks.voice_provider !== "fish" || fishVoices.length) return;
+    fetch("/api/tts/fish/voices").then((r) => r.ok ? r.json() : null).then((d) => {
+      if (d && Array.isArray(d.voices)) setFishVoices(d.voices);
+    }).catch(() => {});
+  }, [draft.voice_tweaks.voice_provider]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const previewFish = async () => {
+    stopPreview();
+    setFishError(null);
+    setFishBusy(true);
+    try {
+      const line = (draft.greeting || "").trim() || `Hi! This is a Fish Audio voice preview for ${agent.name}.`;
+      const r = await fetch("/api/tts/preview", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: line.slice(0, 300), reference_id: draft.voice_tweaks.fish_voice_id || "" }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error((d && d.detail) || `Preview failed (${r.status})`);
+      }
+      const url = URL.createObjectURL(await r.blob());
+      if (!fishAudioRef.current) fishAudioRef.current = new Audio();
+      const a = fishAudioRef.current;
+      a.onended = () => { try { URL.revokeObjectURL(url); } catch {} };
+      a.src = url;
+      await a.play();
+    } catch (e) {
+      setFishError(String(e.message || e));
+    } finally {
+      setFishBusy(false);
+    }
+  };
 
   const selectVoice = (voiceId) => {
     // Preview and pick are intentionally separate actions: the ▶ button on
@@ -9702,6 +9744,39 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
            page: which language, which voice. The 8-card grid lives
            below as an optional "Explore all voices" expander. -->
       <section class="db-panel vs-panel">
+        <!-- Voice engine (build 375): Gemini native audio (default) or Fish Audio.
+             Selecting Fish stores the choice + a Fish voice; Phase 1 previews it
+             here. The live Gemini phone pipeline is unchanged. -->
+        <label class="db-form-field vs-engine">
+          <span class="db-form-label">Voice engine</span>
+          <select class="db-input vs-select" value=${draft.voice_tweaks.voice_provider || "gemini"}
+                  onChange=${(e) => { stopPreview(); setTweak("voice_provider", e.target.value); }}>
+            <option value="gemini">Gemini native audio — real-time (default)</option>
+            <option value="fish">Fish Audio — text-to-speech (preview)</option>
+          </select>
+        </label>
+        ${draft.voice_tweaks.voice_provider === "fish" ? html`
+          <div class="vs-fish">
+            <p class="db-form-help" style=${{ marginTop: 0 }}>Fish Audio is a text-to-speech engine — pick a voice and hear it here. Live phone calls keep using Gemini native audio until Fish call-routing ships.</p>
+            <div class="vs-twocol">
+              <label class="db-form-field">
+                <span class="db-form-label">Fish voice</span>
+                <select class="db-input vs-select" value=${draft.voice_tweaks.fish_voice_id || ""}
+                        onChange=${(e) => setTweak("fish_voice_id", e.target.value)}>
+                  <option value="">Default voice</option>
+                  ${fishVoices.map((v) => html`<option key=${v.id} value=${v.id}>${v.label}</option>`)}
+                </select>
+              </label>
+              <div class="db-form-field vs-fish-preview">
+                <span class="db-form-label" aria-hidden="true">${" "}</span>
+                <button type="button" class="db-btn-primary db-btn-sm" onClick=${previewFish} disabled=${fishBusy}>
+                  ${fishBusy ? "Synthesizing…" : "▶ Preview voice"}
+                </button>
+              </div>
+            </div>
+            ${fishError ? html`<p class="db-form-help vs-fish-err">${fishError}</p>` : ""}
+          </div>
+        ` : ""}
         <div class="vs-twocol">
           <label class="db-form-field">
             <span class="db-form-label">Language</span>

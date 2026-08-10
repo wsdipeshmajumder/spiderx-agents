@@ -132,7 +132,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 374
+APP_BUILD = 375
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -3140,6 +3140,46 @@ async def abandon_build_session(sid: str, request: Request) -> dict:
             user["id"], sid,
         )
     return {"ok": True, "result": result}
+
+
+# ─── Fish Audio TTS — Phase 1 voice-engine option (build 375) ───────────────
+# A selectable alternative to Gemini native audio. These power the Voice &
+# behaviour "Voice engine" dropdown + "Preview voice" button; the live Gemini
+# phone pipeline is untouched (Gemini stays the default).
+@app.get("/api/tts/fish/voices")
+async def fish_voices(request: Request) -> dict:
+    """Voice catalogue for the Fish engine picker (auth-gated)."""
+    await current_user(request)
+    from . import fish_audio
+    if not fish_audio.is_configured():
+        return {"configured": False, "voices": fish_audio.DEFAULT_VOICES}
+    voices = await fish_audio.list_voices()
+    return {"configured": True, "voices": voices}
+
+
+@app.post("/api/tts/preview")
+async def tts_preview(request: Request) -> Response:
+    """Synthesize a short preview line via Fish Audio and return the audio.
+    Auth-gated (dashboard-only). Surfaces Fish errors with their status — a 402
+    means the Fish API credit is exhausted (separate from platform credit)."""
+    await current_user(request)
+    from . import fish_audio
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="body must be a JSON object")
+    text = (str(body.get("text") or "").strip()
+            or "Hi! This is a quick voice preview for your agent.")
+    reference_id = str(body.get("reference_id") or body.get("voice_id") or "").strip() or None
+    backbone = str(body.get("backbone") or "").strip() or None
+    try:
+        audio = await fish_audio.synthesize(text, reference_id=reference_id, backbone=backbone)
+    except fish_audio.FishAudioError as e:
+        raise HTTPException(status_code=e.status, detail=str(e))
+    return Response(content=audio, media_type="audio/mpeg",
+                    headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/tweaks/schema")

@@ -13897,6 +13897,14 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
   margin: -6px 0 16px;
 }
 .vs-select { width: 100%; }
+/* Voice engine selector + Fish Audio sub-panel (build 375). */
+.vs-engine { display: block; margin-bottom: 14px; }
+.vs-fish { border: 1px solid var(--border, #e6e8ef); border-radius: 12px; padding: 12px 14px; margin-bottom: 16px; background: var(--bg-1, #f7f8fa); }
+.vs-fish .vs-twocol { margin-bottom: 0; }
+.vs-fish-preview { display: flex; flex-direction: column; }
+.vs-fish-preview button { align-self: flex-start; }
+.vs-fish-err { color: #b23b2e; margin: 8px 0 0; }
+:root[data-theme="dark"] .vs-fish { background: #161a26; border-color: #2a2e44; }
 
 .vs-card {
   display: flex;

@@ -5,7 +5,26 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 374**
+**Last updated: build 375**
+
+**Build 375 (Fish Audio — selectable voice engine, Phase 1):** added Fish Audio
+as a second, selectable voice engine alongside the default **Gemini native
+audio** — via a "Voice engine" dropdown in Voice & behaviour. Non-breaking: the
+live Gemini phone pipeline stays the default and is untouched (verified Gemini
+`voice` unchanged after saving a Fish selection). New `backend/fish_audio.py`
+(async client over Fish's `POST /v1/tts`, `GET /model` voice catalogue with a
+curated fallback); two endpoints — `GET /api/tts/fish/voices` (authed) and
+`POST /api/tts/preview` (authed, returns `audio/mpeg`). Frontend: engine
+`<select>` + Fish voice picker + "Preview voice" button in `VoiceSettings`,
+persisting `voice_provider` / `fish_voice_id` into `voice_tweaks`. **Verdict:
+PARTIAL** — UI, persistence, and synthesis wiring all work end-to-end; the live
+preview surfaces Fish's error cleanly. Actual audio playback is blocked on the
+Fish account having **API credit** (calls currently return **402** — API credit
+is separate from platform credit) and on `FISH_AUDIO_API_KEY` being set in the
+Railway (prod) env. Phase 2 (route live calls through STT→LLM→Fish-TTS) deferred.
+Evidence: **Behavioral** (dropdown renders both engines, 13 voices load, preview
+POSTs and returns the 402 gracefully, save round-trips `voice_provider=fish`).
+
 
 **Eval suite: `--scenario` live-chat mode added (tests/docs only):** the harness
 now optionally drives a real customer chat over `/ws/session?mode=chat` (opt-in,
