@@ -5,7 +5,18 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 372**
+**Last updated: build 373**
+
+**Build 373 (smooth page/tab transition — no more content "break dance"):**
+navigating hard-swapped the main content with no transition, so each page/tab
+load popped/jumped. The `.db-content` container is now keyed by `activeKey`, so
+it remounts per navigation and replays a short fade + 7px lift
+(`@keyframes db-content-in`, 0.26s ease-out) instead of a hard cut. Honours
+`prefers-reduced-motion` (animation disabled). Covers all sidebar-route
+navigations (the agent sub-pages that read as tabs are routes → covered).
+Verified live: computed `animation-name db-content-in`, 0.26s, keyframes
+present; the content node is a fresh element on each nav (remount confirmed) and
+renders correctly at rest. Evidence: **Behavioral**.
 
 **Build 372 (split Add-ons vs Workspace sections + stylized paid footer):**
 - The single "Workspace & add-ons" header is replaced by a **per-group section

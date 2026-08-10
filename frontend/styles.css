@@ -6883,6 +6883,19 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 .db-content {
   padding: 8px 32px 40px;
   flex: 1;
+  /* Smooth page/tab transition (build 373) — the content is keyed by the active
+     route, so this fade+lift replays on every navigation instead of the old
+     hard content pop ("break dance"). Kept short + subtle so it reads as polish,
+     not a slow animation. */
+  animation: db-content-in 0.26s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+@keyframes db-content-in {
+  from { opacity: 0; transform: translateY(7px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+/* Respect reduced-motion — no slide, just an instant (no) animation. */
+@media (prefers-reduced-motion: reduce) {
+  .db-content { animation: none; }
 }
 
 .db-search {

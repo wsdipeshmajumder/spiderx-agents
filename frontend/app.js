@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 372;
+const SXAI_BUILD = 373;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -5103,7 +5103,7 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
             </div>
             ${actions ? html`<div class="db-pageheader-actions">${actions}</div>` : ""}
           </header>
-          <div class="db-content">
+          <div class="db-content" key=${activeKey}>
             ${body}
           </div>
         </main>
