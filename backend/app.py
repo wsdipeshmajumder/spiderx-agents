@@ -132,7 +132,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 368
+APP_BUILD = 369
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -2802,11 +2802,13 @@ async def ws_session(ws: WebSocket) -> None:
         except (TypeError, ValueError):
             initial_agent_id = None
     user_id: int = (await db.get_founder())["id"]
+    user_id_authed = False   # True only when ?user_id= resolved to a REAL user
     if qp.get("user_id"):
         try:
             uid = int(qp["user_id"])
             if await db.get_user(uid):
                 user_id = uid
+                user_id_authed = True
         except (TypeError, ValueError):
             pass
     # `sid` is a browser-generated UUID per build — stable across Gemini
@@ -2841,6 +2843,17 @@ async def ws_session(ws: WebSocket) -> None:
     if _mode == "chat_observe":
         from . import chat_bridge as _cb
         from . import auth as _auth
+        # Operators observe from the authenticated dashboard (which sends
+        # ?user_id=). Without a real client-supplied id, `user_id` is just the
+        # founder default — reject, so an anonymous caller can't watch live
+        # customer chats of the founder's agents (build 366).
+        if not user_id_authed:
+            try:
+                await ws.send_text(json.dumps({"type": "error", "message": "Not authorised."}))
+                await ws.close()
+            except Exception:  # noqa: BLE001
+                pass
+            return
         observe_sid = (qp.get("sid") or "").strip()
         live = _cb.get_live_chat(observe_sid) if observe_sid else None
         if not live:

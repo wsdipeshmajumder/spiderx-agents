@@ -7,6 +7,28 @@
 
 **Last updated: build 368**
 
+**Security: anonymous `chat_observe` can no longer watch live customer chats.**
+The `/ws/session` handler defaults `user_id` to the founder for header-less
+connections (needed so the anonymous embed chat/voice + Eva build flow work).
+But the `mode=chat_observe` branch (operator watching a live chat) ran
+`require_agent_member(user_id, agent)` against that founder default — so an
+anonymous caller who knew a live `sid` could watch the founder's live customer
+conversations. Fix: track `user_id_authed` (True only when `?user_id=` resolves
+to a real user) and reject `chat_observe` when it's false. The customer
+chat/voice + builder branches are untouched (they legitimately run anonymously).
+Evidence: **Code** (guard is a contained early-return; the leak needs a guessed
+live sid so wasn't reproduced end-to-end).
+
+**Known residual (lower severity, flagged not fixed):** the same founder-default
+also lives in `_agents_brief` (gemini_bridge) and the builder agent-save
+(`owner_id` in gemini_bridge:4517 / chat_bridge:1063). Effect: anonymous Eva can
+be prompted to list the founder's agent *names*, and an anonymous direct-WS
+`save_agent` writes a *draft* (unpublishable without paid+auth) into the
+founder's org — MEDIUM/LOW (names + draft spam, not transcripts/recordings/
+secrets/money, which are all closed). These sit inside the intentionally-
+anonymous Eva build flow, so removing them needs a coordinated change + voice/
+build-flow testing; deferred to avoid breaking anonymous Eva.
+
 **Build 368 (loading spinner on the system-prompt editor):** the System prompt
 tab auto-drafts the prompt via an LLM call (`/chat-instructions/suggest`) on
 first open when empty — during which the textarea sat empty with only a
