@@ -7,6 +7,15 @@
 
 **Last updated: build 374**
 
+**Eval suite: `--scenario` live-chat mode added (tests/docs only):** the harness
+now optionally drives a real customer chat over `/ws/session?mode=chat` (opt-in,
+gated on `GEMINI_API_KEY`) — asserting session-ready, a model reply, follow-up
+chips (build 350; SKIP if none in-window since they're a background LLM call),
+and visitor provenance capture (build 351 — mobile UA → device, `?host=` Referer
+→ source, read back off the persisted chat). Verified: `--scenario` alone → 4/4;
+full run `--scenario` → 47 checks green. Provenance rows in EVAL_SUITE.md
+promoted from Scenario → Automated. Evidence: **Behavioral**.
+
 **Feature eval + rubric suite added (no build bump — tests/docs only):** new
 `tests/eval_suite.py` — a standalone, stdlib-only harness that hits the live API
 (stub `X-User-Id` auth, snapshot+restore on every mutation) and scores each

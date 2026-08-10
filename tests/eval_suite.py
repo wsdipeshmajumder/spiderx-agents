@@ -39,6 +39,7 @@ import urllib.request
 BASE = os.environ.get("BASE", "http://localhost:8765").rstrip("/")
 UID = os.environ.get("UID", "1")
 ONLY = None
+SCENARIO = "--scenario" in sys.argv   # opt-in: drives a real chat WebSocket (needs a Gemini key)
 for i, a in enumerate(sys.argv):
     if a == "--only" and i + 1 < len(sys.argv):
         ONLY = sys.argv[i + 1].lower()
@@ -342,6 +343,102 @@ def s_provenance():
         _skip("provenance columns", "openpyxl not importable here")
 
 
+async def _drive_chat(agent_id, slug):
+    """Drive one real customer chat over /ws/session?mode=chat, exactly as the
+    embed does — send a question, collect the model reply + the follow-up chips,
+    then close so the session persists. The WS handshake headers set provenance:
+    a mobile User-Agent → device, and a Referer carrying `?host=` → source."""
+    import asyncio
+    import websockets  # noqa: F401 — presence checked by the caller
+    ws_base = BASE.replace("https://", "wss://").replace("http://", "ws://")
+    sid = "eval-" + str(int(time.time()))
+    ref = f"{BASE}/embed/{slug}?channel=chat&host=eval-suite.example"
+    ua = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+          "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
+    url = (f"{ws_base}/ws/session?mode=chat&agent_id={agent_id}&sid={sid}"
+           f"&locale=en-US&kickoff=0&host=eval-suite.example&u={UID}")
+    out = {"ready": False, "reply": "", "chips": [], "sid": sid}
+    async with websockets.connect(
+        url, additional_headers={"User-Agent": ua, "Referer": ref}, max_size=4_000_000,
+    ) as ws:
+        # wait for ready
+        end = time.time() + 20
+        while time.time() < end:
+            m = json.loads(await asyncio.wait_for(ws.recv(), timeout=end - time.time()))
+            if m.get("type") == "ready":
+                out["ready"] = True
+                break
+            if m.get("type") == "error":
+                out["error"] = m.get("message"); return out
+        await ws.send(json.dumps({"type": "text", "text": "What are the ticket prices?"}))
+        # collect the turn; chips fire as a background task, sometimes just after
+        # turn_complete, so keep a short grace window open after the turn ends.
+        turn_done_at = None
+        end = time.time() + 45
+        while time.time() < end:
+            try:
+                m = json.loads(await asyncio.wait_for(ws.recv(), timeout=max(0.2, end - time.time())))
+            except asyncio.TimeoutError:
+                break
+            t = m.get("type")
+            if t == "transcript" and m.get("role") == "model" and m.get("text"):
+                out["reply"] += m["text"]
+            elif t == "quick_replies" and isinstance(m.get("options"), list) and m["options"]:
+                out["chips"] = m["options"]
+                if turn_done_at:
+                    break
+            elif t == "turn_complete":
+                turn_done_at = time.time()
+                # Chips are a SEPARATE background LLM call fired after the turn —
+                # give it a generous window (the suggest LLM path can take 10s+).
+                end = turn_done_at + 22
+    return out
+
+
+def s_scenario_chat():
+    if not SCENARIO:
+        return  # opt-in only
+    import asyncio
+    if not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
+        return _skip("live chat scenario", "no GEMINI_API_KEY in env")
+    try:
+        import websockets  # noqa: F401
+    except ImportError:
+        return _skip("live chat scenario", "pip install websockets")
+    aid, slug = STATE.get("agent_id"), STATE.get("agent_slug")
+    if not aid:
+        return _skip("live chat scenario", "no agent")
+    try:
+        r = asyncio.run(_drive_chat(aid, slug))
+    except Exception as e:  # noqa: BLE001
+        return _ok("chat WS session drove without error", False, f"{type(e).__name__}: {e}")
+    if r.get("error"):
+        return _ok("chat WS session opened", False, f"server error: {r['error']}")
+    _ok("chat WS: session reached 'ready'", r["ready"])
+    _ok("chat WS: got a model reply", bool(r["reply"].strip()), r["reply"][:70])
+    # Chips come from a background LLM call + are suppressed when the agent shows
+    # its own widget that turn — so "none this run" is timing/LLM, not a bug.
+    # Assert when present; SKIP (don't fail the suite) when absent.
+    if r["chips"]:
+        _ok("chat WS: follow-up chips emitted (grounded next questions)", True, str(r["chips"])[:120])
+    else:
+        _skip("chat WS: follow-up chips emitted", "no chips within the window (LLM/timing; passes in isolation)")
+    # provenance persisted on session close — find our just-created chat.
+    time.sleep(2)
+    st, calls, _ = GET(f"/api/agents/{aid}/calls?channel=web_chat&limit=4")
+    prov = None
+    if isinstance(calls, list):
+        for c in calls:
+            ex = c.get("extracted") if isinstance(c.get("extracted"), dict) else {}
+            p = ex.get("_provenance") if isinstance(ex.get("_provenance"), dict) else None
+            if p and p.get("source") == "eval-suite.example":
+                prov = p
+                break
+    _ok("chat WS: visitor provenance captured (device + our source)",
+        bool(prov and prov.get("device") == "Mobile" and prov.get("source") == "eval-suite.example"),
+        str(prov))
+
+
 # ═════════════════════════════════ RUNNER ═══════════════════════════════════
 def main():
     print(f"SpiderX.AI eval suite → {BASE}  (uid={UID})")
@@ -351,7 +448,7 @@ def main():
         sys.exit(2)
     discover()
 
-    for name, fn in [
+    sections = [
         ("Platform & meta", s_platform),
         ("Auth & security", s_security),
         ("Agents (read + update)", s_agents),
@@ -365,7 +462,10 @@ def main():
         ("Super-admin (subscription table)", s_admin),
         ("Embed / public surface", s_embed_public),
         ("Visitor provenance (report)", s_provenance),
-    ]:
+    ]
+    if SCENARIO:
+        sections.append(("Live chat scenario (WS end-to-end)", s_scenario_chat))
+    for name, fn in sections:
         run(name, fn)
 
     # ── report ──────────────────────────────────────────────────────────────

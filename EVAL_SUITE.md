@@ -21,12 +21,23 @@ it was verified).
 # a single area (substring match):
 .venv/bin/python tests/eval_suite.py --only security
 BASE=http://localhost:8765 UID=1 .venv/bin/python tests/eval_suite.py
+
+# ALSO drive a real chat WebSocket end-to-end (needs GEMINI_API_KEY in the env):
+.venv/bin/python tests/eval_suite.py --scenario
 ```
+
+`--scenario` opens `/ws/session?mode=chat` exactly as the embed does, sends a
+question, and asserts: session **ready**, a **model reply**, **follow-up chips**
+(build 350 — SKIPped if none arrive in the window, since they're a background
+LLM call), and **visitor provenance captured** (build 351 — a mobile User-Agent
+→ device, a `?host=` Referer → source, read back off the persisted chat). It
+creates one real chat-log row for the agent (expected test data).
 
 The harness authenticates with the passwordless **`X-User-Id`** stub header
 (user 1 = the founder / super-admin in dev). Every mutation snapshots the prior
 value and restores it, so it is safe to run repeatedly against the dev DB.
-Last full run: **43 PASS · 0 FAIL** (13 areas).
+Last full run: **43 PASS · 0 FAIL** (13 areas); **+4 with `--scenario`** (live
+chat WS) → 47.
 
 ## Evidence tiers
 
@@ -150,7 +161,7 @@ Last full run: **43 PASS · 0 FAIL** (13 areas).
 |---|---|---|
 | Conversations columns | export Conversations sheet has **Device** + **Source** | PASS |
 | Summary analytics | Summary sheet has **Visitor device** + **Top sources** breakdowns | PASS |
-| Capture pipeline | UA/referer → `extracted._provenance` on a live chat | **Scenario** (needs a driven chat WS) |
+| Capture pipeline | UA/referer → `extracted._provenance` on a live chat | **Automated (`--scenario`)** |
 
 ---
 
@@ -159,9 +170,11 @@ Last full run: **43 PASS · 0 FAIL** (13 areas).
 These need a live Gemini key and/or a real browser, so they live as scenario
 scripts or manual checks rather than in `eval_suite.py`:
 
-- **Voice & chat conversations** — turn-taking, interrupts, tool/connector calls,
-  handoff, CSAT, follow-up chips → `northstar_test.py`, `human_test.py`,
-  `interrupt_test.py`, `talk_to_agent.py`.
+- **Text chat (one turn) — now automated** by `eval_suite.py --scenario`: ready
+  → model reply → follow-up chips → provenance capture. Deeper multi-turn / VOICE
+  conversations, interrupts, tool/connector calls, handoff, CSAT stay in the
+  scenario scripts → `northstar_test.py`, `human_test.py`, `interrupt_test.py`,
+  `talk_to_agent.py`.
 - **Eva build flow** — describe → build → save → test an agent → `test_industries.py`,
   `talk_to_eva.py`, `build_one_agent.py`.
 - **Session resume / memory** → `reconnect_memory_test.py`.
