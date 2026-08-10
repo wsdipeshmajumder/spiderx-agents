@@ -7,6 +7,24 @@
 
 **Last updated: build 365**
 
+**SECURITY (critical): closed the systemic anonymous-founder auth bypass.**
+`current_user()` fell back to `db.get_founder()` for any header-less request, so
+an UNAUTHENTICATED caller was treated as a fully-privileged founder across ~55
+endpoints — confirmed live on prod: anon `GET /api/me` returned the founder
+(incl. `is_super_admin`), `GET /api/agents` enumerated their agents, and
+`GET /api/agents/{id}` leaked `system_prompt`; destructive routes (delete agent,
+provision numbers, place outbound calls, rewrite prompts, flip plan/add-ons)
+were all reachable as the founder. Fix: `current_user()` now **raises 401** when
+no real user resolves; a narrow `allow_anonymous=True` (returns `None`) is used
+only by the two genuinely-public endpoints — the `by-slug` embed read and the
+support-ticket intake. The `?u=`/`?user_id=` media flow and the `/ws/session`
+handler (resolves the founder id directly, not via `current_user`) are
+unaffected. Verified on an isolated instance: anon → 401 on every protected +
+destructive endpoint; embed `by-slug` anon → 200 stripped shape; authed
+(`X-User-Id`) → 200 full; support anon → 200; SPA logged-out landing renders
+(no crash, benign 401s the SPA already tolerates); SPA logged-in dashboard loads
+all 27 agents. Evidence: **Behavioral**.
+
 **Build 365 (chat tabs left-aligned + system-prompt editor to the top):** two
 tweaks reversing part of 363's layout per feedback:
 - The three chat tabs (Settings / System prompt / Conversations) are now

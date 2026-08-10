@@ -143,17 +143,21 @@ APP_BUILD = 365
 # of truth changes: the dependency below validates an Auth0 JWT and looks
 # up / creates the matching user row. Everything downstream stays the same.
 
-async def current_user(request: Request) -> dict:
-    """Resolves the requesting user. Header-based for now; will become an
-    Auth0 JWT validator. Falls back to founder so unauthed test calls keep
-    working during development."""
+async def current_user(request: Request, *, allow_anonymous: bool = False) -> Optional[dict]:
+    """Resolves the requesting user from the client-supplied `X-User-Id` header
+    (or `?u=`/`?user_id=` for native media requests that can't set headers).
+
+    Raises **401** when no real user resolves — UNLESS `allow_anonymous=True`,
+    which returns `None`. Only the genuinely-public endpoints opt in (the
+    `by-slug` embed read and the support-ticket intake).
+
+    SECURITY (build 363): this used to fall back to `db.get_founder()` for any
+    header-less request, which meant an unauthenticated caller was treated as a
+    fully-privileged founder — a systemic auth bypass (read every agent's
+    prompt/transcripts/recordings, delete agents, provision numbers, place
+    outbound calls). The fallback is gone; header-less dev/test now needs to
+    send `X-User-Id` (the passwordless stub login already does)."""
     uid_raw = request.headers.get("X-User-Id")
-    # Native media requests (an <audio>/<img> src, a new-tab download) can't set
-    # the X-User-Id header, so also accept the id from a `?u=` / `?user_id=` query
-    # param — same client-provided-id trust model as the header (both become an
-    # Auth0-JWT check later). Without this, recording.wav 403s for any non-founder
-    # user because the header-less request falls through to the founder, who
-    # doesn't own their agent.
     if not uid_raw:
         try:
             uid_raw = request.query_params.get("u") or request.query_params.get("user_id")
@@ -166,7 +170,9 @@ async def current_user(request: Request) -> dict:
                 return user
         except (TypeError, ValueError):
             pass
-    return await db.get_founder()
+    if allow_anonymous:
+        return None
+    raise HTTPException(status_code=401, detail="authentication required")
 
 
 async def _require_agent_owned(agent_id: int, user: dict) -> dict:
@@ -1654,30 +1660,28 @@ async def get_agent_by_slug(slug: str, request: Request, response: Response) -> 
     # client-set header, not an ambient cookie, so `*` carries no CSRF risk.
     response.headers["Access-Control-Allow-Origin"] = "*"
     from . import auth
-    # `current_user` falls back to the founder for header-less requests, so an
-    # anonymous embed read would otherwise look "authenticated" and, if the agent
-    # sits in the founder's org, get the FULL (secret) shape. Gate the full shape
-    # on a real client-supplied identity (build 358 — plugged a public leak of
-    # system_prompt / guardrails / business variables).
-    authed = bool(request.headers.get("X-User-Id")
-                  or request.query_params.get("u") or request.query_params.get("user_id"))
-    user = await current_user(request)
-    org_id = await auth.primary_org_id(user["id"])
-    a = await db.get_agent_by_slug(slug, org_id=org_id)
-    if a and authed:
-        # Authenticated caller reading an agent in their own org (the dashboard
-        # opening /agent/<slug> to edit it) → full shape, minus carrier secrets.
-        try:
-            await _require_agent_owned(a["id"], user)
-            return _public_agent(a)
-        except HTTPException:
-            pass  # not actually theirs — fall through to the public shape
-    # Public / embed / non-owner path. The widget on a customer's site loads
-    # UNAUTHENTICATED, so resolve the slug GLOBALLY and return ONLY the embed's
-    # public look — never the prompt, guardrails, or business internals. Publish
-    # + chat-entitlement are still enforced when the WS actually connects.
-    if a is None:
-        a = await db.get_agent_by_slug(slug, org_id=None)
+    # This endpoint is the ONLY public agent read (the embed loads it
+    # unauthenticated), so it opts into anonymous access: `user` is None for an
+    # anonymous read, and a real user only when a valid X-User-Id / ?u= was
+    # supplied (the dashboard opening /agent/<slug> to edit it). The full shape
+    # is gated on that real identity — plugging a public leak of
+    # system_prompt / guardrails / business variables (build 358/363).
+    user = await current_user(request, allow_anonymous=True)
+    a = None
+    if user:
+        org_id = await auth.primary_org_id(user["id"])
+        a = await db.get_agent_by_slug(slug, org_id=org_id)
+        if a:
+            try:
+                await _require_agent_owned(a["id"], user)
+                return _public_agent(a)   # authenticated owner → full shape (dashboard editor)
+            except HTTPException:
+                a = None  # not actually theirs — fall through to the public shape
+    # Public / embed / non-owner path. Resolve the slug GLOBALLY and return ONLY
+    # the embed's public look — never the prompt, guardrails, or business
+    # internals. Publish + chat-entitlement are still enforced when the WS
+    # actually connects.
+    a = a or await db.get_agent_by_slug(slug, org_id=None)
     if a:
         return _public_agent_embed(a)
     raise HTTPException(status_code=404, detail="agent not found")
@@ -2555,10 +2559,7 @@ async def create_support_ticket(request: Request) -> dict:
     """Inbound support ticket from the topbar "Raise a Support Ticket" button.
     For now: just log + return — ops monitors the logs and replies by email.
     A real ticketing-table backing comes after we plug into Linear/Plain."""
-    try:
-        user = await current_user(request)
-    except Exception:
-        user = None
+    user = await current_user(request, allow_anonymous=True)   # ticket intake is public
     try:
         body = await request.json()
     except Exception:
