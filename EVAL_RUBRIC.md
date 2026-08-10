@@ -7,6 +7,20 @@
 
 **Last updated: build 374**
 
+**Feature eval + rubric suite added (no build bump — tests/docs only):** new
+`tests/eval_suite.py` — a standalone, stdlib-only harness that hits the live API
+(stub `X-User-Id` auth, snapshot+restore on every mutation) and scores each
+feature area PASS/FAIL/SKIP, plus `EVAL_SUITE.md`, the breadth rubric catalogue
+(feature → acceptance criterion → evidence tier). Covers 13 areas / 43 automated
+checks: platform, auth & security (anon-401 + stripped embed read), agents
+read/update, chat branding round-trip, guardrails/policy, knowledge, calls +
+date filter, XLSX export (2 vs 3 sheets), entitlements/add-ons, plans/billing,
+super-admin subscription table + plan override, embed/public, provenance
+columns. Out-of-band features (voice/chat WS, Eva build, telephony, Razorpay,
+UI) are catalogued as Scenario/Manual with pointers to the existing scenario
+scripts. First run: **43 PASS · 0 FAIL**. Evidence: **Behavioral** (suite runs
+green vs the live server).
+
 **Build 374 (System prompt loads instantly once drafted — no repeat LLM fetch):**
 the System prompt tab auto-drafts via `/chat-instructions/suggest` (an LLM call
 that measures **~14s** locally) whenever `chat_settings.instructions` is empty —
