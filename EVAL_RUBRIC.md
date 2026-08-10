@@ -5,7 +5,16 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 368**
+**Last updated: build 370**
+
+**Build 370 (nav division: Add-ons / Developer / Account set apart):** the
+Add-ons (build 367), Developer, and Account groups are now a distinct nav
+division — separated from the agent-config groups above by a labelled separator
+("WORKSPACE & ADD-ONS", `.db-nav-divider`). Each of the three groups carries a
+`division: true` flag; the render inserts the divider before the FIRST division
+group only (guarded so it never leads the nav when Account is the sole group,
+e.g. no agent open). Verified live: one divider, label "Workspace & add-ons",
+immediately precedes the Add-ons group. Evidence: **Behavioral**.
 
 **Security: anonymous `chat_observe` can no longer watch live customer chats.**
 The `/ws/session` handler defaults `user_id` to the founder for header-less

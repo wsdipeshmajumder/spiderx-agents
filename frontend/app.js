@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 368;
+const SXAI_BUILD = 370;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -4882,6 +4882,7 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
       key: "addons",
       label: "Add-ons",
       icon: "extension",
+      division: true,   // Add-ons / Developer / Account form a separate nav division
       items: [
         { key: "chat", label: "Chat widget", icon: "chat", route: `/agent/${agentSlug}/chat`, addon: true },
       ],
@@ -4890,6 +4891,7 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
       key: "developer",
       label: "Developer",
       icon: "code",
+      division: true,
       items: [
         { key: "developer", label: "Webhooks & data", icon: "webhook", route: `/agent/${agentSlug}/developer` },
       ],
@@ -4898,6 +4900,7 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
       key: "admin",
       label: "Account",
       icon: "manage_accounts",
+      division: true,
       items: [
         { key: "org",          label: "Workspace",      icon: "corporate_fare", route: "/account/org" },
         { key: "team",         label: "Team & invites", icon: "group",          route: "/account/team" },
@@ -5027,7 +5030,9 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
               </button>
             ` : ""}
 
-            ${groups.map((g) => html`
+            ${groups.map((g, i) => html`
+              ${g.division && i > 0 && !(groups[i - 1] && groups[i - 1].division)
+                ? html`<div class="db-nav-divider" role="separator"><span>Workspace & add-ons</span></div>` : ""}
               <div key=${g.key} class=${"db-nav-group" + (openGroups[g.key] ? " open" : "")}>
                 <button class="db-nav-group-head" onClick=${() => toggleGroup(g.key)}>
                   ${typeof g.icon === "string"
