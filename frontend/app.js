@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 373;
+const SXAI_BUILD = 374;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -12111,17 +12111,34 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
     } finally { setGSaving(false); }
   };
   const autoTriedRef = useRef(false);
-  const suggestInstructions = async () => {
+  const suggestInstructions = async (auto = false) => {
     setSuggesting(true);
     try {
       const r = await fetch(`/api/agents/${agent.id}/chat-instructions/suggest`, { method: "POST" });
-      if (r.ok) { const d = await r.json(); if (d && d.instructions) setChatField("instructions", d.instructions); }
+      if (r.ok) {
+        const d = await r.json();
+        if (d && d.instructions) {
+          setChatField("instructions", d.instructions);
+          // Persist the FIRST auto-draft to chat_settings so the next open just
+          // LOADS the saved prompt instead of firing the (slow) LLM draft again.
+          // Manual "Regenerate" (auto=false) leaves saving to the operator.
+          if (auto) {
+            const merged = { ...(agent.chat_settings || {}), instructions: d.instructions };
+            fetch(`/api/agents/${agent.id}`, {
+              method: "PATCH", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ chat_settings: merged }),
+            }).then((pr) => { if (pr.ok) refreshAgent && refreshAgent(); }).catch(() => {});
+          }
+        }
+      }
     } catch { /* leave blank */ } finally { setSuggesting(false); }
   };
   useEffect(() => {
+    // Only draft when there is NO saved system prompt. A saved prompt loads
+    // straight from chat_settings — no fetch, no spinner.
     if (hasChat && !autoTriedRef.current && !(chatCfg.instructions || "").trim()) {
       autoTriedRef.current = true;
-      suggestInstructions();
+      suggestInstructions(true);   // auto-draft → persist so it's cached
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasChat]);
@@ -12592,7 +12609,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
       <div class="chatknow-instr">
         <div class="chatcfg-acc-toolbar">
           <span class="db-form-label" style=${{ margin: 0 }}>System prompt — what to do & how to sound (layered on the shared brief)</span>
-          <button type="button" class="db-btn-ghost db-btn-sm" onClick=${suggestInstructions} disabled=${suggesting}>
+          <button type="button" class="db-btn-ghost db-btn-sm" onClick=${() => suggestInstructions()} disabled=${suggesting}>
             ${suggesting ? "✨ Drafting…" : (chatCfg.instructions || "").trim() ? "✨ Regenerate" : "✨ Suggest"}
           </button>
           <button type="button" class="db-btn-ghost db-btn-sm" onClick=${() => setInstrFull(true)}>⤢ Expand</button>
@@ -12730,7 +12747,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
                     value=${chatCfg.instructions}
                     onInput=${(e) => setChatField("instructions", e.target.value)}></textarea>
           <div class="db-modal-actions">
-            <button type="button" class="db-btn-ghost db-btn-sm" onClick=${suggestInstructions} disabled=${suggesting}>${suggesting ? "✨ Drafting…" : "✨ Regenerate"}</button>
+            <button type="button" class="db-btn-ghost db-btn-sm" onClick=${() => suggestInstructions()} disabled=${suggesting}>${suggesting ? "✨ Drafting…" : "✨ Regenerate"}</button>
             <button type="button" class="db-btn-primary db-btn-sm" onClick=${async () => { await saveChatCfg(); setInstrFull(false); }} disabled=${chatCfgSaving}>${chatCfgSaving ? "Saving…" : "Save & close"}</button>
           </div>
         </div>

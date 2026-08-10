@@ -5,7 +5,20 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 373**
+**Last updated: build 374**
+
+**Build 374 (System prompt loads instantly once drafted — no repeat LLM fetch):**
+the System prompt tab auto-drafts via `/chat-instructions/suggest` (an LLM call
+that measures **~14s** locally) whenever `chat_settings.instructions` is empty —
+but the draft was never saved, so it re-fetched on EVERY open (the slow load).
+Fix: the auto-draft now **persists** its result to `chat_settings.instructions`
+(a `PATCH` right after the draft returns), so subsequent opens load the saved
+prompt straight from chat_settings — no fetch, no spinner. A saved prompt was
+already loaded directly; this closes the never-saved case. Manual "Regenerate"
+still leaves saving to the operator (fixed the handler so the click event isn't
+mistaken for the auto=true flag). Verified live (temp entitlement, Rohan
+cleared): first open drafted 806 chars and persisted them; reload loaded 808
+chars at t=0 with no "Drafting" state across 4 samples. Evidence: **Behavioral**.
 
 **Build 373 (smooth page/tab transition — no more content "break dance"):**
 navigating hard-swapped the main content with no transition, so each page/tab
