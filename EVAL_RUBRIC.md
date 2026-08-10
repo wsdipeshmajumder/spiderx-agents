@@ -5,7 +5,16 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 367**
+**Last updated: build 368**
+
+**Build 368 (loading spinner on the system-prompt editor):** the System prompt
+tab auto-drafts the prompt via an LLM call (`/chat-instructions/suggest`) on
+first open when empty — during which the textarea sat empty with only a
+placeholder, reading as an empty/broken box. Now while `suggesting` is true the
+textarea is covered by a centered overlay — `.db-spin` spinner + "Drafting your
+system prompt…" (`.chatcfg-instr-loading`) — so the loading state is explicit.
+Verified live: clicking Regenerate showed the spinner overlay over the editor.
+Evidence: **Behavioral**.
 
 **Build 367 (Chat widget presented as a paid add-on in the nav):** the
 "Chat widget" nav item was inside the voice agent's "Test & launch" group. Moved

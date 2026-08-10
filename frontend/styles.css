@@ -1685,6 +1685,14 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   border: 2px solid rgba(120,120,140,0.3); border-top-color: var(--primary, #4f46e5);
   animation: db-spin 0.7s linear infinite; }
 @keyframes db-spin { to { transform: rotate(360deg); } }
+/* System-prompt editor loading overlay (build 368) — the prompt is auto-drafted
+   via an LLM call on first open; show a spinner so the textarea never reads as
+   an empty/broken box while it loads. */
+.chatcfg-instr-wrap { position: relative; }
+.chatcfg-instr-loading { position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: center; gap: 10px; border-radius: 10px; pointer-events: none;
+  background: var(--bg-0, #fff); color: var(--fg-mute, #6b7080); font-size: 13px; font-weight: 600; }
+:root[data-theme="dark"] .chatcfg-instr-loading { background: #12141f; }
 /* Voice input mic (Build 313) — sits left of the send button. */
 .chatembed-mic {
   width: 40px; height: 40px; flex-shrink: 0; border: 0; border-radius: 50%;

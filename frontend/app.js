@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 367;
+const SXAI_BUILD = 368;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -12581,10 +12581,17 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
           </button>
           <button type="button" class="db-btn-ghost db-btn-sm" onClick=${() => setInstrFull(true)}>⤢ Expand</button>
         </div>
-        <textarea class="db-input chatcfg-instr" rows="8"
-                  placeholder=${suggesting ? "Drafting from your industry & knowledge…" : `e.g. Be a touch more playful than the phone line. Always mention free home delivery. Offer a brochure link before booking.`}
-                  value=${chatCfg.instructions}
-                  onInput=${(e) => setChatField("instructions", e.target.value)}></textarea>
+        <div class="chatcfg-instr-wrap">
+          <textarea class="db-input chatcfg-instr" rows="8"
+                    placeholder=${suggesting ? "" : `e.g. Be a touch more playful than the phone line. Always mention free home delivery. Offer a brochure link before booking.`}
+                    value=${chatCfg.instructions}
+                    onInput=${(e) => setChatField("instructions", e.target.value)}></textarea>
+          ${suggesting ? html`
+            <div class="chatcfg-instr-loading">
+              <span class="db-spin"></span>
+              <span>Drafting your system prompt…</span>
+            </div>` : ""}
+        </div>
         <div class="chatknow-instr-foot">
           <span class="db-form-help" style=${{ margin: 0 }}>✨ Auto-drafted from your industry, business context and what this agent captures — edit or clear it freely. ${(chatCfg.instructions || "").length} characters.</span>
           <button type="button" class=${"db-btn-primary db-btn-sm " + (chatCfgSaved ? "is-copied" : "")} onClick=${saveChatCfg} disabled=${chatCfgSaving}>
