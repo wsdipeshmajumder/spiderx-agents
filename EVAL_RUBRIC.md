@@ -5,7 +5,22 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 370**
+**Last updated: build 371**
+
+**Build 371 (division = flat direct items + more separation):** two follow-ups
+to 370's nav division:
+- **More space** between the voice-agent groups and the division — the
+  `.db-nav-divider` top margin went 14→28px (plus a short leading tick).
+- The three division entries (Add-ons / Developer / Account) no longer render as
+  collapsible groups; the division renders as **flat direct menu items**
+  (`.db-nav-flat`, no group head / chevron / expand). Because Account carries 4
+  pages, the flat list is 6 items: Chat widget [Add-on] · Webhooks & data ·
+  Workspace · Team & invites · Billing & plan · Integrations — nothing orphaned
+  (collapsing Account to one link would have lost Team/Billing/Integrations,
+  which have no in-page nav). Non-division groups stay collapsible. Verified
+  live: no Add-ons/Developer/Account group heads remain, all 6 items are direct,
+  divider margin-top 28px, label renders "Workspace & add-ons". Evidence:
+  **Behavioral**.
 
 **Build 370 (nav division: Add-ons / Developer / Account set apart):** the
 Add-ons (build 367), Developer, and Account groups are now a distinct nav

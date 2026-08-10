@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 370;
+const SXAI_BUILD = 371;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -5033,34 +5033,50 @@ function DashboardShell({ activeKey, agent, plan, agents, user: userProp, theme:
             ${groups.map((g, i) => html`
               ${g.division && i > 0 && !(groups[i - 1] && groups[i - 1].division)
                 ? html`<div class="db-nav-divider" role="separator"><span>Workspace & add-ons</span></div>` : ""}
-              <div key=${g.key} class=${"db-nav-group" + (openGroups[g.key] ? " open" : "")}>
-                <button class="db-nav-group-head" onClick=${() => toggleGroup(g.key)}>
-                  ${typeof g.icon === "string"
-                    ? html`<${MIcon} name=${g.icon} size=18 className="db-nav-group-icon" />`
-                    : g.icon}
-                  <span>${g.label}</span>
-                  <${MIcon} name="expand_more" size=18 className="db-nav-group-chev" />
-                </button>
-                ${openGroups[g.key] ? html`
-                  <div class="db-nav-group-items">
+              ${g.division
+                ? html`
+                  <div class="db-nav-group-items db-nav-flat">
                     ${g.items.map((it) => html`
                       <button key=${it.key}
-                              class=${"db-nav-item" + (itemActive(it.key) ? " active" : "") + (it.key === "live" ? " db-nav-item-golive" : "")}
+                              class=${"db-nav-item" + (itemActive(it.key) ? " active" : "")}
                               onClick=${() => navTo(it.route)}>
-                        ${it.icon
-                          ? html`<${MIcon} name=${it.icon} size=18 className="db-nav-item-icon" />`
-                          : (it.key === "live"
-                              ? html`<span class="db-nav-golive-dot" aria-hidden="true"></span>`
-                              : "")}
+                        ${it.icon ? html`<${MIcon} name=${it.icon} size=18 className="db-nav-item-icon" />` : ""}
                         <span class="db-nav-item-label">${it.label}</span>
-                        ${it.statusBadge === "live" ? html`<span class="db-nav-item-badge is-live">Live</span>` : ""}
-                        ${it.statusBadge === "draft" ? html`<span class="db-nav-item-badge is-draft">Draft</span>` : ""}
                         ${it.addon ? html`<span class="db-nav-item-badge is-addon">Add-on</span>` : ""}
                       </button>
                     `)}
                   </div>
-                ` : ""}
-              </div>
+                `
+                : html`
+                  <div key=${g.key} class=${"db-nav-group" + (openGroups[g.key] ? " open" : "")}>
+                    <button class="db-nav-group-head" onClick=${() => toggleGroup(g.key)}>
+                      ${typeof g.icon === "string"
+                        ? html`<${MIcon} name=${g.icon} size=18 className="db-nav-group-icon" />`
+                        : g.icon}
+                      <span>${g.label}</span>
+                      <${MIcon} name="expand_more" size=18 className="db-nav-group-chev" />
+                    </button>
+                    ${openGroups[g.key] ? html`
+                      <div class="db-nav-group-items">
+                        ${g.items.map((it) => html`
+                          <button key=${it.key}
+                                  class=${"db-nav-item" + (itemActive(it.key) ? " active" : "") + (it.key === "live" ? " db-nav-item-golive" : "")}
+                                  onClick=${() => navTo(it.route)}>
+                            ${it.icon
+                              ? html`<${MIcon} name=${it.icon} size=18 className="db-nav-item-icon" />`
+                              : (it.key === "live"
+                                  ? html`<span class="db-nav-golive-dot" aria-hidden="true"></span>`
+                                  : "")}
+                            <span class="db-nav-item-label">${it.label}</span>
+                            ${it.statusBadge === "live" ? html`<span class="db-nav-item-badge is-live">Live</span>` : ""}
+                            ${it.statusBadge === "draft" ? html`<span class="db-nav-item-badge is-draft">Draft</span>` : ""}
+                            ${it.addon ? html`<span class="db-nav-item-badge is-addon">Add-on</span>` : ""}
+                          </button>
+                        `)}
+                      </div>
+                    ` : ""}
+                  </div>
+                `}
             `)}
 
             <div class="db-nav-foot">

@@ -6066,12 +6066,16 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 .db-nav-pinned + .db-nav-group { border-top: 1px solid var(--db-border-soft, #eef0f4); padding-top: 6px; }
 :root[data-theme="dark"] .db-nav-pinned + .db-nav-group { border-top-color: #1f2433; }
 /* Nav division separator — sets Add-ons / Developer / Account apart from the
-   agent-config groups above (build 369). */
-.db-nav-divider { display: flex; align-items: center; gap: 8px; margin: 14px 6px 6px;
+   agent-config groups above, with a clear gap above it (build 371). */
+.db-nav-divider { display: flex; align-items: center; gap: 8px; margin: 28px 6px 8px;
   font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
   color: var(--fg-dim, #9aa0ad); white-space: nowrap; }
+.db-nav-divider::before { content: ""; height: 1px; width: 10px; background: var(--db-border-soft, #eef0f4); }
 .db-nav-divider::after { content: ""; flex: 1; height: 1px; background: var(--db-border-soft, #eef0f4); }
+:root[data-theme="dark"] .db-nav-divider::before,
 :root[data-theme="dark"] .db-nav-divider::after { background: #1f2433; }
+/* Division items render flat (direct links), no collapsible group chrome. */
+.db-nav-flat { padding-top: 0; }
 
 /* ─── WorkspaceSelector (build 222) ───────────────────────────────────
    Soft pill in the topbar with the active workspace name + member
