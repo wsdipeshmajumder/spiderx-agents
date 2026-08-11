@@ -5,7 +5,29 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 393**
+**Last updated: build 394**
+
+**Build 394 (Recent-chats toolbar: 2 compact rows, not 3):** screenshot
+showed FROM/TO on one line, the All/Widget/Test filter dropped to its own
+second line, and the transcript-checkbox+Export row as a third — tester:
+"instead of 3 rows, make it 2 rows compact." Root cause was physical, not a
+CSS bug: in the narrow `chatconv-list` pane (~311–353px per live
+measurement) the date range alone needs ~270px, leaving nowhere near enough
+room for the segmented filter (180px) on the same line as build 390 had
+grouped them — no amount of flex tuning fits 132+135+52+180px of controls
+into a 311px row. Regrouped instead of just shrinking: row 1 is now
+FROM/TO/Clear only (fits standalone); row 2 is the traffic filter + the
+transcript toggle + Export, all three compacted to fit together — Widget/
+Test go icon-only (🧩/🧪, `title=` tooltip carries the label, kept in the
+segment's accessible name so screen readers still hear "Widget traffic" /
+"Test traffic"), the transcript checkbox drops its text label for a 📄 icon
+(tooltip explains it), and "Export report" shortens to "Export". Date
+input `min-width` trimmed 132px → 116px for a little extra breathing room.
+**Verdict: PASS** — browser-verified on `rohan`: date range renders on one
+line, filter+checkbox+Export render together on a second line with no
+wrap; clicking the icon-only Test filter still correctly narrows the list
+to the 1 test conversation. Evidence: **Behavioral** (logged-in browser,
+measured pane width) + **Code**.
 
 **Build 393 (Ambient lake/forest background, right side of the dashboard
 shell):** tester supplied a watercolor lake/forest image and asked to "use

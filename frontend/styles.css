@@ -1473,10 +1473,17 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 .chatconv-toolbar-row:first-child { align-items: flex-end; }
 .chatconv-datefld { display: flex; flex-direction: column; gap: 3px; font-size: 11px; font-weight: 600;
   color: var(--fg-mute, #6b7080); text-transform: uppercase; letter-spacing: 0.02em; }
-.chatconv-datefld .db-input { padding: 6px 8px; font-size: 12.5px; min-width: 132px; text-transform: none; letter-spacing: 0; }
+.chatconv-datefld .db-input { padding: 6px 8px; font-size: 12.5px; min-width: 116px; text-transform: none; letter-spacing: 0; }
 .chatconv-toolbar-spacer { flex: 1 1 auto; }
 .chatconv-toolbar .db-btn-primary { display: inline-flex; align-items: center; gap: 6px; }
 .chatconv-toolbar .db-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Row 2 compaction (build 394) — filter + transcript toggle + export all on
+   one line in the narrow chatconv-list pane; Widget/Test go icon-only
+   (title= tooltip carries the label) and Export drops "report". */
+.chatconv-trafficseg .db-embed-seg-btn { padding: 5px 8px; font-size: 12px; }
+.chatconv-txcheck { display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+  font-size: 14px; padding: 4px 2px; flex: none; }
+.chatconv-txcheck input { margin: 0; }
 /* Live chat rendered INLINE in the right pane (build 349) instead of a modal —
    fills the pane, its own header/log/controls scroll within it. */
 .livechat-inline { display: flex; flex-direction: column; min-height: 0; max-height: calc(100vh - 150px); }
