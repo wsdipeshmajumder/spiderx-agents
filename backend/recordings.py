@@ -216,6 +216,34 @@ class RecordingWriter:
             self._safe_close()
             return False
 
+    def _pad_to_now(self, wave_obj: "wave.Wave_write", written_bytes: int, rate_hz: int) -> int:
+        """Insert silence so this stream's cumulative duration catches up to
+        real elapsed time since the call started, before the next real chunk
+        lands.
+
+        The caller-mic tap fires continuously (every inbound WS chunk, silence
+        included), so caller.wav is naturally wall-clock-aligned. The agent
+        tap only fires while Gemini is actually emitting TTS audio — with NO
+        silence written during the gaps while Eva isn't speaking. Without this
+        padding, agent.wav is a "compressed" track (all of a call's TTS
+        back-to-back with the dead air squeezed out), so mix_to_stereo's
+        naive sample-index interleave drifts the agent channel earlier and
+        earlier as the call goes on — a real answer can end up mixed BEFORE
+        the caller question that prompted it. Reported by a tester listening
+        to a live recording where the bot's audio ran out ~35s before the
+        caller's did, having front-loaded everything into the first ~57s of
+        a 91s call. Best-effort: caller writes past-the-end silence too, in
+        case the mic tap ever gets its own gap (e.g. a WS hiccup)."""
+        if not self._started_at:
+            return written_bytes
+        elapsed_s = (datetime.now(timezone.utc) - self._started_at).total_seconds()
+        expected_bytes = int(elapsed_s * rate_hz) * 2  # int16 mono = 2 bytes/sample
+        gap = expected_bytes - written_bytes
+        if gap > 0:
+            wave_obj.writeframesraw(b"\x00" * gap)
+            written_bytes += gap
+        return written_bytes
+
     def write_caller(self, chunk: bytes) -> None:
         """Append one inbound-mic PCM chunk. Best-effort — exceptions
         are swallowed and the writer's state stays consistent (we
@@ -223,6 +251,7 @@ class RecordingWriter:
         if self._closed or not self._caller_wave or not chunk:
             return
         try:
+            self._caller_bytes = self._pad_to_now(self._caller_wave, self._caller_bytes, CALLER_RATE_HZ)
             self._caller_wave.writeframesraw(chunk)
             self._caller_bytes += len(chunk)
         except Exception as e:  # noqa: BLE001
@@ -233,6 +262,7 @@ class RecordingWriter:
         if self._closed or not self._agent_wave or not chunk:
             return
         try:
+            self._agent_bytes = self._pad_to_now(self._agent_wave, self._agent_bytes, AGENT_RATE_HZ)
             self._agent_wave.writeframesraw(chunk)
             self._agent_bytes += len(chunk)
         except Exception as e:  # noqa: BLE001

@@ -5,7 +5,49 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 394**
+**Last updated: build 395**
+
+**Build 395 (Fix call-recording audio drift — bot audio front-loaded ahead
+of the caller's):** tester reported a live call recording where the voices
+sounded mixed up — the bot's answer played before the user's question that
+prompted it. Downloaded the recording and confirmed it empirically before
+touching code: per-second RMS energy showed the agent (right) channel
+packed solid for the first ~57s of a 91s call with almost no gaps, then
+completely silent for the remaining ~34s — while the caller (left) channel
+kept its normal on/off speech pattern the entire way through.
+
+Root cause: `RecordingWriter.write_agent()` (`backend/recordings.py`) only
+writes bytes while Gemini is actually emitting TTS audio, with no silence
+written during the gaps while Eva isn't speaking. `write_caller()` gets a
+continuous mic tap (every inbound WS chunk, silence included), so
+`caller.wav` stays wall-clock aligned — but `agent.wav` is a "compressed"
+track: all of a call's TTS back-to-back with the dead air squeezed out.
+`mix_to_stereo()`'s sample-index interleave assumes both streams start
+aligned at frame 0, so a call with real gaps drifts the agent channel
+earlier and earlier as it goes on, exactly matching the empirical shape
+above (and the tester's report — a later answer ending up mixed before an
+earlier question).
+
+Fix: added `RecordingWriter._pad_to_now()`, called from both `write_caller`
+and `write_agent` before every real chunk — inserts silence so each
+stream's cumulative duration catches up to real elapsed time since
+`self._started_at`, keeping both channels wall-clock aligned regardless of
+how bursty either one is. `mix_to_stereo`'s existing end-of-stream padding
+(for whichever side is shorter overall) is untouched and still correct.
+
+**Verdict: PASS** — `tests/test_offline.py::TestRecordingWriterAlignment`
+(4 new tests): `_pad_to_now` inserts the correct silence for elapsed time
+and is a no-op when a stream is already caught up; `write_agent` pads
+through a simulated silent gap (reproduces the reported bug shape) with the
+padding verified as genuine silence, not garbage; an end-to-end check that
+after caller-continuous + agent-bursty writes, both streams' durations land
+within 0.2s of true elapsed time despite wildly different active-audio
+totals. Evidence: **Behavioral** (RMS analysis of the real reported
+recording, offline) + **Unit** (4 tests) + **Code**. Not yet re-verified
+against a fresh live call recording end-to-end (existing bad recordings
+predate the fix and can't be repaired retroactively) — flagged as the
+natural follow-up.
+
 
 **Build 394 (Recent-chats toolbar: 2 compact rows, not 3):** screenshot
 showed FROM/TO on one line, the All/Widget/Test filter dropped to its own

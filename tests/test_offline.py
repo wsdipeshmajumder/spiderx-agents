@@ -457,6 +457,115 @@ class TestGeoipProvenance(unittest.TestCase):
         self.assertEqual(asyncio.run(self.cb._geoip_lookup("not-an-ip")), {})
 
 
+class TestRecordingWriterAlignment(unittest.TestCase):
+    """build 393 — agent.wav must stay wall-clock aligned with caller.wav.
+
+    Tester report: a live call recording where the bot's answers drift
+    earlier and earlier, ending up mixed BEFORE the caller question that
+    prompted them. Root cause: write_agent() only fires while Gemini is
+    actually emitting TTS, with no silence written during the gaps while
+    Eva isn't speaking — so agent.wav is a "compressed" track (all TTS
+    back-to-back, dead air squeezed out) while caller.wav (continuous mic
+    tap) stays real-time. mix_to_stereo's naive sample-index interleave
+    then drifts the agent channel earlier as the call goes on. Fixed by
+    padding each stream with silence up to elapsed wall-clock time before
+    every real chunk. Empirically confirmed against a real recording: the
+    agent channel was packed solid for the first ~57s of a 91s call, then
+    silent for the last ~34s, while the caller channel kept its normal
+    on/off speech pattern the whole way through."""
+
+    def setUp(self):
+        from backend import recordings
+        self.recordings = recordings
+
+    class _FakeWave:
+        def __init__(self):
+            self.written = bytearray()
+
+        def writeframesraw(self, b):
+            self.written += b
+
+    def _new_writer(self, started_at):
+        w = self.recordings.RecordingWriter.__new__(self.recordings.RecordingWriter)
+        w._closed = False
+        w._started_at = started_at
+        return w
+
+    def test_pad_to_now_inserts_silence_for_elapsed_time(self):
+        from datetime import datetime, timedelta, timezone
+        w = self._new_writer(datetime.now(timezone.utc) - timedelta(seconds=2.0))
+        fake = self._FakeWave()
+        new_total = w._pad_to_now(fake, 0, self.recordings.AGENT_RATE_HZ)
+        expected = int(2.0 * self.recordings.AGENT_RATE_HZ) * 2  # int16 mono
+        # Real wall-clock elapses a hair more than 2.0s between the timestamp
+        # above and _pad_to_now's own now() call — allow a small tolerance.
+        self.assertGreaterEqual(new_total, expected)
+        self.assertLess(new_total, expected + int(0.2 * self.recordings.AGENT_RATE_HZ) * 2)
+        self.assertEqual(len(fake.written), new_total)
+        self.assertEqual(bytes(fake.written), b"\x00" * new_total)
+
+    def test_pad_to_now_is_noop_when_caught_up(self):
+        from datetime import datetime, timezone
+        w = self._new_writer(datetime.now(timezone.utc))
+        fake = self._FakeWave()
+        # written_bytes already "in the future" relative to elapsed time.
+        new_total = w._pad_to_now(fake, 10_000_000, self.recordings.AGENT_RATE_HZ)
+        self.assertEqual(new_total, 10_000_000)
+        self.assertEqual(len(fake.written), 0)
+
+    def test_write_agent_pads_through_a_silent_gap(self):
+        """Reproduces the reported bug shape: Eva speaks, goes quiet for a
+        stretch (caller talking), then speaks again — agent.wav must grow
+        through the gap so its total duration tracks real elapsed time, not
+        just active-speech time."""
+        from datetime import datetime, timedelta, timezone
+        w = self._new_writer(datetime.now(timezone.utc))
+        w._agent_wave = self._FakeWave()
+        w._agent_bytes = 0
+
+        chunk = b"\x01\x00" * 100  # 200 bytes of "speech"
+        w.write_agent(chunk)
+        self.assertEqual(w._agent_bytes, len(chunk))  # no gap yet — no padding
+
+        # Simulate Eva going quiet for 1s while the caller talks, by rewinding
+        # _started_at (equivalent to real time having advanced 1s).
+        w._started_at -= timedelta(seconds=1.0)
+        w.write_agent(chunk)
+
+        # The gap-fill target already covers the first chunk's bytes as part
+        # of "what should exist by the 1s mark" — only the second chunk adds
+        # on top of that (pushing slightly past the 1s mark).
+        min_expected = int(1.0 * self.recordings.AGENT_RATE_HZ) * 2 + len(chunk)
+        self.assertGreaterEqual(w._agent_bytes, min_expected)
+        # And the padding is genuinely silent, not garbage.
+        pad_region = bytes(w._agent_wave.written[len(chunk):len(chunk) + 1000])
+        self.assertEqual(pad_region, b"\x00" * len(pad_region))
+
+    def test_write_caller_and_write_agent_stay_wall_clock_aligned(self):
+        """End-to-end shape check: after caller speaks continuously and agent
+        speaks in two bursts with a gap, both streams' durations should match
+        real elapsed time (within a fraction of a second), not each stream's
+        own active-audio total — which is exactly what let the bug ship
+        (both streams individually "worked", they just drifted apart)."""
+        from datetime import datetime, timedelta, timezone
+        w = self._new_writer(datetime.now(timezone.utc) - timedelta(seconds=3.0))
+        w._caller_wave = self._FakeWave()
+        w._agent_wave = self._FakeWave()
+        w._caller_bytes = 0
+        w._agent_bytes = 0
+
+        w.write_caller(b"\x00\x01" * 500)
+        w.write_agent(b"\x00\x01" * 500)  # only ~1/8 as much "real" agent audio
+
+        caller_duration_s = w._caller_bytes / 2 / self.recordings.CALLER_RATE_HZ
+        agent_duration_s = w._agent_bytes / 2 / self.recordings.AGENT_RATE_HZ
+        # Both tracks should reflect ~3s of real elapsed time, not the tiny
+        # amount of actual audio bytes each call wrote.
+        self.assertGreater(caller_duration_s, 2.9)
+        self.assertGreater(agent_duration_s, 2.9)
+        self.assertLess(abs(caller_duration_s - agent_duration_s), 0.2)
+
+
 class TestImportSanity(unittest.TestCase):
     def setUp(self):
         _ensure_loop()   # backend.settings builds an asyncio.Lock() at import time
