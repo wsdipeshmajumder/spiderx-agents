@@ -5,7 +5,19 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 375**
+**Last updated: build 376**
+
+**Build 376 (Fish Audio default → free `s2.1-pro-free` backbone):** Phase 1's
+default TTS backbone was `s1`, which requires paid Fish *API credit* and returned
+**402** in prod (verified live: 503→502→402 as the key rolled out). Fish offers a
+free tier — model id **`s2.1-pro-free`** (state-of-the-art, no credit, free
+through 2026-08-31; same `/v1/tts` endpoint). Changed `backend/fish_audio.py`
+`FISH_TTS_MODEL` default `s1` → `s2.1-pro-free` (still overridable via env to a
+paid backbone). Verified with the live key: `model: s2.1-pro-free` → **200
+audio/mpeg, 57677 bytes** (valid 128kbps MP3). **Verdict: PASS** — Fish preview
+now produces real audio in prod with zero cost and no top-up. Evidence:
+**Behavioral** (live 200 + valid MP3 bytes). Supersedes the build-375 PARTIAL.
+
 
 **Build 375 (Fish Audio — selectable voice engine, Phase 1):** added Fish Audio
 as a second, selectable voice engine alongside the default **Gemini native

@@ -8,9 +8,11 @@ button in Voice & behaviour; it does NOT touch the live Gemini phone pipeline
 an STT → LLM → Fish-TTS cascade.
 
 API shape validated against the live service: `POST /v1/tts` with a Bearer key,
-a `model:` header selecting the TTS backbone (`s1` / `speech-1.6` / `speech-1.5`),
-and a JSON body `{text, reference_id, format, …}` returning audio bytes. A 402
-means the Fish *API credit* (separate from platform credit) is exhausted.
+a `model:` header selecting the TTS backbone (default `s2.1-pro-free` — Fish's
+free tier; also `s1` / `speech-1.6` / `speech-1.5` on paid credit), and a JSON
+body `{text, reference_id, format, …}` returning audio bytes. A 402 means the
+Fish *API credit* (separate from platform credit) is exhausted — not hit on the
+free backbone.
 """
 from __future__ import annotations
 
@@ -20,8 +22,12 @@ from typing import Any, Optional
 import httpx
 
 FISH_API_BASE = os.environ.get("FISH_AUDIO_API_BASE", "https://api.fish.audio").rstrip("/")
-# Default TTS backbone. s1 is the newest; overridable per call / via env.
-FISH_TTS_MODEL = os.environ.get("FISH_TTS_MODEL", "s1")
+# Default TTS backbone. `s2.1-pro-free` is Fish's free tier (state-of-the-art
+# model, no API credit required, free through 2026-08-31 per fish.audio/blog/
+# s2-1-pro-free-api) — chosen as the default so preview/TTS works out of the box
+# without topping up API credit. Overridable per call / via FISH_TTS_MODEL env
+# to a paid backbone (e.g. `s1`, `speech-1.6`, `speech-1.5`) if credit is added.
+FISH_TTS_MODEL = os.environ.get("FISH_TTS_MODEL", "s2.1-pro-free")
 
 # A small curated set of natural voices so the dropdown is useful out of the box
 # (operators can also paste any Fish model id). Ids resolved from the live model
