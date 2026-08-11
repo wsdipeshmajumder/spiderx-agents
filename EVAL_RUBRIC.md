@@ -5,9 +5,27 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 395**
+**Last updated: build 396**
 
-**Build 395 (Fix call-recording audio drift — bot audio front-loaded ahead
+**Build 396 (Fix the build-393 background image — too big, overlapping the
+tab row):** tester screenshot showed the lake/forest background dominating
+the whole right third of the viewport, its treetops washing out the
+"System prompt" / "Go live" / "Conversations" tab labels where the image
+overlapped them — the 55%/820px sizing from build 393 was sized for a wide
+open panel, not for sitting directly behind live text. Fixed on three axes:
+(1) size — 380px fixed width, not up to 820px; (2) position — pushed down
+170px from the top of `.db-main` (clears the pageheader + tab row, which
+sit in that first ~150px) instead of flush top; (3) scope — wrapped in
+`@media (min-width: 1680px)`, since `.db-main` only has genuine spare
+gutter beyond the 1440px-capped content column on wide monitors — on a
+standard laptop width the image would sit on top of real content instead
+of beside it, which is exactly what the tester's ultra-wide screenshot
+exposed. **Verdict: PASS** — browser-verified at 1920×1080 on `rohan`:
+background renders small and clearly clear of the tab row and both panel
+cards; tab labels fully legible. Evidence: **Behavioral** (logged-in
+browser, live screenshot) + **Code**.
+
+**Build 395 (Fix call-recording audio drift — bot audio front-loaded ahead — bot audio front-loaded ahead
 of the caller's):** tester reported a live call recording where the voices
 sounded mixed up — the bot's answer played before the user's question that
 prompted it. Downloaded the recording and confirmed it empirically before

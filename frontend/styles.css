@@ -6870,17 +6870,25 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   display: flex;
   flex-direction: column;
   background: #f7f8fa;
-  /* Ambient lake/forest scene, right side (build 393) — anchored to the box
-     itself (default background-attachment: scroll), not the page, so it
-     stays put in the top-right as the content inside scrolls. The image's
-     own foggy-white top half blends into #f7f8fa with no extra gradient
-     needed; opaque .db-panel cards naturally occlude it wherever content
-     actually sits, so it only ever shows through empty margin. Dark theme
-     drops it entirely below — a pastel watercolor clashes there. */
-  background-image: url('/static/bg-lake.jpg');
-  background-repeat: no-repeat;
-  background-position: right top;
-  background-size: min(55%, 820px) auto;
+}
+/* Ambient lake/forest scene, right side (build 393, resized build 394 —
+   the first pass at 55%/820px swallowed the pageheader + tab row on wide
+   windows, washing out the tab labels). Small, pushed well below the
+   header+tabs (~170px), and gated to windows wide enough that .db-main
+   actually has spare gutter to the right of the 1440px-capped content
+   column — narrower than that and it would sit on top of real content
+   instead of beside it. Anchored to the box itself (default
+   background-attachment: scroll, not the page), so it stays in place
+   as content inside scrolls; "top" (not "bottom") keeps it inside the
+   visible viewport on tall pages instead of scrolled out of view. Dark
+   theme drops it entirely — see the .db-main override below. */
+@media (min-width: 1680px) {
+  .db-main {
+    background-image: url('/static/bg-lake.jpg');
+    background-repeat: no-repeat;
+    background-position: right 0 top 170px;
+    background-size: 380px auto;
+  }
 }
 .db-main-wide .db-pageheader,
 .db-main-wide .db-content {
