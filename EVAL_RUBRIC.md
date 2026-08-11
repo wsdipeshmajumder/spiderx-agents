@@ -5,7 +5,25 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 385**
+**Last updated: build 386**
+
+**Build 386 (Live now moves to Home's right pane; clicking opens it in
+Conversations):** tester follow-up: "the live now need not be in the left,
+make it a list on right side, clicking which take them to conversations
+tab." Reworked build 383's layout — left pane (`chatconv-list`) is back to
+just Chat overview (stats + quick links); the **Live now** list moved to the
+right pane (`chatconv-detail`), replacing the inline `LiveChatModal` Home
+used to render there. Row click no longer opens the chat inline on Home at
+all — it does `setLiveSid(lc.sid); setChatTab("conversations")`, so the
+visitor opens in the Conversations tab's existing detail pane (same shared
+`liveSid` state — Conversations already renders `LiveChatModal` there when
+it's set). Row CTA copy changed from "Watch / join →" to "Open in
+Conversations →" to match. **Verdict: PASS** — browser-verified with a real
+live visitor session: Home's right pane lists the live visitor with the new
+copy; clicking it switches the active tab to Conversations AND the live
+chat is already open and "watching" there (transcript visible, Join as
+human available) — no extra click needed. Evidence: **Behavioral** (live WS
+session) + **Code**.
 
 **Build 383–385 (Home tab goes wide: live-visitor list + fix the watch/join
 auth bug it exposed):** tester ask: "the home tab also shud have the wide

@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 385;
+const SXAI_BUILD = 386;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -12737,16 +12737,18 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
           <button type="button" class="chathome-quicklink" onClick=${() => setChatTab("knowledge")}>System prompt →</button>
           <button type="button" class="chathome-quicklink" onClick=${() => setChatTab("conversations")}>Read conversations →</button>
         </div>
-        <div class="db-panel-head" style=${{ marginTop: "18px" }}>
+      </section>
+      <section class="db-panel chatconv-detail chathome-live">
+        <div class="db-panel-head">
           <div>
             <h3 class="db-panel-title">Live now ${liveChats.length > 0 ? html`<span class="db-pill-live">🟢 ${liveChats.length}</span>` : ""}</h3>
-            <p class="db-panel-sub">Visitors chatting right now — click one to watch in real time or join as a human.</p>
+            <p class="db-panel-sub">Visitors chatting right now — click one to open it in Conversations, where you can watch or join.</p>
           </div>
         </div>
         ${liveChats.length > 0 ? html`
           <ul class="call-log livechat-list">
             ${liveChats.map((lc) => html`
-              <li key=${lc.sid} class=${"call-row livechat-live-row" + (liveSid === lc.sid ? " is-selected" : "")} onClick=${() => setLiveSid(lc.sid)}>
+              <li key=${lc.sid} class="call-row livechat-live-row" onClick=${() => { setLiveSid(lc.sid); setChatTab("conversations"); }}>
                 <div class="call-row-head">
                   <span class="call-channel call-channel-web_chat">💬 Live</span>
                   ${lc.human_control ? html`<span class="db-pill-soft livechat-pill-join">${lc.operator_name || "human"} in control</span>` : ""}
@@ -12755,23 +12757,16 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
                   ${lc.watchers > 0 ? html`<span class="call-dur">👁 ${lc.watchers}</span>` : ""}
                 </div>
                 ${lc.last_visitor_text ? html`<div class="call-summary">“${lc.last_visitor_text}”</div>` : html`<div class="call-summary db-muted">No visitor message yet…</div>`}
-                <div class="livechat-row-cta">${lc.human_control ? "Open →" : "Watch / join →"}</div>
+                <div class="livechat-row-cta">Open in Conversations →</div>
               </li>
             `)}
           </ul>
-        ` : html`<div class="db-form-help" style=${{ padding: "10px 0" }}>No one's chatting right now — live visitors will show up here the moment they start typing.</div>`}
-      </section>
-      <section class="db-panel chatconv-detail">
-        ${liveSid
-          ? html`<${LiveChatModal} inline=${true} agent=${agent} sid=${liveSid} onClose=${() => setLiveSid(null)} />`
-          : html`
-            <div class="chatconv-empty">
-              <span class="chatconv-empty-glyph" aria-hidden="true">💬</span>
-              <div>${liveChats.length > 0
-                ? "Click a live visitor on the left to watch in real time or join as a human."
-                : "No one's chatting right now. Live visitors will show up on the left to watch or join."}</div>
-            </div>
-          `}
+        ` : html`
+          <div class="chatconv-empty">
+            <span class="chatconv-empty-glyph" aria-hidden="true">💬</span>
+            <div>No one's chatting right now. Live visitors will show up here to open in Conversations.</div>
+          </div>
+        `}
       </section>
     </div>
   `) : "";
