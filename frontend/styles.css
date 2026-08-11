@@ -6863,6 +6863,17 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   display: flex;
   flex-direction: column;
   background: #f7f8fa;
+  /* Ambient lake/forest scene, right side (build 393) — anchored to the box
+     itself (default background-attachment: scroll), not the page, so it
+     stays put in the top-right as the content inside scrolls. The image's
+     own foggy-white top half blends into #f7f8fa with no extra gradient
+     needed; opaque .db-panel cards naturally occlude it wherever content
+     actually sits, so it only ever shows through empty margin. Dark theme
+     drops it entirely below — a pastel watercolor clashes there. */
+  background-image: url('/static/bg-lake.jpg');
+  background-repeat: no-repeat;
+  background-position: right top;
+  background-size: min(55%, 820px) auto;
 }
 .db-main-wide .db-pageheader,
 .db-main-wide .db-content {

@@ -5,7 +5,36 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 392**
+**Last updated: build 393**
+
+**Build 393 (Ambient lake/forest background, right side of the dashboard
+shell):** tester supplied a watercolor lake/forest image and asked to "use
+this background image as a background on the right side" to make the UI
+feel more alive; follow-up clarified the target as the agent dashboard
+shell (not the marketing homepage or login page). Saved the asset to
+`frontend/bg-lake.jpg` (served at `/static/bg-lake.jpg` via the existing
+`app.mount("/static", ...)`) and applied it to `.db-main` — the persistent
+main-content box behind every internal dashboard page (Home, Chat widget,
+Call Analytics, etc.) — anchored `right top`, `no-repeat`,
+`background-size: min(55%, 820px) auto`. Deliberately left
+`background-attachment` at its default (`scroll`, tied to the element's own
+box): `.db-main` is itself the scrolling container, so the image stays
+pinned top-right as page content scrolls inside it, rather than scrolling
+away immediately. No overlay/gradient needed — the image's own top half is
+already a soft near-white fog that blends into `.db-main`'s `#f7f8fa`
+background, and opaque `.db-panel` cards naturally occlude it wherever
+real content sits, so it only shows through empty margin. Dark theme is
+untouched: `:root[data-theme="dark"] .db-main`'s existing `background:
+#0b0d14` shorthand already resets `background-image` to `none` via normal
+cascade (higher-specificity full shorthand beats the light-mode
+longhand), so the pastel watercolor never appears against the dark UI.
+**Verdict: PASS** — code-level: confirmed `/static/bg-lake.jpg` resolves
+under the existing static mount with no new route needed; confirmed the
+dark-theme override's shorthand-reset behavior against the CSS cascade
+rules (no explicit `:root[data-theme="dark"] .db-main { background-image:
+none; }` required). Evidence: **Code** (asset placement, mount reuse,
+cascade correctness) — a full logged-in-browser screenshot pass at both
+themes is the natural next-session follow-up, not yet captured here.
 
 **Build 392 also carries a trailing build-390 fix:** `.chatconv-list` (the
 Recent-chats left pane) had no height cap, so once build 390 split its
