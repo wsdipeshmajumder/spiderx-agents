@@ -5,7 +5,56 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 396**
+**Last updated: build 397**
+
+**Build 397 (Persistent, retryable error on a mid-call drop instead of
+silently bouncing to the dashboard; error boundary for the Google-login
+blank screen):** two tester reports, investigated with the codebase before
+touching anything (no guessing).
+
+- **"automatically the test call page got removed during testing in a
+  call... is there a timer set?"** — clarified: this was testing an
+  already-*saved* agent (not the Eva-builder voice conversation, which does
+  have a legitimate 90s/150s/240s wrap-up watchdog by design). Traced the
+  actual mechanism: every server-sent mid-call `type:"error"` frame
+  (reconnects exhausted — `gemini_bridge.py:5386,5411`; save failed; no
+  usable model) is immediately followed by the server closing the WS.
+  `ws.onclose` only had a persistent-error path for *pre-ready* failures —
+  anything after `callStartRef.current` was set fell straight into
+  `closeSession()`, which silently `setView("landing")` + routes to `/`.
+  The only feedback was a 3s toast fired moments before the page vanished —
+  easy to miss, reads exactly as "the test call page got removed" with no
+  visible cause. Added `midCallErrorRef` (set in the `onmessage` error
+  handler, alongside a `setCallError` with a retry callback identical to
+  the existing pre-ready-failure pattern) so `ws.onclose` now recognizes
+  this case too and keeps the call surface up with a persistent, retryable
+  error card instead of navigating away.
+- **Blank screen after Google login in Edge** — no error boundary existed
+  anywhere in the app; a post-login render crash unmounts the whole React
+  tree, leaving only the background gradient with zero explanation —
+  browser- and root-cause-agnostic, but matches the symptom exactly. Added
+  `AppErrorBoundary` (inline-styled only, so it can't depend on a possibly-
+  unloaded stylesheet) wrapping the root render. Also addressed the likely
+  Edge-specific contributor: `googleSignIn()` awaited the Firebase SDK's
+  dynamic `import()` *before* calling `signInWithPopup()`, moving the popup
+  call outside the synchronous click handler — Chromium popup heuristics
+  (Edge's stricter tracking-prevention especially) are more likely to
+  block/wedge a popup opened outside that gesture window. `AuthPage` now
+  prefetches `_getFirebaseAuth()` on mount so the cached promise is
+  normally already resolved by the time the button is clicked.
+
+**Verdict: PASS (mid-call error UX) / PARTIAL (Edge blank screen)** — the
+mid-call fix is code-verified against the exact server code paths that
+produce it (every `type:"error"` send in `gemini_bridge.py` during an
+active session is followed by `return`, confirmed by direct inspection);
+not yet reproduced live end-to-end (would need to force a Gemini drop
+past `MAX_RECONNECTS` on demand). The Edge fix is a defense-in-depth pair
+(error boundary + popup-timing) addressing the most plausible root causes
+identified from investigation, but the user hadn't captured a console
+error at the time of the report, so the *actual* trigger is still
+unconfirmed — flagged as the natural follow-up if it recurs (check
+DevTools Console next time). Evidence: **Code** (both) + **Behavioral**
+pending reproduction.
 
 **Build 396 (Fix the build-393 background image — too big, overlapping the
 tab row):** tester screenshot showed the lake/forest background dominating

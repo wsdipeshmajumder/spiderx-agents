@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 396;
+const SXAI_BUILD = 397;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -4426,6 +4426,16 @@ function AuthPage({ mode, defaults, onAuthed, onSwitch }) {
   const [resendIn, setResendIn] = useState(0);
   const codeInputRef = useRef(null);
   const isSignup = mode === "signup";
+
+  // Warm the Firebase SDK the moment the auth page mounts, not on click.
+  // googleSignIn() used to await this import before calling
+  // signInWithPopup(), moving the popup call outside the synchronous click
+  // handler that spawned it — Chromium's popup heuristics (Edge's stricter
+  // tracking-prevention especially) are more likely to block or wedge a
+  // popup opened outside that gesture window. _getFirebaseAuth() caches its
+  // promise, so by the time the button is clicked this is normally already
+  // resolved and signInWithPopup fires with no async gap in between.
+  useEffect(() => { _getFirebaseAuth().catch(() => {}); }, []);
 
   // Countdown for the "Resend code" affordance on the OTP step.
   useEffect(() => {
@@ -18727,6 +18737,13 @@ function App() {
   // event. Reset on every openSession. closeSession reads it to decide
   // whether to surface the recovery banner.
   const agentSavedRef = useRef(false);
+  // Set synchronously when the server sends a mid-call `type:"error"` frame
+  // (reconnects exhausted, save failed, no usable model, …) — every such
+  // frame is immediately followed by the server closing the WS. Without this,
+  // ws.onclose couldn't tell that close apart from a normal hangup and would
+  // silently closeSession() → bounce to the dashboard with only a 3s toast as
+  // explanation, reading as "the test call page just vanished."
+  const midCallErrorRef = useRef(false);
   const [revealAgent, setRevealAgent] = useState(null);   // post-build reveal card
   const [revealSection, setRevealSection] = useState("overview");   // overview | calls | settings | numbers
   const [embedSlug, setEmbedSlug] = useState(null);                  // /embed/<slug> minimal iframe surface
@@ -19190,6 +19207,7 @@ function App() {
     // Reset the "did this session commit a new agent?" flag. closeSession
     // reads it to decide whether to surface the recovery banner.
     agentSavedRef.current = false;
+    midCallErrorRef.current = false;
     // Hide any leftover recovery banner — the operator is starting a new
     // session intentionally.
     setRecoverSid(null);
@@ -19311,20 +19329,26 @@ function App() {
     };
     ws.onclose = (e) => {
       // Distinguish a clean handoff close (code 1000 / 1005) from a
-      // pre-ready failure (anything else). A pre-ready failure keeps the
-      // call surface with a persistent, retryable error (so the user isn't
-      // bounced back to the dashboard wondering what happened); clean closes
-      // just unwind quietly.
+      // pre-ready failure (anything else) or a mid-call server-sent error
+      // (midCallErrorRef — reconnects exhausted, save failed, no usable
+      // model, …). Either failure keeps the call surface with a persistent,
+      // retryable error (so the user isn't bounced back to the dashboard
+      // wondering what happened); clean closes just unwind quietly.
       if (engineRef.current) {
-        if (e && e.code && e.code !== 1000 && e.code !== 1005 && !callStartRef.current) {
-          console.error("[openSession] WS closed before ready:", e.code, e.reason);
-          setBlobMode("error");
-          setCallError({
-            msg: e.reason
-              ? `Connection dropped: ${e.reason.slice(0, 80)}`
-              : "Connection dropped before Eva picked up. Try again.",
-            retry: () => openSessionRef.current && openSessionRef.current(testAgentId, opts),
-          });
+        const preReadyFailure = e && e.code && e.code !== 1000 && e.code !== 1005 && !callStartRef.current;
+        if (preReadyFailure || midCallErrorRef.current) {
+          if (preReadyFailure) {
+            console.error("[openSession] WS closed before ready:", e.code, e.reason);
+            setBlobMode("error");
+            setCallError({
+              msg: e.reason
+                ? `Connection dropped: ${e.reason.slice(0, 80)}`
+                : "Connection dropped before Eva picked up. Try again.",
+              retry: () => openSessionRef.current && openSessionRef.current(testAgentId, opts),
+            });
+          }
+          // Otherwise midCallErrorRef fired — callError is already set
+          // (with the server's message) by the onmessage error handler.
           // Stop the mic/WS but DON'T tear down the call view — the error
           // card lives there until the user retries or closes.
           try { engineRef.current?.stop(); } catch {}
@@ -19510,6 +19534,18 @@ function App() {
         } else if (msg.type === "error") {
           setBlobMode("error");
           flashHint(msg.message?.slice(0, 80) || "Something went wrong.", 3000);
+          // Every server-sent mid-call error (reconnects exhausted, save
+          // failed, no usable model, …) is immediately followed by the
+          // server closing the WS. Flag it so ws.onclose keeps the call
+          // surface up with a persistent, retryable error instead of
+          // silently closeSession()-ing back to the dashboard — the 3s
+          // toast above is easy to miss and the page just disappearing
+          // read as a bug ("automatically the test call page got removed").
+          midCallErrorRef.current = true;
+          setCallError({
+            msg: msg.message || "Something went wrong.",
+            retry: () => openSessionRef.current && openSessionRef.current(testAgentId, opts),
+          });
           // Surface on the embed surface too (the iframe doesn't render hints).
           if (msg.code === "agent_not_published") {
             setEmbedError(msg.message || "This assistant isn't live yet.");
@@ -20640,4 +20676,32 @@ function App() {
   `;
 }
 
-createRoot(document.getElementById("root")).render(html`<${App} />`);
+// No error boundary existed anywhere in the app — a render crash (e.g. right
+// after Google login, if the auth response's shape surprises a downstream
+// component) unmounts the whole tree, leaving only the CSS background
+// gradient with zero explanation. Inline styles only: this is the fallback
+// of last resort, so it can't depend on styles.css having loaded correctly.
+class AppErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error("[AppErrorBoundary] caught:", error, info?.componentStack); }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return html`
+      <div style=${{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px", fontFamily: "system-ui, sans-serif" }}>
+        <div style=${{ maxWidth: "420px", textAlign: "center", background: "#fff", border: "1px solid #e6e8ef", borderRadius: "16px", padding: "32px 28px", boxShadow: "0 8px 30px rgba(0,0,0,0.08)" }}>
+          <h2 style=${{ margin: "0 0 8px", fontSize: "18px", color: "#1a1c25" }}>Something went wrong</h2>
+          <p style=${{ margin: "0 0 20px", fontSize: "14px", color: "#5b6070", lineHeight: 1.5 }}>
+            This page hit an unexpected error. Reloading usually fixes it — if it keeps happening, let us know what you were doing right before.
+          </p>
+          <button type="button" onClick=${() => location.reload()}
+                  style=${{ background: "#2563eb", color: "#fff", border: "0", borderRadius: "8px", padding: "10px 20px", fontSize: "14px", fontWeight: "600", cursor: "pointer" }}>
+            Reload
+          </button>
+        </div>
+      </div>
+    `;
+  }
+}
+
+createRoot(document.getElementById("root")).render(html`<${AppErrorBoundary}><${App} /></${AppErrorBoundary}>`);
