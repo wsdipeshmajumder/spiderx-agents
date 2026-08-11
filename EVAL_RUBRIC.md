@@ -5,7 +5,29 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 381**
+**Last updated: build 382**
+
+**Build 382 (Chat-panel tabs: fix equal-width regression on narrower
+windows):** build 381's `flex: 1 1 0` made the 5 tabs equal-width, but only
+verified at a wide (1280px) viewport. Tester report from production
+(agents.spiderx.ai) at a normal desktop window: "Home and Go live are not
+the same width as the others." Root cause: flex items default to
+`min-width: auto`, which floors each button at its own text's intrinsic
+width — `flex: 1 1 0` can grow a short label's box but can't shrink a long
+label's box below its content. Once the row gets narrow enough that
+"System prompt"/"Conversations" (13 chars) hit that floor, they're pushed
+past their equal 1/5 share and squeeze "Home" (4 chars) and "Go live"
+(7 chars) below theirs. Added `min-width: 0` (overrides the default) +
+`white-space: nowrap` to `.chatpage-tabs .db-tab`. **Verdict: PASS** —
+browser-verified: confirmed the CSS from build 381 was genuinely live on
+`agents.spiderx.ai` (`?v=381` cache-busted `styles.css` matched the local
+source exactly, no CDN staleness), so the bug was real, not a cache issue.
+Re-measured all 5 tab widths via `getBoundingClientRect()` after the
+build-382 fix at both 900px and 1280px viewports — identical widths at
+both. At a true mobile width (480px) the row hits a separate, pre-existing
+overflow (no wrap/scroll on the tab bar) — out of scope for this fix, not
+introduced by it, and not what was reported. Evidence: **Behavioral**
+(measured on `rohan`, both viewport widths) + **Code**.
 
 **Build 381 (Chat-panel tabs: equal width):** the 5 chat-widget tabs (Home /
 Settings / System prompt / Go live / Conversations) previously sized to their

@@ -12000,8 +12000,13 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
 .chatpage .chatpage-tabs { align-self: stretch; }
 /* Equal-width chat tabs (Home / Settings / System prompt / Go live /
    Conversations) — each tab claims the same share of the bar instead of
-   sizing to its own label, so the row reads as one balanced control. */
-.chatpage-tabs .db-tab { flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+   sizing to its own label, so the row reads as one balanced control.
+   min-width: 0 overrides the flex-item default of min-width: auto, which
+   otherwise floors each button at its own text's width — on a narrower
+   window the long labels ("System prompt", "Conversations") hit that floor
+   first and get pushed wider, squeezing the short ones ("Home", "Go live")
+   below their equal share (build 382 fix). */
+.chatpage-tabs .db-tab { flex: 1 1 0; min-width: 0; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 /* ── Chat Home tab (build 369) ─────────────────────────────────────────────── */
 .chathome-welcome { text-align: center; max-width: 640px; margin: 0 auto; padding: 24px 16px 32px; }
 .chathome-welcome-glyph { width: 60px; height: 60px; border-radius: 16px; margin: 0 auto 16px;
