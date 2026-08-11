@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Pre-push regression gate for spiderx-agents.
+#
+# Blocks a push (which is the Railway deploy trigger) when the eval suite fails,
+# so regressions never reach production. Two layers:
+#   1. Offline unit suite (tests/test_offline.py) — ALWAYS runs. Fast, no deps:
+#      voice pipeline (audio codecs, Fish flushing, live-call _bridge branch +
+#      degrade-to-Gemini), fish_audio shape, build-number lockstep, imports.
+#   2. Online eval suite (tests/eval_suite.py) — runs ONLY if a dev server is
+#      reachable on :8765; hits the live HTTP/WS surface (43+ checks).
+#
+# Install once:  git config core.hooksPath .githooks   (or: make install-hooks)
+# Emergency bypass:  git push --no-verify
+set -u
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+# Prefer the project venv; fall back to python3.
+PY=".venv/bin/python"; [ -x "$PY" ] || PY="python3"
+BASE_URL="${EVAL_BASE_URL:-http://localhost:8765}"
+NOISE="FutureWarning|NotOpenSSL|warnings.warn|eol_message|ResourceWarning|base_events"
+
+# run_suite <label> <command...> — run a suite, print de-noised output, and
+# return the SUITE's real exit code (not grep's — a pipeline would mask it).
+run_suite() {
+    local label="$1"; shift
+    local log rc
+    log="$(mktemp)"
+    "$@" >"$log" 2>&1; rc=$?
+    grep -vE "$NOISE" "$log" || true
+    rm -f "$log"
+    return $rc
+}
+
+echo "── pre-push: offline eval suite ─────────────────────────────"
+if ! run_suite offline "$PY" -W ignore tests/test_offline.py; then
+    echo "❌ offline eval suite FAILED — push blocked. (bypass: git push --no-verify)"
+    exit 1
+fi
+
+# Online suite only when a server is up (uses curl if present, else python).
+server_up() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -sf -m 3 "$BASE_URL/api/build" >/dev/null 2>&1
+    else
+        "$PY" - "$BASE_URL" <<'PYEOF' >/dev/null 2>&1
+import sys, urllib.request
+try:
+    urllib.request.urlopen(sys.argv[1] + "/api/build", timeout=3); print("ok")
+except Exception:
+    sys.exit(1)
+PYEOF
+    fi
+}
+
+echo "── pre-push: online eval suite (if server on ${BASE_URL}) ───"
+if server_up; then
+    if ! BASE="$BASE_URL" run_suite online "$PY" tests/eval_suite.py; then
+        echo "❌ online eval suite FAILED — push blocked. (bypass: git push --no-verify)"
+        exit 1
+    fi
+else
+    echo "⚠  no server on ${BASE_URL} — skipped online suite (offline gate passed)."
+    echo "   Start it for full coverage:  uvicorn backend.app:app --port 8765"
+fi
+
+echo "✅ pre-push eval gate passed."
+exit 0

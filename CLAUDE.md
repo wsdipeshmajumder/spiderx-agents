@@ -121,3 +121,13 @@ Current build: **377**.
   (PASS / PARTIAL / OPEN), evidence tier (Behavioral / Unit / Code / Asset /
   Instrumented), and the build it shipped in. Never push a behavioural change
   without updating the rubric. Bump the rubric's "Last updated: build N" line.
+- **Evals are the regression gate — keep them passing and current.** The
+  pre-push hook (`.githooks/pre-push`; install with `make install-hooks`) runs
+  `tests/test_offline.py` (offline, always) and `tests/eval_suite.py` (when a
+  server is up) and BLOCKS the push/deploy on failure; CI
+  (`.github/workflows/evals.yml`) runs the offline suite on every push + PR.
+  When you add or change a feature, extend the matching suite: in-process logic
+  (audio, parsing, pipeline branches) → `tests/test_offline.py`; a new HTTP/WS
+  surface → `tests/eval_suite.py`. `test_offline.py` enforces build lockstep, so
+  keep `APP_BUILD`/`SXAI_BUILD`/CLAUDE.md/rubric-last-updated in sync. Don't
+  `--no-verify` past a real failure.

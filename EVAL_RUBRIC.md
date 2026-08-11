@@ -7,6 +7,27 @@
 
 **Last updated: build 377**
 
+**Regression gate added (no build bump — tests/CI/docs only):** the evals now run
+themselves so regressions can't reach prod. New `tests/test_offline.py` — a
+27-check, stdlib-only **offline** unit suite (no server/DB/keys; all fixtures
+synthesized in-process) covering the code with no HTTP surface that `eval_suite.py`
+can't see: the Fish voice pipeline (audio codecs µ-law↔PCM 8/16/24 kHz, WAV→mono
+decode, sentence flushing, the live-call `_bridge` branch **and its
+degrade-to-Gemini safety net** via fake carrier/session objects), the `fish_audio`
+client shape, build-number lockstep (`APP_BUILD`==`SXAI_BUILD`==CLAUDE.md==this
+line), and import sanity. Wired into the pipeline two ways: a committed **pre-push
+hook** (`.githooks/pre-push`, `make install-hooks`) that blocks the push/deploy on
+any offline failure — and runs the online suite too when a dev server is up — and
+a **GitHub Actions** workflow (`.github/workflows/evals.yml`) running the offline
+suite on every push + PR on Python 3.13 (matches Railway; no secrets). `Makefile`
+targets: `make eval` / `eval-offline` / `eval-online` / `eval-scenario` /
+`install-hooks`. First runs: offline **27 PASS**, online **43 PASS** (47 with
+`--scenario`), pre-push gate green end-to-end. Evidence: **Behavioral** (both
+suites run green) + the hook's exit-code plumbing unit-checked (fails block even
+when output is warning-only). This closes the Build-377 rubric gap: the Fish
+live-call path now has an automated **Unit** gate (Behavioral on a real call still
+pending).
+
 **Build 377 (Fish Audio drives LIVE CALLS — Phase 2, Fish is default):** the
 voice-engine preference now applies to live phone calls, not just the preview
 button. Architecture: Gemini Live stays the brain (STT + reasoning + tools +

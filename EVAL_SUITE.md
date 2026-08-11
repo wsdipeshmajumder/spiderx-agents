@@ -9,6 +9,36 @@ This is the *breadth* rubric (does every feature work?). It complements
 `EVAL_RUBRIC.md`, which is the *per-build* changelog rubric (what changed and how
 it was verified).
 
+## Two suites + the regression gate
+
+| Suite | File | Needs a server? | Runs where |
+|---|---|---|---|
+| **Offline** (unit) | `tests/test_offline.py` | No — fixtures synthesized in-process | pre-push hook **and** CI (`.github/workflows/evals.yml`) |
+| **Online** (API/WS) | `tests/eval_suite.py` | Yes (`:8765` + dev DB) | pre-push hook (when a server is up) |
+
+The **pre-push hook** (`.githooks/pre-push`, installed with `make install-hooks`
+or `git config core.hooksPath .githooks`) runs the offline suite on every push
+and blocks the push — hence the Railway deploy — if it fails; it also runs the
+online suite when a dev server is reachable. Bypass in an emergency with
+`git push --no-verify`. **GitHub Actions** runs the offline suite on every push
++ PR (Python 3.13, matching Railway; no secrets — the suite has no external deps).
+
+`make eval` runs both; `make eval-offline` / `make eval-online` / `make
+eval-scenario` run the pieces.
+
+### Offline suite coverage (`tests/test_offline.py`)
+
+The in-process logic with **no HTTP surface** — invisible to the online suite:
+
+| Area | Checks | Evidence |
+|---|---|---|
+| Telephony audio codecs | µ-law↔PCM resampling (8/16/24 kHz), WAV→mono decode (16/8-bit, stereo), garbage-WAV raises, frame chunking | Unit |
+| Fish sentence flushing | incremental sentence boundaries, tail buffering, long-fragment force-flush, short-fragment hold, barge-in drain | Unit |
+| Fish live-call `_bridge` | Fish drives audio + Gemini voice suppressed; **synth failure degrades to Gemini** mid-call; Gemini-provider path unchanged | Unit (fakes) |
+| `fish_audio` client | default backbone = `s2.1-pro-free`, `is_configured` env gating, voices shape, error carries HTTP status | Unit |
+| Build lockstep | `APP_BUILD` == `SXAI_BUILD` == CLAUDE.md == rubric last-updated; index.html uses `{BUILD}` | Code |
+| Import sanity | `backend.app` + telephony + fish_audio + gemini_bridge import clean | Code |
+
 ## Running it
 
 ```bash
@@ -36,8 +66,8 @@ creates one real chat-log row for the agent (expected test data).
 The harness authenticates with the passwordless **`X-User-Id`** stub header
 (user 1 = the founder / super-admin in dev). Every mutation snapshots the prior
 value and restores it, so it is safe to run repeatedly against the dev DB.
-Last full run: **43 PASS · 0 FAIL** (13 areas); **+4 with `--scenario`** (live
-chat WS) → 47.
+Last full run: online **43 PASS · 0 FAIL** (13 areas); **+4 with `--scenario`**
+(live chat WS) → 47. Offline **27 PASS · 0 FAIL** (`tests/test_offline.py`).
 
 ## Evidence tiers
 
