@@ -539,6 +539,10 @@ async def handle(connector_id: str, args: dict[str, Any], agent: dict[str, Any])
                 # webhook (None for browser/web calls). Logged so the Call log
                 # can show who called. (build 309)
                 "caller_number": agent.get("_caller_number"),
+                # Voice engine at call time — "fish" (Pro) / "gemini" (Standard);
+                # stamped so the LLM ledger can segment Pro vs Standard. None for
+                # web-voice calls that never set it. (build 379)
+                "voice_provider": agent.get("_voice_provider"),
                 "sentiment":     sentiment,
                 "lead_quality":  lead_quality,
                 "lead_signals":  lead_signals,

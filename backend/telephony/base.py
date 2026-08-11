@@ -377,6 +377,10 @@ async def run_call(ws: WebSocket, provider: TelephonyProvider, agent_id: int,
     # webhook via the WS query string. Both persist paths (end_call connector +
     # the hangup fallback below) stamp it onto the call row. None for web calls.
     agent["_caller_number"] = caller_number
+    # Point-in-time voice engine for cost attribution (Build 379): the selected
+    # provider at call time — "fish" (Pro) / "gemini" (Standard). Read by both
+    # persist paths (end_call connector + the hangup fallback) onto the call row.
+    agent["_voice_provider"] = str((agent.get("voice_tweaks") or {}).get("voice_provider") or "fish").strip().lower()
     agent["_transcript"] = []
     # Structured fields harvested from connector calls (send_email metadata,
     # book_appointment args, …) — merged into `extracted` at persist time so
@@ -530,6 +534,7 @@ async def _persist_call(
             "transcript": _json.dumps(turns, ensure_ascii=False) if turns else None,
             "model_id": model_id,
             "caller_number": agent.get("_caller_number"),
+            "voice_provider": agent.get("_voice_provider"),
             "recording_started_at": agent.get("_recording_started_iso"),
         }
         # Finalize the recording (if any) BEFORE insert so its path/size land

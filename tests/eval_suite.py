@@ -303,6 +303,11 @@ def s_admin():
     _ok("GET /api/admin/orgs → 200 list (subscription table)", st == 200 and isinstance(orgs, list))
     st, sh, _ = GET("/api/admin/storage-health")
     _ok("super-admin GET /api/admin/storage-health → 200", st == 200)
+    # Build 379 — engine-aware LLM ledger: by_engine segments Standard vs Pro.
+    st, llm, _ = GET("/api/admin/analytics/llm?days=30")
+    _ok("LLM ledger → 200 with by_engine breakdown",
+        st == 200 and isinstance(llm, dict) and isinstance(llm.get("by_engine"), list),
+        f"{st} keys={list(llm.keys()) if isinstance(llm, dict) else llm}")
     # admin plan override round-trips (snapshot slug, set starter, restore)
     if isinstance(orgs, list) and orgs:
         oid = orgs[0].get("id")

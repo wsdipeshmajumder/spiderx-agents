@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 378;
+const SXAI_BUILD = 380;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -9776,6 +9776,7 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
                 </button>`;
             })}
           </div>
+          <p class="db-form-help vs-tier-note">Both are included on your plan at no extra cost — billing stays per minute either way. Pick the voice your callers will love.</p>
         </div>
         ${draft.voice_tweaks.voice_provider === "fish" ? html`
           <div class="vs-fish">
@@ -12109,7 +12110,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   // picks up the new appearance/behaviour. Also lets the operator restart it.
   const [previewKey, setPreviewKey] = useState(0);
   // Settings | Conversations tabs (Build 290).
-  const [chatTab, setChatTab] = useState("settings");
+  const [chatTab, setChatTab] = useState("home");
   // Chat conversation logs live here (separate from voice/phone Call logs).
   const [chatLogs, setChatLogs] = useState(null);
   // Date-range filter (YYYY-MM-DD, inclusive) — drives the list AND the export.
@@ -12165,7 +12166,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   const [liveChats, setLiveChats] = useState([]);
   const [liveSid, setLiveSid] = useState(null);
   useEffect(() => {
-    if (!hasChat || chatTab !== "conversations") return;
+    if (!hasChat || (chatTab !== "conversations" && chatTab !== "home")) return;
     let stop = false;
     const tick = () => {
       fetch(`/api/agents/${agent.id}/chat/live`).then((r) => r.json())
@@ -12670,10 +12671,113 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
     </div>
   `;
 
+  // ── Home tab — high-level overview; a welcome/getting-started screen until
+  // the chat has been set up or used (build 369). ────────────────────────────
+  const chatName = (chatCfg.display_name || "").trim() || agent.name;
+  const _logs = Array.isArray(chatLogs) ? chatLogs : [];
+  const chatConfigured = _logs.length > 0
+    || !!(chatCfg.welcome_message || "").trim()
+    || !!(chatCfg.instructions || "").trim();
+  const _pos = _logs.filter((c) => (c.extracted && c.extracted.csat) === "up").length;
+  const _handoffs = _logs.filter((c) => (c.extracted && c.extracted.handoff_requested) || c.outcome === "transferred_human").length;
+  const _rated = _logs.filter((c) => c.extracted && c.extracted.csat).length;
+  const homePanel = hasChat ? html`
+    <section class="db-panel chathome">
+      ${!chatConfigured ? html`
+        <div class="chathome-welcome">
+          <div class="chathome-welcome-glyph" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+          </div>
+          <h2 class="chathome-welcome-title">Set up ${chatName}'s chat widget</h2>
+          <p class="chathome-welcome-sub">A text version of ${agent.name} for your website — same brain, knowledge and lead capture, no mic. Three quick steps and you're live.</p>
+          <div class="chathome-stepcards">
+            <button type="button" class="chathome-stepcard" onClick=${() => setChatTab("settings")}>
+              <span class="chathome-stepcard-n">1</span>
+              <span class="chathome-stepcard-t">Style it</span>
+              <span class="chathome-stepcard-d">Colours, logo, welcome message & starter questions</span>
+            </button>
+            <button type="button" class="chathome-stepcard" onClick=${() => setChatTab("knowledge")}>
+              <span class="chathome-stepcard-n">2</span>
+              <span class="chathome-stepcard-t">Write its system prompt</span>
+              <span class="chathome-stepcard-d">What to do & how to sound — auto-drafted for you</span>
+            </button>
+            <button type="button" class="chathome-stepcard" onClick=${() => setChatTab("golive")}>
+              <span class="chathome-stepcard-n">3</span>
+              <span class="chathome-stepcard-t">Go live</span>
+              <span class="chathome-stepcard-d">Paste one line on your site — no coding</span>
+            </button>
+          </div>
+          <button type="button" class="db-btn-primary" onClick=${() => setChatTab("settings")}>Get started →</button>
+        </div>
+      ` : html`
+        <div class="db-panel-head">
+          <div>
+            <h3 class="db-panel-title">Chat overview</h3>
+            <p class="db-panel-sub">How ${chatName} is doing on the web — last 30 days.</p>
+          </div>
+          <button class="db-btn-primary db-btn-sm" onClick=${() => setChatTab("golive")}>Go live →</button>
+        </div>
+        <div class="chathome-stats">
+          <div class="chathome-stat"><span class="chathome-stat-v">${_logs.length}</span><span class="chathome-stat-k">Conversations</span></div>
+          <div class="chathome-stat"><span class="chathome-stat-v">${liveChats.length}</span><span class="chathome-stat-k">Live now</span></div>
+          <div class="chathome-stat"><span class="chathome-stat-v">${_rated ? Math.round((_pos / _rated) * 100) + "%" : "—"}</span><span class="chathome-stat-k">Positive rating</span></div>
+          <div class="chathome-stat"><span class="chathome-stat-v">${_handoffs}</span><span class="chathome-stat-k">Human handoffs</span></div>
+        </div>
+        <div class="chathome-quick">
+          <button type="button" class="chathome-quicklink" onClick=${() => setChatTab("settings")}>Appearance & behaviour →</button>
+          <button type="button" class="chathome-quicklink" onClick=${() => setChatTab("knowledge")}>System prompt →</button>
+          <button type="button" class="chathome-quicklink" onClick=${() => setChatTab("conversations")}>Read conversations →</button>
+        </div>
+      `}
+    </section>
+  ` : "";
+
+  // ── Go-live tab — layman-friendly "embed it in 3 steps" flow (build 369). ──
+  const goLivePanel = hasChat ? html`
+    <section class="db-panel chatgolive">
+      <div class="db-panel-head">
+        <div>
+          <h3 class="db-panel-title">Take ${chatName} live</h3>
+          <p class="db-panel-sub">Three steps, no coding needed — copy one line and paste it on your site.</p>
+        </div>
+      </div>
+      <ol class="chatgolive-steps">
+        <li class="chatgolive-step">
+          <div class="chatgolive-num">1</div>
+          <div class="chatgolive-body">
+            <h4>Copy your chat code</h4>
+            <p>This single line loads ${chatName} on any page of your website.</p>
+            <div class="db-embed-snippet"><code>${chatSnippet}</code></div>
+            <button type="button" class=${"db-btn-primary db-btn-sm " + (chatCopied ? "is-copied" : "")} onClick=${copyChatSnippet}>
+              ${chatCopied ? "✓ Copied" : "Copy code"}
+            </button>
+          </div>
+        </li>
+        <li class="chatgolive-step">
+          <div class="chatgolive-num">2</div>
+          <div class="chatgolive-body">
+            <h4>Paste it on your website</h4>
+            <p>Paste it just before the closing <code>${"</body>"}</code> tag — or drop it into your site builder's "custom code / footer" box (Shopify, Wix, WordPress, Webflow, Squarespace…). It shows on every page you add it to.</p>
+          </div>
+        </li>
+        <li class="chatgolive-step">
+          <div class="chatgolive-num">3</div>
+          <div class="chatgolive-body">
+            <h4>That's it — you're live</h4>
+            <p>Refresh your site and the chat bubble appears in the bottom-right corner for every visitor. Try it yourself first:</p>
+            <a class="db-btn-ghost db-btn-sm" href=${`/embed/${agent.slug || agent.id}?channel=chat`} target="_blank" rel="noopener">Open a live preview →</a>
+          </div>
+        </li>
+      </ol>
+    </section>
+  ` : "";
+
   const chatTabs = hasChat ? html`
     <div class="db-tabs chatpage-tabs">
+      <button class=${"db-tab" + (chatTab === "home" ? " is-active" : "")} onClick=${() => setChatTab("home")}>Home</button>
       <button class=${"db-tab" + (chatTab === "settings" ? " is-active" : "")} onClick=${() => setChatTab("settings")}>Settings</button>
       <button class=${"db-tab" + (chatTab === "knowledge" ? " is-active" : "")} onClick=${() => setChatTab("knowledge")}>System prompt</button>
+      <button class=${"db-tab" + (chatTab === "golive" ? " is-active" : "")} onClick=${() => setChatTab("golive")}>Go live</button>
       <button class=${"db-tab" + (chatTab === "conversations" ? " is-active" : "")} onClick=${() => setChatTab("conversations")}>
         Conversations${liveChats.length > 0 ? html` <span class="db-pill-live">🟢 ${liveChats.length}</span>` : ""}
       </button>
@@ -12826,6 +12930,8 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
       <div class="golive-focus golive-focus-wide">
         ${chatTabs}
         ${!hasChat ? chatPanel
+          : chatTab === "home" ? homePanel
+          : chatTab === "golive" ? goLivePanel
           : chatTab === "conversations" ? conversationsPanel
           : chatTab === "knowledge" ? knowledgePanel
           : chatPanel}
@@ -16542,6 +16648,50 @@ function AdminLlmLedger() {
                   </td>
                   <td>${(Number(k.cost_paise || 0)/100).toFixed(2)}</td>
                   <td class="db-muted">${kcpm == null ? "—" : kcpm.toFixed(4)}</td>
+                </tr>
+              `;
+            })}
+          </tbody>
+        </table>
+      `}
+    </section>
+
+    <section class="db-card db-admin-by-org">
+      <header class="db-card-head">
+        <h2>By voice tier</h2>
+        <${InfoDot} position="bottom">
+          Agent-call spend split by the voice engine chosen at call time.
+          <strong>Pro</strong> and <strong>Standard</strong> both run the same
+          Gemini compute (Pro swaps only the outbound voice for Fish, which is on
+          the free tier), so cost/min is expected to match today. <strong>Legacy</strong>
+          = calls before engine stamping (build 379) + web-voice test calls.
+        </${InfoDot}>
+      </header>
+      ${(data.by_engine || []).length === 0 ? html`
+        <p class="db-muted db-pad">No agent calls in the last ${days} days.</p>
+      ` : html`
+        <table class="db-table">
+          <thead>
+            <tr>
+              <th>Voice tier</th>
+              <th>Sessions</th>
+              <th>Minutes</th>
+              <th>Cost (₹)</th>
+              <th>Cost / min (₹)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${data.by_engine.map((e) => {
+              const label = e.voice_provider === "fish" ? "Pro"
+                          : e.voice_provider === "gemini" ? "Standard" : "Legacy";
+              const ecpm = e.cost_per_minute_paise == null ? null : Number(e.cost_per_minute_paise) / 100;
+              return html`
+                <tr key=${e.voice_provider}>
+                  <td><span class=${"db-role-tag db-tier-" + (e.voice_provider || "unknown")}>${label}</span></td>
+                  <td>${e.sessions}</td>
+                  <td>${Math.round(Number(e.minutes || 0))}</td>
+                  <td>${(Number(e.cost_paise || 0)/100).toFixed(2)}</td>
+                  <td class="db-muted">${ecpm == null ? "—" : ecpm.toFixed(4)}</td>
                 </tr>
               `;
             })}

@@ -11157,10 +11157,17 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
 .db-llm-kind-builder { background: rgba(59,130,246,0.16);  color: #2563eb; }
 .db-llm-kind-agent   { background: rgba(167,139,250,0.18); color: #7c3aed; }
 .db-llm-kind-tts     { background: rgba(244,114,182,0.18); color: #be185d; }
+/* Voice-tier tags in the LLM ledger (build 379): Pro / Standard / Legacy. */
+.db-tier-fish    { background: rgba(124,58,237,0.16);  color: #6d28d9; }
+.db-tier-gemini  { background: rgba(59,130,246,0.16);  color: #2563eb; }
+.db-tier-unknown { background: rgba(107,114,128,0.16); color: #4b5563; }
 .db-admin-tile-cpm .db-admin-tile-value { color: #2563eb; }
 :root[data-theme="dark"] .db-llm-kind-builder { background: rgba(59,130,246,0.22);  color: #93c5fd; }
 :root[data-theme="dark"] .db-llm-kind-agent   { background: rgba(167,139,250,0.20); color: #c4b5fd; }
 :root[data-theme="dark"] .db-llm-kind-tts     { background: rgba(244,114,182,0.20); color: #f9a8d4; }
+:root[data-theme="dark"] .db-tier-fish    { background: rgba(124,58,237,0.24);  color: #c4b5fd; }
+:root[data-theme="dark"] .db-tier-gemini  { background: rgba(59,130,246,0.22);  color: #93c5fd; }
+:root[data-theme="dark"] .db-tier-unknown { background: rgba(107,114,128,0.22); color: #cbd5e1; }
 
 /* ─── Phase 8: Core purpose box + call-log quality columns ─── */
 
@@ -11994,6 +12001,45 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
 /* Left-aligned chat tabs (Settings / System prompt / Conversations) — natural
    width, packed to the left instead of stretched equal-width (build 364). */
 .chatpage-tabs .db-tab { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; }
+/* ── Chat Home tab (build 369) ─────────────────────────────────────────────── */
+.chathome-welcome { text-align: center; max-width: 640px; margin: 0 auto; padding: 24px 16px 32px; }
+.chathome-welcome-glyph { width: 60px; height: 60px; border-radius: 16px; margin: 0 auto 16px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-1, #f1f2f7); color: var(--chat-accent, #7c3aed); }
+.chathome-welcome-title { font-size: 22px; font-weight: 700; color: var(--fg, #1a1c25); margin: 0 0 8px; }
+.chathome-welcome-sub { font-size: 14px; color: var(--fg-mute, #6b7080); line-height: 1.55; margin: 0 auto 22px; max-width: 520px; }
+.chathome-stepcards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 0 0 22px; text-align: left; }
+@media (max-width: 720px) { .chathome-stepcards { grid-template-columns: 1fr; } }
+.chathome-stepcard { display: flex; flex-direction: column; gap: 4px; padding: 16px; cursor: pointer;
+  border: 1px solid var(--border, #e6e8ef); border-radius: 14px; background: var(--bg-0, #fff);
+  font: inherit; transition: border-color .12s, transform .12s, box-shadow .12s; }
+.chathome-stepcard:hover { border-color: var(--chat-accent, #7c3aed); transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,0,0,0.06); }
+.chathome-stepcard-n { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: var(--chat-accent, #7c3aed); color: #fff; font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+.chathome-stepcard-t { font-size: 14px; font-weight: 700; color: var(--fg, #1a1c25); }
+.chathome-stepcard-d { font-size: 12.5px; color: var(--fg-mute, #6b7080); line-height: 1.4; }
+.chathome-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 4px 0 18px; }
+@media (max-width: 720px) { .chathome-stats { grid-template-columns: repeat(2, 1fr); } }
+.chathome-stat { display: flex; flex-direction: column; gap: 3px; padding: 16px; border-radius: 14px;
+  border: 1px solid var(--border, #e6e8ef); background: var(--bg-1, #f6f7fb); }
+.chathome-stat-v { font-size: 24px; font-weight: 800; color: var(--fg, #1a1c25); line-height: 1; }
+.chathome-stat-k { font-size: 12px; font-weight: 600; color: var(--fg-mute, #6b7080); text-transform: uppercase; letter-spacing: 0.02em; }
+.chathome-quick { display: flex; flex-wrap: wrap; gap: 10px; }
+.chathome-quicklink { border: 1px solid var(--border, #e6e8ef); background: var(--bg-0, #fff); border-radius: 999px;
+  padding: 8px 15px; font: inherit; font-size: 13px; font-weight: 600; color: var(--chat-accent, #4f46e5); cursor: pointer;
+  transition: background .12s, border-color .12s; }
+.chathome-quicklink:hover { background: var(--bg-1, #eef0f6); border-color: var(--chat-accent, #4f46e5); }
+:root[data-theme="dark"] .chathome-stepcard, :root[data-theme="dark"] .chathome-quicklink { background: #161a2b; border-color: #2a2e44; }
+:root[data-theme="dark"] .chathome-stat { background: #161a2b; border-color: #2a2e44; }
+/* ── Chat Go-live tab (build 369) ─────────────────────────────────────────── */
+.chatgolive-steps { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 18px; }
+.chatgolive-step { display: flex; gap: 14px; align-items: flex-start; }
+.chatgolive-num { flex: none; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: var(--chat-accent, #7c3aed); color: #fff; font-size: 15px; font-weight: 700; }
+.chatgolive-body { flex: 1; min-width: 0; }
+.chatgolive-body h4 { font-size: 15px; font-weight: 700; color: var(--fg, #1a1c25); margin: 3px 0 4px; }
+.chatgolive-body p { font-size: 13.5px; color: var(--fg-mute, #6b7080); line-height: 1.55; margin: 0 0 10px; }
+.chatgolive-body code { background: var(--bg-1, #f1f2f7); padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
 .golive-tabs {
   display: inline-flex; gap: 4px;
   padding: 4px; margin: 0 auto 18px;
@@ -13933,6 +13979,7 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
   color: var(--db-accent, #4f46e5);
 }
 .vs-tier-desc { font-size: 12.5px; line-height: 1.5; color: var(--fg-mute, #6b7080); }
+.vs-tier-note { margin: 10px 0 0; }
 :root[data-theme="dark"] .vs-tier { background: #161a26; border-color: #2a2e44; }
 :root[data-theme="dark"] .vs-tier-name { color: #eef1f8; }
 .vs-fish { border: 1px solid var(--border, #e6e8ef); border-radius: 12px; padding: 12px 14px; margin-bottom: 16px; background: var(--bg-1, #f7f8fa); }

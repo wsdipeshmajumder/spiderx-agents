@@ -401,6 +401,26 @@ class TestBuildLockstep(unittest.TestCase):
 # ─── 6. import sanity (catches import-time breakage before deploy) ───────
 
 
+class TestVoiceProviderMigration(unittest.TestCase):
+    """Guard the engine-aware ledger migration (build 379) stays well-formed."""
+
+    def _mig(self):
+        return (REPO / "backend/alembic/versions/0034_voice_provider.py").read_text()
+
+    def test_chained_on_prev_head(self):
+        self.assertIn('down_revision = "0033_caller_number"', self._mig())
+
+    def test_stamps_engine_on_calls_and_ledger(self):
+        m = self._mig()
+        self.assertIn("ALTER TABLE calls ADD COLUMN IF NOT EXISTS voice_provider", m)
+        self.assertIn("ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS voice_provider", m)
+
+    def test_seeds_zero_fish_pricing_dimension(self):
+        m = self._mig()
+        self.assertIn("'fish'", m)
+        self.assertIn("tts.pro.voice", m)  # ₹0 dimension, rolled forward later
+
+
 class TestImportSanity(unittest.TestCase):
     def setUp(self):
         _ensure_loop()   # backend.settings builds an asyncio.Lock() at import time

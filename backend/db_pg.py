@@ -690,6 +690,10 @@ async def insert_call(record: dict[str, Any]) -> int:
     model_id = record.get("model_id")
     explicit_cost = record.get("cost_paise")
     cost = explicit_cost if explicit_cost is not None else pricing.cost_paise(model_id, in_tok, out_tok)
+    # Point-in-time voice engine ("fish" = Pro, "gemini" = Standard, None =
+    # legacy/web-voice). Stamped so the LLM ledger can segment Pro vs Standard
+    # spend — cost itself is engine-independent (metered off model_id + tokens).
+    voice_provider = record.get("voice_provider") or None
     duration_s = float(record.get("duration_s") or 0)
     minutes = duration_s / 60.0
     outcome_key = record.get("outcome") or "unknown"
@@ -738,7 +742,7 @@ async def insert_call(record: dict[str, Any]) -> int:
                     sentiment, lead_quality, lead_signals,
                     recording_path, recording_format, recording_size_bytes,
                     recording_started_at, recording_expires_at, channel, visitor_key,
-                    caller_number
+                    caller_number, voice_provider
                 ) VALUES (
                     $1, $2, COALESCE($3, now()), COALESCE($4, now()), $5,
                     $6, $7, $8, $9,
@@ -747,7 +751,7 @@ async def insert_call(record: dict[str, Any]) -> int:
                     $17, $18, $19,
                     $20, $21, $22,
                     $23, $24, $25, $26,
-                    $27
+                    $27, $28
                 ) RETURNING id
                 """,
                 int(record["agent_id"]),
@@ -776,6 +780,7 @@ async def insert_call(record: dict[str, Any]) -> int:
                 record.get("channel"),
                 record.get("visitor_key") or visitor_key_from_extracted(record.get("extracted")),
                 record.get("caller_number"),
+                voice_provider,
             )
             # Phase 9b denormalisation — keep agents.last_call_at + calls_count
             # in lockstep with the calls table. `list_agents` reads these
@@ -803,11 +808,13 @@ async def insert_call(record: dict[str, Any]) -> int:
                 INSERT INTO llm_calls (
                     kind, user_id, org_id, agent_id, call_id,
                     started_at, ended_at, duration_s,
-                    input_tokens, output_tokens, cached_tokens, model_id, cost_paise
+                    input_tokens, output_tokens, cached_tokens, model_id, cost_paise,
+                    voice_provider
                 ) VALUES (
                     'agent', $1, $2, $3, $4,
                     COALESCE($5, now()), COALESCE($6, now()), $7,
-                    COALESCE($8,0), COALESCE($9,0), COALESCE($10,0), $11, $12
+                    COALESCE($8,0), COALESCE($9,0), COALESCE($10,0), $11, $12,
+                    $13
                 )
                 """,
                 user_id, org_id, int(record["agent_id"]), cid,
@@ -816,6 +823,7 @@ async def insert_call(record: dict[str, Any]) -> int:
                 duration_s,
                 in_tok, out_tok, record.get("cached_tokens"),
                 model_id, cost,
+                voice_provider,
             )
             if not is_chat:
                 # agent_daily_stats — ON CONFLICT do atomic increment. Outcomes
@@ -1995,10 +2003,32 @@ async def llm_analytics_platform(
             """,
             *params,
         )
+        # Build 379 — segment agent-call spend by voice engine (Pro vs Standard).
+        # Only kind='agent' rows carry an engine; 'fish'→Pro, 'gemini'→Standard,
+        # NULL→legacy/unknown (pre-379 + web-voice test calls).
+        by_engine = await conn.fetch(
+            f"""
+            SELECT COALESCE(voice_provider, 'unknown')  AS voice_provider,
+                   COUNT(*)                             AS sessions,
+                   COALESCE(SUM(duration_s)/60.0, 0)    AS minutes,
+                   COALESCE(SUM(cost_paise), 0)         AS cost_paise,
+                   CASE WHEN COALESCE(SUM(duration_s),0) > 0
+                        THEN (COALESCE(SUM(cost_paise),0)::numeric * 60.0)
+                             / SUM(duration_s)
+                        ELSE NULL END                   AS cost_per_minute_paise
+              FROM llm_calls
+             WHERE {where_sql}
+               AND kind = 'agent'
+             GROUP BY COALESCE(voice_provider, 'unknown')
+             ORDER BY cost_paise DESC
+            """,
+            *params,
+        )
     return {
         "range_days": int(days),
         "totals": dict(totals) if totals else {},
         "by_kind": _records_to_list(by_kind),
+        "by_engine": _records_to_list(by_engine),
     }
 
 

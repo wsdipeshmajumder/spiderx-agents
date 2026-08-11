@@ -5,7 +5,27 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 378**
+**Last updated: build 379**
+
+**Build 379 (Engine-aware cost ledger — Standard vs Pro):** the super-admin LLM
+ledger can now segment spend by voice engine, and the user picker states both
+tiers are included at no extra cost (per the product decision: Pro is a free
+quality upgrade). Migration `0034_voice_provider` adds a point-in-time
+`voice_provider` stamp to `calls` + `llm_calls` (was only in mutable
+`agents.voice_tweaks`, unrecoverable after the fact) and seeds a **₹0 Fish
+`tts.pro.voice` pricing dimension** (free `s2.1-pro-free` tier; a real rate rolls
+forward via the audited Pricing tab when the free window ends 2026-08-31 —
+detect-only, historical `cost_paise` never re-priced). Threaded through
+`_persist_call` + the `end_call` connector → `insert_call` (both the `calls` and
+`llm_calls` writes). `llm_analytics_platform` gains a `by_engine` breakdown
+(kind='agent', grouped by provider; fish→Pro, gemini→Standard, NULL→Legacy);
+super-admin `AdminLlmLedger` renders a "By voice tier" table. Cost stays
+engine-independent (metered off `model_id`+tokens); Pro's full Gemini compute was
+already counted, so this only *labels* it. **Verdict: PASS** — migration applied
+locally; verified `voice_provider` on both tables, Fish ₹0 row seeded, and
+`by_engine` segments distinct Pro/Standard/Legacy buckets (ephemeral rows,
+cleaned up). Evidence: **Behavioral** (live DB query) + **Code**. No historical
+re-pricing; no user-facing price delta (both included).
 
 **Build 378 (Voice engine UI → provider-agnostic Standard / Pro tiers):** the
 Voice & behaviour engine picker no longer names the underlying providers. The
