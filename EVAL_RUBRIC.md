@@ -5,7 +5,34 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 386**
+**Last updated: build 387**
+
+**Build 387 (Label preview-link visits "Test" vs real embed.js traffic
+"Real"):** tester ask: "when u see visits are from the preview link, show
+them as test, when visitors come from embed widget, show them as real
+traffic, use diff label." The 4 operator self-test surfaces (embed-flyout
+"Open preview", Go-live's "Open a live preview", the Go-Live page's FAB-mock
+iframe + "Open standalone") now append `?is_test=1` to the `/embed/<slug>`
+URL. `AgentChatEmbed` reads it and forwards `&is_test=1` on the chat WS;
+`run_agent_chat_session` stamps `extracted._is_test=true` (added to both
+`chat_report.py` and `app.js`'s meta-key exclusion lists so it doesn't leak
+as a fake "captured field"). `_LiveChat` gained an `is_test` slot (threaded
+through `live_chats_for_agent` and the `chat_observe` "hello" frame) so the
+label is live, not just post-hoc. Real embed.js visits are untouched — no
+flag, and `_chat_provenance`'s existing `source`/host tracking already
+distinguishes them by construction (embed.js sets `?host=<page domain>` on
+the iframe; these operator links never do). Labelled in 5 places: Home's +
+Conversations' live-visitor list rows, `LiveChatModal`'s header (both
+live-watch entry points), the historical Conversations list rows, and the
+chat-detail provenance chips (🧪 amber "Test" / 🌎 green "Real"). **Verdict:
+PASS** — browser-verified with two simultaneous live sessions on `rohan`:
+one opened via `/embed/rohan?channel=chat&is_test=1` (the real "Open a live
+preview" link's URL shape), one via a raw WS mimicking embed.js (no
+`is_test`). Confirmed correct labelling live (both live-list locations +
+the watch modal header) and post-hoc (Conversations list row + detail
+chip) — test visit tagged everywhere, real visit untagged/labelled 🌎 Real
+everywhere. Evidence: **Behavioral** (two concurrent live sessions,
+compared side by side) + **Code**.
 
 **Build 386 (Live now moves to Home's right pane; clicking opens it in
 Conversations):** tester follow-up: "the live now need not be in the left,

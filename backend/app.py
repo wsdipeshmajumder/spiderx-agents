@@ -132,7 +132,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 386
+APP_BUILD = 387
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -2938,6 +2938,7 @@ async def ws_session(ws: WebSocket) -> None:
                     send_kickoff=(qp.get("kickoff") != "0"),
                     preview=(qp.get("preview") == "1"),
                     resume=(qp.get("resume") == "1"),
+                    is_test=(qp.get("is_test") == "1"),
                 )
         elif text_only:
             from . import chat_bridge

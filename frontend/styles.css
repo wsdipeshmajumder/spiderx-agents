@@ -1500,6 +1500,11 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   background: var(--bg-1, #f1f2f7); color: var(--fg-mute, #5b6070);
   border: 1px solid var(--border, #e6e8ef); white-space: nowrap; }
 :root[data-theme="dark"] .chatdrawer-provchip { background: #1b1f33; color: #b4b9c7; border-color: #2a2e44; }
+/* Test (operator preview/standalone link) vs Real (embed.js widget) visit label. */
+.chatdrawer-provchip-test { background: rgba(217,119,6,0.12); color: #b45309; border-color: rgba(217,119,6,0.28); }
+.chatdrawer-provchip-real { background: rgba(5,150,105,0.12); color: #047857; border-color: rgba(5,150,105,0.28); }
+:root[data-theme="dark"] .chatdrawer-provchip-test { background: rgba(217,119,6,0.18); color: #fbbf24; border-color: rgba(217,119,6,0.3); }
+:root[data-theme="dark"] .chatdrawer-provchip-real { background: rgba(5,150,105,0.18); color: #34d399; border-color: rgba(5,150,105,0.3); }
 .chatdrawer-csat { padding: 9px 12px; border-radius: 10px; font-size: 13px; font-weight: 600; margin-bottom: 12px;
   display: flex; flex-direction: column; gap: 2px; }
 .chatdrawer-csat-up { background: rgba(16,185,129,0.10); color: #047857; }

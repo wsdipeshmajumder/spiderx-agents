@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 386;
+const SXAI_BUILD = 387;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -1758,7 +1758,12 @@ function AgentChatEmbed({ slug, contained, override }) {
     const host = (() => { try { return new URLSearchParams(location.search).get("host") || ""; } catch { return ""; } })();
     const hostQ = host ? `&host=${encodeURIComponent(host)}` : "";
     const previewQ = contained ? "&preview=1" : "";   // operator preview — don't log it
-    const ws = new WebSocket(`${proto}://${location.host}/ws/session?mode=chat&agent_id=${agent.id}&sid=${sid}&locale=${encodeURIComponent(locale)}${kickoff}${resumeQ}${hostQ}${previewQ}`);
+    // Opened via one of our own "Open preview / standalone" links (?is_test=1),
+    // not through embed.js on a real customer site — still logged (unlike the
+    // in-dashboard preview above), just tagged so it doesn't look like a real lead.
+    const isTest = (() => { try { return new URLSearchParams(location.search).get("is_test") === "1"; } catch { return false; } })();
+    const testQ = isTest ? "&is_test=1" : "";
+    const ws = new WebSocket(`${proto}://${location.host}/ws/session?mode=chat&agent_id=${agent.id}&sid=${sid}&locale=${encodeURIComponent(locale)}${kickoff}${resumeQ}${hostQ}${previewQ}${testQ}`);
     wsRef.current = ws;
     if (restored) {
       ws.onopen = () => {
@@ -11883,7 +11888,7 @@ function chatDetailBody(loading, data, agent) {
   if (!data) return "";
   const ex = (data.extracted && typeof data.extracted === "object") ? data.extracted : {};
   const csat = ex.csat;
-  const META = ["csat", "csat_comment", "handoff_requested", "handoff_reason", "_provenance"];
+  const META = ["csat", "csat_comment", "handoff_requested", "handoff_reason", "_provenance", "_is_test"];
   const fields = Object.entries(ex).filter(([k]) => !META.includes(k));
   // Visitor provenance — where they came from (device / browser / OS / source).
   const prov = (ex._provenance && typeof ex._provenance === "object") ? ex._provenance : null;
@@ -11891,6 +11896,10 @@ function chatDetailBody(loading, data, agent) {
   return html`
     ${prov ? html`
       <div class="chatdrawer-prov">
+        <span class=${"chatdrawer-provchip" + (ex._is_test ? " chatdrawer-provchip-test" : " chatdrawer-provchip-real")}
+              title=${ex._is_test ? "Opened via a preview/standalone link, not the live embed widget" : "Came through the real embed.js widget on a website"}>
+          ${ex._is_test ? "🧪 Test" : "🌎 Real"}
+        </span>
         ${prov.device ? html`<span class="chatdrawer-provchip">${devIcon[prov.device] || "💻"} ${prov.device}</span>` : ""}
         ${prov.browser ? html`<span class="chatdrawer-provchip">🌐 ${prov.browser}</span>` : ""}
         ${prov.os ? html`<span class="chatdrawer-provchip">${prov.os}</span>` : ""}
@@ -11962,6 +11971,7 @@ function LiveChatModal({ agent, sid, onClose, inline }) {
   const [joined, setJoined] = useState(false);
   const [input, setInput] = useState("");
   const [agentName, setAgentName] = useState(agent?.name || "AI");
+  const [isTest, setIsTest] = useState(false);
   const wsRef = useRef(null);
   const logRef = useRef(null);
 
@@ -11982,6 +11992,7 @@ function LiveChatModal({ agent, sid, onClose, inline }) {
         setStatus("live");
         if (m.agent_name) setAgentName(m.agent_name);
         setJoined(!!m.human_control);
+        setIsTest(!!m.is_test);
         setMsgs((m.transcript || []).map((t) => ({ role: t.role, text: t.text })));
       } else if (m.type === "msg") {
         setMsgs((p) => [...p, { role: m.role, text: m.text }]);
@@ -12009,7 +12020,8 @@ function LiveChatModal({ agent, sid, onClose, inline }) {
   const live = status === "live";
   const inner = html`
         <header class="db-modal-head livechat-head">
-          <h2>Live chat ${live ? html`<span class=${"db-pill-soft " + (joined ? "livechat-pill-join" : "")}>${joined ? "you're in control" : "watching"}</span>` : ""}</h2>
+          <h2>Live chat ${live ? html`<span class=${"db-pill-soft " + (joined ? "livechat-pill-join" : "")}>${joined ? "you're in control" : "watching"}</span>` : ""}
+            ${isTest ? html`<span class="chatdrawer-provchip chatdrawer-provchip-test">🧪 Test</span>` : ""}</h2>
           <button class="db-modal-close" onClick=${onClose} aria-label=${inline ? "Close live chat" : "Close"}>×</button>
         </header>
         <div class="livechat-log" ref=${logRef}>
@@ -12585,6 +12597,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
             <li key=${lc.sid} class=${"call-row livechat-live-row" + (liveSid === lc.sid ? " is-selected" : "")} onClick=${() => { setLiveSid(lc.sid); setDetailId(null); }}>
               <div class="call-row-head">
                 <span class="call-channel call-channel-web_chat">💬 Live</span>
+                ${lc.is_test ? html`<span class="chatdrawer-provchip chatdrawer-provchip-test">🧪 Test</span>` : ""}
                 ${lc.human_control ? html`<span class="db-pill-soft livechat-pill-join">${lc.operator_name || "human"} in control</span>` : ""}
                 <span class="call-time">started ${fmtTime(lc.started_at)}</span>
                 <span class="call-dur">${lc.turns} turns</span>
@@ -12629,6 +12642,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
                 <div class="call-row-head">
                   <span class=${"call-outcome call-outcome-" + (c.outcome || "unknown")}>${(c.outcome || "unknown").replace(/_/g, " ")}</span>
                   <span class="call-channel call-channel-web_chat">💬 Chat</span>
+                  ${c.extracted?._is_test ? html`<span class="chatdrawer-provchip chatdrawer-provchip-test">🧪 Test</span>` : ""}
                   <span class="call-time">${fmtTime(c.started_at)}</span>
                   ${c.duration_s ? html`<span class="call-dur">${Math.round(c.duration_s)}s</span>` : ""}
                 </div>
@@ -12673,7 +12687,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
             ? html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg><span>Copied!</span>`
             : html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy snippet</span>`}
         </button>
-        <a class="db-btn-ghost db-btn-sm" href=${`/embed/${agent.slug || agent.id}?channel=chat`} target="_blank" rel="noopener">Open preview →</a>
+        <a class="db-btn-ghost db-btn-sm" href=${`/embed/${agent.slug || agent.id}?channel=chat&is_test=1`} target="_blank" rel="noopener">Open preview →</a>
       </div>
     </div>
   `;
@@ -12751,6 +12765,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
               <li key=${lc.sid} class="call-row livechat-live-row" onClick=${() => { setLiveSid(lc.sid); setChatTab("conversations"); }}>
                 <div class="call-row-head">
                   <span class="call-channel call-channel-web_chat">💬 Live</span>
+                  ${lc.is_test ? html`<span class="chatdrawer-provchip chatdrawer-provchip-test">🧪 Test</span>` : ""}
                   ${lc.human_control ? html`<span class="db-pill-soft livechat-pill-join">${lc.operator_name || "human"} in control</span>` : ""}
                   <span class="call-time">started ${fmtTime(lc.started_at)}</span>
                   <span class="call-dur">${lc.turns} turns</span>
@@ -12804,7 +12819,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
           <div class="chatgolive-body">
             <h4>That's it — you're live</h4>
             <p>Refresh your site and the chat bubble appears in the bottom-right corner for every visitor. Try it yourself first:</p>
-            <a class="db-btn-ghost db-btn-sm" href=${`/embed/${agent.slug || agent.id}?channel=chat`} target="_blank" rel="noopener">Open a live preview →</a>
+            <a class="db-btn-ghost db-btn-sm" href=${`/embed/${agent.slug || agent.id}?channel=chat&is_test=1`} target="_blank" rel="noopener">Open a live preview →</a>
           </div>
         </li>
       </ol>
@@ -13613,7 +13628,7 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
             </button>
             <div class="sxai-tip">${fabLabel}</div>
             <div class=${"sxai-panel" + (embedOpen ? " open" : "")}>
-              <iframe class="sxai-frame" src=${`/embed/${agent.slug || agent.id}`} title=${`SpiderX.AI — ${fabLabel}`} allow="microphone; autoplay; clipboard-read; clipboard-write" loading="lazy" />
+              <iframe class="sxai-frame" src=${`/embed/${agent.slug || agent.id}?is_test=1`} title=${`SpiderX.AI — ${fabLabel}`} allow="microphone; autoplay; clipboard-read; clipboard-write" loading="lazy" />
               <button type="button" class="sxai-close" aria-label="Close" onClick=${() => setEmbedOpen(false)}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
               </button>
@@ -13683,7 +13698,7 @@ function AgentGoLivePage({ agent, agents, presets, plan, onNav, refreshAgent, or
         <button type="button" class=${"db-btn-primary " + (copied ? "is-copied" : "")} onClick=${copySnippet}>
           ${copied ? html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg><span>Copied!</span>` : html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy snippet</span>`}
         </button>
-        <a class="db-btn-ghost" href=${`/embed/${agent.slug || agent.id}`} target="_blank" rel="noopener">Open standalone →</a>
+        <a class="db-btn-ghost" href=${`/embed/${agent.slug || agent.id}?is_test=1`} target="_blank" rel="noopener">Open standalone →</a>
       </div>
     </section>
   `;

@@ -25,7 +25,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 # Fields inside `extracted` that are meta, not captured lead info.
-_META_KEYS = {"csat", "csat_comment", "handoff_requested", "handoff_reason", "_provenance"}
+_META_KEYS = {"csat", "csat_comment", "handoff_requested", "handoff_reason", "_provenance", "_is_test"}
 
 
 def _prov(ex: dict) -> dict:

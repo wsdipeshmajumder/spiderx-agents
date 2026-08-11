@@ -87,14 +87,15 @@ _CHAT_MIN_MSG_INTERVAL_S = 0.4    # drop messages arriving faster than this
 class _LiveChat:
     __slots__ = ("sid", "agent_id", "org_id", "agent_name", "started_at",
                  "transcript", "observers", "human_control", "operator_name",
-                 "inject", "last_visitor_text", "turns")
+                 "inject", "last_visitor_text", "turns", "is_test")
 
-    def __init__(self, sid, agent_id, org_id, agent_name, started_at):
+    def __init__(self, sid, agent_id, org_id, agent_name, started_at, is_test=False):
         self.sid = sid
         self.agent_id = agent_id
         self.org_id = org_id
         self.agent_name = agent_name
         self.started_at = started_at          # iso string
+        self.is_test = is_test                # operator self-test vs a real visitor
         self.transcript: list[dict[str, Any]] = []   # [{role, text}] mirror for late joiners
         self.observers: set[asyncio.Queue] = set()    # operator feed queues
         self.human_control = False            # operator took over → AI paused
@@ -138,6 +139,7 @@ def live_chats_for_agent(agent_id: int) -> list[dict[str, Any]]:
             "human_control": lc.human_control,
             "operator_name": lc.operator_name,
             "watchers": len(lc.observers),
+            "is_test": lc.is_test,
         })
     out.sort(key=lambda r: r["started_at"], reverse=True)
     return out
@@ -2355,6 +2357,7 @@ async def run_agent_chat_session(
     send_kickoff: bool = True,
     preview: bool = False,
     resume: bool = False,
+    is_test: bool = False,
 ) -> None:
     from datetime import datetime, timezone
     from . import connectors as _conn
@@ -2384,6 +2387,12 @@ async def run_agent_chat_session(
     _prov = _chat_provenance(ws, client_locale)
     if _prov:
         agent["_extracted_extra"]["_provenance"] = _prov
+    # Operator self-test (Open [a live] preview / Open standalone links, and the
+    # embed-flyout FAB mock) vs a real embed.js visitor on a customer's site —
+    # tagged so the Conversations list and live-watch view can label them
+    # distinctly instead of test traffic looking identical to real leads.
+    if is_test:
+        agent["_extracted_extra"]["_is_test"] = True
 
     connector_ids = agent.get("connectors") or []
     tool_ids = list(connector_ids) + (["end_call"] if "end_call" not in connector_ids else [])
@@ -2413,7 +2422,7 @@ async def run_agent_chat_session(
         try:
             live = _LiveChat(sid=sid, agent_id=agent_id, org_id=agent.get("org_id"),
                              agent_name=agent.get("name") or "Assistant",
-                             started_at=started_at.isoformat())
+                             started_at=started_at.isoformat(), is_test=is_test)
             _LIVE_CHATS[sid] = live
         except Exception:  # noqa: BLE001
             live = None
@@ -2940,7 +2949,7 @@ async def run_operator_observe(ws: WebSocket, sid: str, *, operator_name: str = 
     had_control = False
     await _send({"type": "hello", "sid": sid, "agent_name": live.agent_name,
                  "started_at": live.started_at, "human_control": live.human_control,
-                 "operator_name": live.operator_name,
+                 "operator_name": live.operator_name, "is_test": live.is_test,
                  "transcript": list(live.transcript)})
 
     def _take_control() -> None:
