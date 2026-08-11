@@ -5,7 +5,23 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 377**
+**Last updated: build 378**
+
+**Build 378 (Voice engine UI → provider-agnostic Standard / Pro tiers):** the
+Voice & behaviour engine picker no longer names the underlying providers. The
+`<select>` (Gemini / Fish) is replaced by two selectable cards — **Standard**
+(Real-time) and **Pro** (Most natural, Recommended, default) — each with a
+one-line "clear diff" so an operator can choose on merit without seeing vendor
+names. Sub-panel copy scrubbed ("Voice style" not "Fish voice"; fallback
+described as Standard, not Gemini); the preview's default line and its error
+message are now generic (raw backend detail → console only, never surfaced —
+it can name the engine). No behaviour change: the cards still write
+`voice_tweaks.voice_provider` = `"fish"`/`"gemini"`, so the build-377 live
+pipeline is untouched; only the presentation layer changed. New CSS
+`.vs-tiers`/`.vs-tier` (accent ring on active, radio affordance, dark theme,
+mobile 1-col). **Verdict: PASS** — offline suite green (build lockstep bumped to
+378 in all four files); provider strings absent from the rendered picker.
+Evidence: **Code** + **Behavioral** (dashboard render check).
 
 **Regression gate added (no build bump — tests/CI/docs only):** the evals now run
 themselves so regressions can't reach prod. New `tests/test_offline.py` — a

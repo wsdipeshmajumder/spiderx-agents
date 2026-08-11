@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 377;
+const SXAI_BUILD = 378;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -9653,14 +9653,17 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
     setFishError(null);
     setFishBusy(true);
     try {
-      const line = (draft.greeting || "").trim() || `Hi! This is a Fish Audio voice preview for ${agent.name}.`;
+      const line = (draft.greeting || "").trim() || `Hi! This is a voice preview for ${agent.name}.`;
       const r = await fetch("/api/tts/preview", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: line.slice(0, 300), reference_id: draft.voice_tweaks.fish_voice_id || "" }),
       });
       if (!r.ok) {
+        // Provider-agnostic message: never surface the raw backend detail (it
+        // can name the engine). Devs still see the real error in the console.
         const d = await r.json().catch(() => ({}));
-        throw new Error((d && d.detail) || `Preview failed (${r.status})`);
+        console.warn("voice preview failed:", r.status, d && d.detail);
+        throw new Error("Couldn't play a preview just now. Please try again.");
       }
       const url = URL.createObjectURL(await r.blob());
       if (!fishAudioRef.current) fishAudioRef.current = new Audio();
@@ -9744,24 +9747,42 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
            page: which language, which voice. The 8-card grid lives
            below as an optional "Explore all voices" expander. -->
       <section class="db-panel vs-panel">
-        <!-- Voice engine (build 377): Fish Audio (default) or Gemini native audio.
-             On live calls Gemini stays the brain (speech-to-text + reasoning +
-             tools) and Fish speaks the agent's words; a Fish hiccup falls back to
-             Gemini's own voice mid-call so a call is never dropped. -->
-        <label class="db-form-field vs-engine">
-          <span class="db-form-label">Voice engine</span>
-          <select class="db-input vs-select" value=${draft.voice_tweaks.voice_provider || "fish"}
-                  onChange=${(e) => { stopPreview(); setTweak("voice_provider", e.target.value); }}>
-            <option value="fish">Fish Audio — natural TTS voice (default)</option>
-            <option value="gemini">Gemini native audio — real-time</option>
-          </select>
-        </label>
+        <!-- Voice quality tier (build 378): Standard vs Pro. Provider-agnostic
+             labels by design — the UI never names the underlying engines. "Pro"
+             maps to voice_provider="fish" (premium TTS voice, the default),
+             "Standard" to "gemini" (real-time). The live pipeline reads those
+             values; only the presentation changes here. -->
+        <div class="db-form-field vs-engine">
+          <span class="db-form-label">Voice quality</span>
+          <div class="vs-tiers" role="radiogroup" aria-label="Voice quality">
+            ${[
+              { id: "gemini", name: "Standard", tag: "Real-time",
+                desc: "Fastest replies with the lowest latency — great for quick, snappy back-and-forth." },
+              { id: "fish", name: "Pro", tag: "Most natural", recommended: true,
+                desc: "Premium, human-sounding voice with selectable voice styles. Best for a polished brand feel." },
+            ].map((t) => {
+              const active = (draft.voice_tweaks.voice_provider || "fish") === t.id;
+              return html`
+                <button type="button" key=${t.id} role="radio" aria-checked=${active}
+                        class=${"vs-tier" + (active ? " is-active" : "")}
+                        onClick=${() => { stopPreview(); setTweak("voice_provider", t.id); }}>
+                  <span class="vs-tier-top">
+                    <span class="vs-tier-name">${t.name}</span>
+                    ${t.recommended ? html`<span class="vs-tier-badge">Recommended</span>` : ""}
+                    <span class="vs-tier-radio" aria-hidden="true"></span>
+                  </span>
+                  <span class="vs-tier-tag">${t.tag}</span>
+                  <span class="vs-tier-desc">${t.desc}</span>
+                </button>`;
+            })}
+          </div>
+        </div>
         ${draft.voice_tweaks.voice_provider === "fish" ? html`
           <div class="vs-fish">
-            <p class="db-form-help" style=${{ marginTop: 0 }}>Fish speaks on live calls — Gemini still handles listening, reasoning and tools. Pick a voice and preview it here. If Fish is ever unavailable mid-call, the agent automatically falls back to Gemini's voice.</p>
+            <p class="db-form-help" style=${{ marginTop: 0 }}>Choose a Pro voice style and preview it below. Listening and understanding always stay real-time; if a Pro voice is briefly unavailable on a call, it automatically falls back to the Standard voice — calls are never interrupted.</p>
             <div class="vs-twocol">
               <label class="db-form-field">
-                <span class="db-form-label">Fish voice</span>
+                <span class="db-form-label">Voice style</span>
                 <select class="db-input vs-select" value=${draft.voice_tweaks.fish_voice_id || ""}
                         onChange=${(e) => setTweak("fish_voice_id", e.target.value)}>
                   <option value="">Default voice</option>
