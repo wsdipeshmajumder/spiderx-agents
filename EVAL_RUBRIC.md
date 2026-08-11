@@ -5,7 +5,20 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 380**
+**Last updated: build 381**
+
+**Build 381 (Chat-panel tabs: equal width):** the 5 chat-widget tabs (Home /
+Settings / System prompt / Go live / Conversations) previously sized to their
+own label (`flex: 0 0 auto`, left-packed — a deliberate build-364 choice), which
+read as uneven since the labels are different lengths. Changed
+`.chatpage-tabs .db-tab` to `flex: 1 1 0` + centered content so all 5 tabs
+split the bar evenly, same balanced-control look regardless of label length.
+Scoped to `.chatpage-tabs` only — the shared `.db-tabs`/`.db-tab` primitive
+used by other tab bars elsewhere in the app is untouched. **Verdict: PASS** —
+browser-verified on `rohan` (org 1): all 5 tabs render equal-width across the
+full bar; clicking through (Home → Conversations) still switches panels
+correctly, including the tab whose label pairs with a live-count pill.
+Evidence: **Behavioral** (logged-in browser) + **Code**.
 
 **Build 380 (Chat panel: Home tab + layman Go-live tab):** the chat-widget
 panel (`AgentChatPage`) gains a **Home** tab (default) and a **Go live** tab,

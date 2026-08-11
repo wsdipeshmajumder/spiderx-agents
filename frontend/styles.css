@@ -11998,9 +11998,10 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
    two-pane preview. Stretch so the tabs span full width and both panes breathe. */
 .chatpage .golive-focus-wide { max-width: 1440px; align-items: stretch; }
 .chatpage .chatpage-tabs { align-self: stretch; }
-/* Left-aligned chat tabs (Settings / System prompt / Conversations) — natural
-   width, packed to the left instead of stretched equal-width (build 364). */
-.chatpage-tabs .db-tab { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; }
+/* Equal-width chat tabs (Home / Settings / System prompt / Go live /
+   Conversations) — each tab claims the same share of the bar instead of
+   sizing to its own label, so the row reads as one balanced control. */
+.chatpage-tabs .db-tab { flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 /* ── Chat Home tab (build 369) ─────────────────────────────────────────────── */
 .chathome-welcome { text-align: center; max-width: 640px; margin: 0 auto; padding: 24px 16px 32px; }
 .chathome-welcome-glyph { width: 60px; height: 60px; border-radius: 16px; margin: 0 auto 16px;
