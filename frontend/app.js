@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 388;
+const SXAI_BUILD = 389;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -11896,9 +11896,9 @@ function chatDetailBody(loading, data, agent) {
   return html`
     ${prov ? html`
       <div class="chatdrawer-prov">
-        <span class=${"chatdrawer-provchip" + (ex._is_test ? " chatdrawer-provchip-test" : " chatdrawer-provchip-real")}
-              title=${ex._is_test ? "Opened via a preview/standalone link, not the live embed widget" : "Came through the real embed.js widget on a website"}>
-          ${ex._is_test ? "🧪 Test" : "🌎 Real"}
+        <span class=${"chatdrawer-provchip" + (ex._is_test ? " chatdrawer-provchip-test" : " chatdrawer-provchip-widget")}
+              title=${ex._is_test ? "Opened via a preview/standalone link, not the live embed widget" : "Not tagged as an operator preview — presumed to be a visitor via the embed widget"}>
+          ${ex._is_test ? "🧪 Test" : "🧩 Widget"}
         </span>
         ${prov.device ? html`<span class="chatdrawer-provchip">${devIcon[prov.device] || "💻"} ${prov.device}</span>` : ""}
         ${prov.browser ? html`<span class="chatdrawer-provchip">🌐 ${prov.browser}</span>` : ""}
@@ -12160,7 +12160,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   // Test (operator preview/standalone links) vs Real (embed.js widget) traffic
   // filter for the Recent-chats list — client-side over the already-fetched
   // window, since chatLogs already carries extracted._is_test (build 217).
-  const [trafficFilter, setTrafficFilter] = useState("all");   // all | real | test
+  const [trafficFilter, setTrafficFilter] = useState("all");   // all | widget | test
   const trafficFiltered = Array.isArray(chatLogs)
     ? chatLogs.filter((c) => trafficFilter === "all" || (trafficFilter === "test") === !!c.extracted?._is_test)
     : chatLogs;
@@ -12631,7 +12631,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
         ${(dateFrom || dateTo) ? html`<button class="db-btn-ghost db-btn-sm" onClick=${() => { setDateFrom(""); setDateTo(""); }}>Clear</button>` : ""}
         <div class="db-embed-segment" role="tablist" aria-label="Filter by traffic type">
           <button type="button" class=${"db-embed-seg-btn" + (trafficFilter === "all" ? " active" : "")} onClick=${() => setTrafficFilter("all")}>All</button>
-          <button type="button" class=${"db-embed-seg-btn" + (trafficFilter === "real" ? " active" : "")} onClick=${() => setTrafficFilter("real")}>🌎 Real</button>
+          <button type="button" class=${"db-embed-seg-btn" + (trafficFilter === "widget" ? " active" : "")} onClick=${() => setTrafficFilter("widget")}>🧩 Widget</button>
           <button type="button" class=${"db-embed-seg-btn" + (trafficFilter === "test" ? " active" : "")} onClick=${() => setTrafficFilter("test")}>🧪 Test</button>
         </div>
         <span class="chatconv-toolbar-spacer"></span>
@@ -12648,7 +12648,7 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
       </div>
       ${chatLogs === null ? html`<div class="db-loading-sm">Loading…</div>`
         : chatLogs.length === 0 ? html`<div class="db-form-help" style=${{ padding: "10px 0" }}>No chats yet — conversations appear here once visitors start chatting.</div>`
-        : trafficFiltered.length === 0 ? html`<div class="db-form-help" style=${{ padding: "10px 0" }}>No ${trafficFilter === "test" ? "test" : "real"} chats in this window.</div>`
+        : trafficFiltered.length === 0 ? html`<div class="db-form-help" style=${{ padding: "10px 0" }}>No ${trafficFilter === "test" ? "test" : "widget"} chats in this window.</div>`
         : html`<ul class="call-log">
             ${trafficFiltered.map((c) => html`
               <li key=${c.id} class=${"call-row call-row-clickable" + (detailId === c.id ? " is-selected" : "")} onClick=${() => { setDetailId(c.id); setLiveSid(null); }}>

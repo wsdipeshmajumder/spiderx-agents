@@ -5,7 +5,25 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 388**
+**Last updated: build 389**
+
+**Build 389 (Rename "Real" → "Widget" — don't overclaim verified traffic):**
+tester pushback: "'real' may be not real, so use some other word for it."
+Fair — the label only means "not tagged `_is_test`"; absence of the test
+flag isn't proof a visit came through embed.js on a real customer site
+(e.g. someone could open `/embed/<slug>?channel=chat` directly with no
+`is_test` param and it'd still read as the non-test bucket). Renamed
+"🌎 Real" → "🧩 Widget" everywhere it appeared: the Conversations traffic
+filter (`trafficFilter` state value `real` → `widget`), the chat-detail
+provenance chip (CSS class `chatdrawer-provchip-real` →
+`-provchip-widget`), and its tooltip — now "Not tagged as an operator
+preview — presumed to be a visitor via the embed widget" instead of
+claiming it "came through the real embed.js widget." Picked 🧩 (not 🌐,
+already used for the Browser chip in the same row) to avoid emoji
+collision. **Verdict: PASS** — browser-verified on `rohan`: filter button
+and detail chip both read "🧩 Widget"; clicking it still filters correctly
+(same underlying `!c.extracted?._is_test` logic, untouched). Evidence:
+**Behavioral** (logged-in browser) + **Code**.
 
 **Build 388 (Traffic filter for Conversations; fix ghost/primary buttons
 wrapping to two lines):** two tester items.
