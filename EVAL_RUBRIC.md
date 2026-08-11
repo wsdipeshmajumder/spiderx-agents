@@ -5,7 +5,35 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 376**
+**Last updated: build 377**
+
+**Build 377 (Fish Audio drives LIVE CALLS — Phase 2, Fish is default):** the
+voice-engine preference now applies to live phone calls, not just the preview
+button. Architecture: Gemini Live stays the brain (STT + reasoning + tools +
+barge-in) but its own voice is **suppressed** when `voice_provider == "fish"`
+(now the platform default); the agent's words — Gemini's `output_transcription`
+— are spoken through Fish, sentence-by-sentence, via a new `fish_player` task in
+`telephony/base.py::_bridge`. New audio helpers in `telephony/audio.py`
+(`wav_to_pcm16_mono`, `pcm16_to_ulaw8k`, `pcm16_resample`) decode Fish's 44.1 kHz
+WAV → 8 kHz µ-law through the existing `audioop` chain (no MP3 dep). Safety (hard
+rule — never break a call): because Gemini's audio is still arriving in parallel,
+ANY Fish failure (synth error, WAV decode error, or a spoken turn with no
+transcription) flips `fx['active']=False` and the call **degrades to Gemini's own
+voice mid-call**; if Fish isn't configured at all, the call silently stays on
+Gemini. Barge-in flushes the Fish queue + bumps a generation counter so
+in-flight/queued audio is dropped. Recording agent-channel now captures the Fish
+audio the caller actually hears (resampled to 24 kHz). Frontend default flipped
+to Fish; labels updated. **Scope:** carrier WebSocket path (Twilio/Plivo) — the
+SIP-native handler still uses Gemini voice (separate, unverified transport).
+**Verdict: PARTIAL** — offline-verified (WAV decode 44.1k→8k µ-law 144×20 ms
+frames; sentence flushing emits complete sentences + buffers the tail; barge-in
+drain empties the queue; module imports clean). **Not yet verified on a real
+carrier call** (needs a live inbound call to confirm end-to-end audio + latency).
+Evidence: **Unit** (audio + flushing tests) + **Code** (branch/fallback review);
+Behavioral pending a live call. Phase 2 follow-ups: Fish streaming-TTS WS for
+lower latency; wire the SIP-native path; stereo-mix alignment with Fish's
+synth-delayed agent channel.
+
 
 **Build 376 (Fish Audio default → free `s2.1-pro-free` backbone):** Phase 1's
 default TTS backbone was `s1`, which requires paid Fish *API credit* and returned

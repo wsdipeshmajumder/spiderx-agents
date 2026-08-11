@@ -132,7 +132,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 376
+APP_BUILD = 377
 
 
 # ────────────────────────── auth (stub) ──────────────────────────

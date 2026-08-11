@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 376;
+const SXAI_BUILD = 377;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -9586,7 +9586,7 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
       temperature: agent.voice_tweaks?.temperature ?? 0.7,
       top_p: agent.voice_tweaks?.top_p ?? 0.9,
       sensitivity: agent.voice_tweaks?.sensitivity ?? "balanced",
-      voice_provider: agent.voice_tweaks?.voice_provider || "gemini",   // gemini native audio (default) | fish
+      voice_provider: agent.voice_tweaks?.voice_provider || "fish",   // fish (default) | gemini native audio
       fish_voice_id: agent.voice_tweaks?.fish_voice_id || "",
       ...(agent.voice_tweaks || {}),
     },
@@ -9744,20 +9744,21 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
            page: which language, which voice. The 8-card grid lives
            below as an optional "Explore all voices" expander. -->
       <section class="db-panel vs-panel">
-        <!-- Voice engine (build 375): Gemini native audio (default) or Fish Audio.
-             Selecting Fish stores the choice + a Fish voice; Phase 1 previews it
-             here. The live Gemini phone pipeline is unchanged. -->
+        <!-- Voice engine (build 377): Fish Audio (default) or Gemini native audio.
+             On live calls Gemini stays the brain (speech-to-text + reasoning +
+             tools) and Fish speaks the agent's words; a Fish hiccup falls back to
+             Gemini's own voice mid-call so a call is never dropped. -->
         <label class="db-form-field vs-engine">
           <span class="db-form-label">Voice engine</span>
-          <select class="db-input vs-select" value=${draft.voice_tweaks.voice_provider || "gemini"}
+          <select class="db-input vs-select" value=${draft.voice_tweaks.voice_provider || "fish"}
                   onChange=${(e) => { stopPreview(); setTweak("voice_provider", e.target.value); }}>
-            <option value="gemini">Gemini native audio — real-time (default)</option>
-            <option value="fish">Fish Audio — text-to-speech (preview)</option>
+            <option value="fish">Fish Audio — natural TTS voice (default)</option>
+            <option value="gemini">Gemini native audio — real-time</option>
           </select>
         </label>
         ${draft.voice_tweaks.voice_provider === "fish" ? html`
           <div class="vs-fish">
-            <p class="db-form-help" style=${{ marginTop: 0 }}>Fish Audio is a text-to-speech engine — pick a voice and hear it here. Live phone calls keep using Gemini native audio until Fish call-routing ships.</p>
+            <p class="db-form-help" style=${{ marginTop: 0 }}>Fish speaks on live calls — Gemini still handles listening, reasoning and tools. Pick a voice and preview it here. If Fish is ever unavailable mid-call, the agent automatically falls back to Gemini's voice.</p>
             <div class="vs-twocol">
               <label class="db-form-field">
                 <span class="db-form-label">Fish voice</span>

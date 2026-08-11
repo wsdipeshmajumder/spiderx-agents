@@ -12,10 +12,12 @@ That's the whole reason for this package: when we add Exotel, we write a
 from __future__ import annotations
 
 import asyncio
+import audioop
 import base64
 import json
 import logging
 import os
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Optional, Union
@@ -37,9 +39,64 @@ from ..gemini_bridge import (
     _agent_system_prompt,
     _live_config,
 )
-from .audio import ULAW_FRAME_BYTES, chunk_ulaw, pcm24k_to_ulaw, ulaw_to_pcm16k
+from .audio import (
+    ULAW_FRAME_BYTES,
+    chunk_ulaw,
+    pcm16_resample,
+    pcm16_to_ulaw8k,
+    pcm24k_to_ulaw,
+    ulaw_to_pcm16k,
+    wav_to_pcm16_mono,
+)
 
 log = logging.getLogger("eva.telephony")
+
+
+# ─── Fish Audio voice path (cascade TTS) ─────────────────────────────────
+#
+# When an agent's voice_tweaks.voice_provider is "fish" (the platform
+# default), live calls keep Gemini Live as the STT + reasoning + tool-calling
+# brain but SUPPRESS Gemini's own voice — the agent's words (Gemini's
+# output_transcription) are spoken through Fish Audio instead. Because Gemini's
+# audio is still arriving in parallel, any Fish failure degrades gracefully
+# back to Gemini's voice mid-call (the hard rule: never break a call).
+#
+# Sentence-boundary flushing so we can synthesize+play incrementally instead of
+# waiting for a whole turn (lower time-to-first-audio).
+_SENT_BOUNDARY = re.compile(r"[.!?…]+[\s\"'\)\]]*")
+# Flush a run-on fragment even without punctuation once it gets this long, so a
+# comma-spliced monologue doesn't stall the voice waiting for a full stop.
+_FISH_MAX_FRAGMENT = 200
+
+
+def _fish_flush(q: "asyncio.Queue", fx: dict[str, Any], *, final: bool) -> None:
+    """Move ready text out of the fx buffer onto the synth queue, tagged with
+    the current barge-in generation so stale segments can be dropped."""
+    text = fx.get("text") or ""
+    seg = None
+    if final:
+        seg, fx["text"] = text.strip(), ""
+    else:
+        bounds = list(_SENT_BOUNDARY.finditer(text))
+        if bounds:
+            idx = bounds[-1].end()
+            seg, fx["text"] = text[:idx].strip(), text[idx:]
+        elif len(text) > _FISH_MAX_FRAGMENT:
+            seg, fx["text"] = text.strip(), ""
+    if seg:
+        try:
+            q.put_nowait((seg, fx["gen"]))
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _drain_queue(q: "asyncio.Queue") -> None:
+    """Discard everything queued (barge-in: the caller cut the agent off)."""
+    while True:
+        try:
+            q.get_nowait()
+        except Exception:  # noqa: BLE001
+            break
 
 
 # ─── Normalised event vocabulary ─────────────────────────────────────────
@@ -544,6 +601,72 @@ async def _bridge(
     new_handle: Optional[str] = None
     rec = agent.get("_recording_writer")   # may be None (recording off / failed)
 
+    # ── Voice engine selection (Build 377) ──────────────────────────────
+    # voice_provider lives in the agent's voice_tweaks JSON. Default is "fish"
+    # (platform-wide default): Gemini stays the brain, Fish speaks. "gemini"
+    # keeps the native Gemini voice (today's path). If Fish is selected but not
+    # configured (no API key), we silently stay on Gemini — never break a call.
+    from .. import fish_audio
+    _vt = agent.get("voice_tweaks") or {}
+    _voice_provider = str(_vt.get("voice_provider") or "fish").strip().lower()
+    _fish_voice_id = (str(_vt.get("fish_voice_id") or "").strip() or None)
+    _fish_on = (_voice_provider == "fish" and fish_audio.is_configured())
+    # fx: shared mutable state between the receive loop and the Fish player.
+    #   active — currently speaking via Fish (flips to False on any Fish error,
+    #            degrading the rest of the call to Gemini's voice)
+    #   gen    — barge-in generation; bumped on interrupt to drop stale audio
+    #   text   — output_transcription accumulator awaiting a sentence boundary
+    fx: dict[str, Any] = {"active": _fish_on, "gen": 0, "text": ""}
+    fish_q: "asyncio.Queue" = asyncio.Queue()
+    if _fish_on:
+        log.info("telephony[%s] voice=fish agent=%s voice_id=%s",
+                 provider.name, agent.get("id"), _fish_voice_id or "default")
+
+    async def fish_player() -> None:
+        """Pull ready text segments, synthesize with Fish, stream µ-law to the
+        carrier. Any failure degrades the call back to Gemini's voice (sets
+        fx['active']=False) rather than dropping audio."""
+        while not stop.is_set():
+            try:
+                item = await fish_q.get()
+            except Exception:  # noqa: BLE001
+                return
+            if item is None or stop.is_set():
+                return
+            seg, gen = item
+            if gen != fx["gen"] or not seg:
+                continue
+            try:
+                wav = await fish_audio.synthesize(seg, reference_id=_fish_voice_id, fmt="wav")
+            except Exception as e:  # noqa: BLE001
+                log.warning("telephony[%s] fish synth failed (%s) — degrading to Gemini voice",
+                            provider.name, e)
+                fx["active"] = False
+                continue
+            # Caller barged in (or call ended) while we were synthesizing → drop it.
+            if gen != fx["gen"] or stop.is_set() or not stream_id:
+                continue
+            try:
+                pcm, rate = wav_to_pcm16_mono(wav)
+            except Exception as e:  # noqa: BLE001
+                log.warning("telephony[%s] fish wav decode failed: %s", provider.name, e)
+                continue
+            # Record what the caller actually hears (agent channel = 24 kHz PCM).
+            if rec is not None:
+                try:
+                    rec.write_agent(pcm16_resample(pcm, rate, 24000))
+                except Exception:  # noqa: BLE001
+                    pass
+            try:
+                ulaw = pcm16_to_ulaw8k(pcm, rate)
+            except Exception as e:  # noqa: BLE001
+                log.warning("telephony[%s] fish encode failed: %s", provider.name, e)
+                continue
+            for chunk in chunk_ulaw(ulaw):
+                if gen != fx["gen"] or stop.is_set():
+                    break   # barged mid-playback — abandon the rest of this clip
+                await _send(ws, provider.encode_outbound_audio(stream_id=stream_id, ulaw_frame=chunk))
+
     # Reconnected session (Gemini ended it mid-call; the caller is still on the
     # line). WsStart — where <call_start> is sent — only fires on the FIRST
     # carrier stream, so a resume previously got NO signal: the new session
@@ -617,6 +740,11 @@ async def _bridge(
     async def gemini_to_carrier() -> None:
         nonlocal state_out, new_handle
         wrapping_up = False   # set once end_call fired; end on next turn_complete
+        # Per-turn tracking for the Fish dead-air guard: if a turn produced
+        # Gemini audio but NO transcription (so Fish had nothing to speak), we
+        # degrade to Gemini's voice rather than leave the caller in silence.
+        turn_had_audio = False
+        turn_had_text = False
         try:
             async for response in session.receive():
                 if stop.is_set():
@@ -627,10 +755,18 @@ async def _bridge(
                     new_handle = sru.new_handle
                 sc = response.server_content
                 if sc:
-                    if sc.interrupted and stream_id:
-                        clear = provider.clear_outbound(stream_id=stream_id)
-                        if clear is not None:
-                            await _send(ws, clear)
+                    if sc.interrupted:
+                        # Caller barged in. Flush the carrier's buffer AND the
+                        # Fish pipeline (bump generation → in-flight/queued audio
+                        # is dropped) so the agent stops talking immediately.
+                        if stream_id:
+                            clear = provider.clear_outbound(stream_id=stream_id)
+                            if clear is not None:
+                                await _send(ws, clear)
+                        if _fish_on:
+                            fx["gen"] += 1
+                            fx["text"] = ""
+                            _drain_queue(fish_q)
                     # Transcripts → conversation memory (persisted at call end).
                     it = getattr(sc, "input_transcription", None)
                     if it and getattr(it, "text", None):
@@ -638,8 +774,23 @@ async def _bridge(
                     ot = getattr(sc, "output_transcription", None)
                     if ot and getattr(ot, "text", None):
                         memory.feed_output_transcription(ot.text)
+                        # Fish path: accumulate the agent's words and synthesize
+                        # sentence-by-sentence for low time-to-first-audio.
+                        if fx["active"]:
+                            turn_had_text = True
+                            fx["text"] += ot.text
+                            _fish_flush(fish_q, fx, final=False)
                     if getattr(sc, "turn_complete", False):
                         memory.on_turn_complete()
+                        if fx["active"]:
+                            _fish_flush(fish_q, fx, final=True)  # speak the tail
+                            if turn_had_audio and not turn_had_text:
+                                log.warning("telephony[%s] fish: spoken turn had no "
+                                            "transcription — degrading to Gemini voice",
+                                            provider.name)
+                                fx["active"] = False
+                        turn_had_audio = False
+                        turn_had_text = False
                         if wrapping_up:
                             # The closing line after end_call has finished —
                             # end the call now (caller_done already set).
@@ -647,6 +798,11 @@ async def _bridge(
                     if sc.model_turn and sc.model_turn.parts:
                         for part in sc.model_turn.parts:
                             if part.inline_data and part.inline_data.data:
+                                turn_had_audio = True
+                                # Fish is speaking → discard Gemini's own voice
+                                # (audio + agent-channel recording come from Fish).
+                                if fx["active"]:
+                                    continue
                                 if rec is not None:
                                     rec.write_agent(part.inline_data.data)  # 24 kHz PCM agent channel
                                 ulaw, state_out = pcm24k_to_ulaw(part.inline_data.data, state_out)
@@ -715,9 +871,18 @@ async def _bridge(
     # on receive_text() — so we race + cancel instead.)
     t_in = asyncio.create_task(carrier_to_gemini())
     t_out = asyncio.create_task(gemini_to_carrier())
+    extra: list[asyncio.Task] = []
+    if _fish_on:
+        extra.append(asyncio.create_task(fish_player()))
     _done, pending = await asyncio.wait({t_in, t_out}, return_when=asyncio.FIRST_COMPLETED)
     stop.set()
-    for t in pending:
+    # Unblock the Fish player if it's parked on the queue, then tear it all down.
+    if _fish_on:
+        try:
+            fish_q.put_nowait(None)
+        except Exception:  # noqa: BLE001
+            pass
+    for t in list(pending) + extra:
         t.cancel()
         try:
             await t
