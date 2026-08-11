@@ -43,6 +43,7 @@ routes to `gemini_bridge.run_session`.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
 import os
@@ -2317,6 +2318,65 @@ def _parse_ua(ua: str) -> dict[str, str]:
     return out
 
 
+def _client_ip(ws) -> str:
+    """Visitor IP for the geoip lookup below. Reverse proxies set
+    X-Forwarded-For — trust the first hop only (mirrors admin.py's _ip_ua;
+    we run behind a single Railway proxy in production)."""
+    try:
+        fwd = ws.headers.get("x-forwarded-for")
+        if fwd:
+            return fwd.split(",")[0].strip()
+        return ws.client.host if ws.client else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+_GEOIP_CACHE: dict[str, dict[str, str]] = {}
+_GEOIP_CACHE_MAX = 2000   # plain dict, no TTL — clear on overflow rather than evict piecemeal
+
+
+async def _geoip_lookup(ip: str) -> dict[str, str]:
+    """Best-effort city/country for the chat-detail provenance chips (Build
+    390). Skips private/loopback/reserved IPs outright — local dev and the
+    operator's own preview links never resolve to anything meaningful, and
+    it saves the round-trip (this is also the ONLY case that matters for
+    request latency in local dev / self-testing — it returns instantly).
+    For a genuine new visitor IP this awaits a real network call (capped at
+    1.5s, then cached) before the chat session starts — a bounded, one-time
+    cost per unique IP, same "best-effort, never breaks the chat" tradeoff
+    _chat_provenance already makes for UA parsing. Swallows every failure."""
+    if not ip:
+        return {}
+    try:
+        addr = ipaddress.ip_address(ip)
+        if addr.is_private or addr.is_loopback or addr.is_reserved or addr.is_link_local:
+            return {}
+    except ValueError:
+        return {}
+    if ip in _GEOIP_CACHE:
+        return _GEOIP_CACHE[ip]
+    geo: dict[str, str] = {}
+    try:
+        import httpx
+        # ipwho.is — free, keyless, no published rate limit (ipapi.co's free
+        # tier 429s under any real load, incl. from this host during dev).
+        async with httpx.AsyncClient(timeout=1.5) as client:
+            r = await client.get(f"https://ipwho.is/{ip}")
+            if r.status_code == 200:
+                d = r.json()
+                if d.get("success", True):
+                    if d.get("city"):
+                        geo["city"] = str(d["city"])
+                    if d.get("country"):
+                        geo["country"] = str(d["country"])
+    except Exception:  # noqa: BLE001
+        geo = {}
+    if len(_GEOIP_CACHE) >= _GEOIP_CACHE_MAX:
+        _GEOIP_CACHE.clear()
+    _GEOIP_CACHE[ip] = geo
+    return geo
+
+
 def _chat_provenance(ws, client_locale: str) -> dict[str, str]:
     """Where the visitor came from, read off the WS handshake headers so no
     frontend plumbing is needed. The embed iframe URL (the WS `referer`) carries
@@ -2385,6 +2445,9 @@ async def run_agent_chat_session(
     # Visitor provenance (device / browser / OS / source domain) from the WS
     # handshake — surfaced as labels in the operator's chat detail + analytics.
     _prov = _chat_provenance(ws, client_locale)
+    _geo = await _geoip_lookup(_client_ip(ws))
+    if _geo:
+        _prov.update(_geo)
     if _prov:
         agent["_extracted_extra"]["_provenance"] = _prov
     # Operator self-test (Open [a live] preview / Open standalone links, and the

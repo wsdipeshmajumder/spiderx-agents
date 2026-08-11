@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 390;
+const SXAI_BUILD = 392;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -11903,6 +11903,7 @@ function chatDetailBody(loading, data, agent) {
         ${prov.device ? html`<span class="chatdrawer-provchip">${devIcon[prov.device] || "💻"} ${prov.device}</span>` : ""}
         ${prov.browser ? html`<span class="chatdrawer-provchip">🌐 ${prov.browser}</span>` : ""}
         ${prov.os ? html`<span class="chatdrawer-provchip">${prov.os}</span>` : ""}
+        ${(prov.city || prov.country) ? html`<span class="chatdrawer-provchip">📍 ${[prov.city, prov.country].filter(Boolean).join(", ")}</span>` : ""}
         ${prov.source ? html`<span class="chatdrawer-provchip" title=${"Came from " + prov.source}>🔗 ${prov.source}</span>` : ""}
         ${prov.locale ? html`<span class="chatdrawer-provchip">🗣️ ${prov.locale}</span>` : ""}
       </div>` : ""}

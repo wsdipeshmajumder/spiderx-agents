@@ -1452,7 +1452,10 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
    it reuses the .chatdrawer-* body styles. The drawer is still used elsewhere
    (Call-log page). */
 .chatconv-layout { display: grid; grid-template-columns: minmax(300px, 0.85fr) minmax(0, 1.4fr); gap: 18px; align-items: start; }
-.chatconv-list { min-width: 0; }
+/* Own scrollbar, not the page's — matches .chatconv-detail's cap so the two
+   panes sit at the same height side by side, and the toolbar's `sticky`
+   (build 349) now sticks within this scroll region instead of the window. */
+.chatconv-list { min-width: 0; max-height: calc(100vh - 150px); overflow-y: auto; }
 .chatconv-detail { position: sticky; top: 16px; padding: 0; display: flex; flex-direction: column; max-height: calc(100vh - 150px); }
 .chatconv-empty { display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center; gap: 10px; padding: 48px 24px; color: var(--fg-dim, #9aa0ad); font-size: 13.5px; min-height: 220px; }
@@ -1484,7 +1487,7 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 .livechat-inline .livechat-input { padding-left: 2px; padding-right: 2px; }
 .call-row.is-selected { background: #eef0ff; }
 :root[data-theme="dark"] .call-row.is-selected { background: #1e2233; }
-@media (max-width: 860px) { .chatconv-layout { grid-template-columns: 1fr; } .chatconv-detail { position: static; max-height: none; } }
+@media (max-width: 860px) { .chatconv-layout { grid-template-columns: 1fr; } .chatconv-detail { position: static; max-height: none; } .chatconv-list { max-height: none; overflow-y: visible; } }
 
 .chatdrawer-backdrop { position: fixed; inset: 0; z-index: 1000; background: rgba(15,23,42,0.32);
   display: flex; justify-content: flex-end; animation: chatdrawer-fade .18s ease; }

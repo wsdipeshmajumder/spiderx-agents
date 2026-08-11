@@ -5,7 +5,43 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 390**
+**Last updated: build 392**
+
+**Build 392 also carries a trailing build-390 fix:** `.chatconv-list` (the
+Recent-chats left pane) had no height cap, so once build 390 split its
+toolbar into two rows the taller pane could scroll the whole page instead
+of itself, drifting out of sync with `.chatconv-detail`'s already-capped
+`max-height: calc(100vh - 150px)`. Gave `.chatconv-list` the same cap +
+`overflow-y: auto` — both panes now scroll independently at equal height.
+Verified: `.chatconv-list` computed `max-height: 570px`, `overflow-y: auto`,
+`scrollHeight` (3932px of rows) > `clientHeight` (568px) — scrolls in its
+own region as intended.
+
+**Build 392 (City/country in the chat-detail provenance chips):** tester ask:
+"show the city, country also" (on the existing device/browser/OS/source/
+locale chip row). No IP-geolocation capability existed anywhere in the repo
+before this. Added `_client_ip(ws)` (mirrors `admin.py`'s `_ip_ua` — trusts
+`X-Forwarded-For`'s first hop, matches Railway's single-proxy deployment)
+and `_geoip_lookup(ip)` to `chat_bridge.py`: skips private/loopback/
+reserved/link-local IPs outright (zero-cost for local dev and the
+operator's own preview links — precisely the case in the tester's
+screenshot), else a keyless `ipwho.is` call (switched from `ipapi.co`
+after hitting its free-tier 429 from this very host mid-build — verified
+live before committing to it) capped at 1.5s, results cached by IP for the
+process lifetime. Awaited synchronously into `_provenance` at session
+start rather than deferred to persist-time — a deliberate simplicity
+tradeoff: private/self-test traffic (the common case) pays zero latency,
+and a genuine new visitor IP pays a bounded, one-time (then-cached) cost,
+same "best-effort, never breaks the chat" contract `_chat_provenance`
+already made for UA parsing. Rendered as a 📍 chip in `chatDetailBody`
+between OS and Source. **Verdict: PASS** — unit-tested `_geoip_lookup`
+directly (private IP → `{}` instantly; `8.8.8.8` → `{city: "San Jose",
+country: "United States"}`), then end-to-end over a real WebSocket with a
+spoofed `X-Forwarded-For` header (Python `websockets` client, bypassing
+the browser's inability to set WS handshake headers) — confirmed the
+persisted `calls.extracted._provenance` row and the rendered "📍 San Jose,
+United States" chip in the dashboard. Evidence: **Behavioral** (unit +
+live WS session + browser) + **Code**.
 
 **Build 390 (Drop the selected-row left border; reorganise the Recent-chats
 toolbar into two rows):** two tester items, both UI polish on the

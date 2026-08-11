@@ -421,6 +421,42 @@ class TestVoiceProviderMigration(unittest.TestCase):
         self.assertIn("tts.pro.voice", m)  # ₹0 dimension, rolled forward later
 
 
+class TestGeoipProvenance(unittest.TestCase):
+    """Build 391 — city/country chip. Only the offline-safe half: the
+    X-Forwarded-For parse and the private/loopback/invalid short-circuit
+    (no real network call, per this suite's no-network design rule)."""
+
+    def setUp(self):
+        _ensure_loop()
+        import backend.chat_bridge as cb
+        self.cb = cb
+
+    def _ws(self, headers=None, client_host=None):
+        return types.SimpleNamespace(
+            headers=headers or {},
+            client=types.SimpleNamespace(host=client_host) if client_host else None,
+        )
+
+    def test_client_ip_prefers_x_forwarded_for_first_hop(self):
+        ws = self._ws(headers={"x-forwarded-for": "203.0.113.5, 10.0.0.1"}, client_host="10.0.0.1")
+        self.assertEqual(self.cb._client_ip(ws), "203.0.113.5")
+
+    def test_client_ip_falls_back_to_ws_client_host(self):
+        ws = self._ws(client_host="203.0.113.7")
+        self.assertEqual(self.cb._client_ip(ws), "203.0.113.7")
+
+    def test_client_ip_empty_when_neither_available(self):
+        self.assertEqual(self.cb._client_ip(self._ws()), "")
+
+    def test_geoip_lookup_skips_private_and_loopback_with_no_network(self):
+        for ip in ("127.0.0.1", "10.1.2.3", "192.168.0.5", "::1"):
+            self.assertEqual(asyncio.run(self.cb._geoip_lookup(ip)), {})
+
+    def test_geoip_lookup_empty_for_blank_or_invalid_ip(self):
+        self.assertEqual(asyncio.run(self.cb._geoip_lookup("")), {})
+        self.assertEqual(asyncio.run(self.cb._geoip_lookup("not-an-ip")), {})
+
+
 class TestImportSanity(unittest.TestCase):
     def setUp(self):
         _ensure_loop()   # backend.settings builds an asyncio.Lock() at import time
