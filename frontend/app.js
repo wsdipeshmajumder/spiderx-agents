@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 382;
+const SXAI_BUILD = 385;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -11967,7 +11967,14 @@ function LiveChatModal({ agent, sid, onClose, inline }) {
 
   useEffect(() => {
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${proto}://${location.host}/ws/session?mode=chat_observe&sid=${encodeURIComponent(sid)}`);
+    // WebSocket can't set the X-User-Id header the SPA normally sends, and the
+    // backend's chat_observe mode requires a real operator id (build 366 closed
+    // the founder-fallback hole) — but ws_session's own query parsing only reads
+    // `user_id` (see its docstring), not the `u` alias withUser() appends for
+    // native media requests/current_user(); using withUser() here still 401s.
+    const uid = currentUserId();
+    const wsUrl = `${proto}://${location.host}/ws/session?mode=chat_observe&sid=${encodeURIComponent(sid)}` + (uid ? `&user_id=${encodeURIComponent(uid)}` : "");
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
     ws.onmessage = (ev) => {
       let m; try { m = JSON.parse(ev.data); } catch { return; }
@@ -12681,35 +12688,37 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
   const _pos = _logs.filter((c) => (c.extracted && c.extracted.csat) === "up").length;
   const _handoffs = _logs.filter((c) => (c.extracted && c.extracted.handoff_requested) || c.outcome === "transferred_human").length;
   const _rated = _logs.filter((c) => c.extracted && c.extracted.csat).length;
-  const homePanel = hasChat ? html`
+  const homePanel = hasChat ? (!chatConfigured ? html`
     <section class="db-panel chathome">
-      ${!chatConfigured ? html`
-        <div class="chathome-welcome">
-          <div class="chathome-welcome-glyph" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-          </div>
-          <h2 class="chathome-welcome-title">Set up ${chatName}'s chat widget</h2>
-          <p class="chathome-welcome-sub">A text version of ${agent.name} for your website — same brain, knowledge and lead capture, no mic. Three quick steps and you're live.</p>
-          <div class="chathome-stepcards">
-            <button type="button" class="chathome-stepcard" onClick=${() => setChatTab("settings")}>
-              <span class="chathome-stepcard-n">1</span>
-              <span class="chathome-stepcard-t">Style it</span>
-              <span class="chathome-stepcard-d">Colours, logo, welcome message & starter questions</span>
-            </button>
-            <button type="button" class="chathome-stepcard" onClick=${() => setChatTab("knowledge")}>
-              <span class="chathome-stepcard-n">2</span>
-              <span class="chathome-stepcard-t">Write its system prompt</span>
-              <span class="chathome-stepcard-d">What to do & how to sound — auto-drafted for you</span>
-            </button>
-            <button type="button" class="chathome-stepcard" onClick=${() => setChatTab("golive")}>
-              <span class="chathome-stepcard-n">3</span>
-              <span class="chathome-stepcard-t">Go live</span>
-              <span class="chathome-stepcard-d">Paste one line on your site — no coding</span>
-            </button>
-          </div>
-          <button type="button" class="db-btn-primary" onClick=${() => setChatTab("settings")}>Get started →</button>
+      <div class="chathome-welcome">
+        <div class="chathome-welcome-glyph" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
         </div>
-      ` : html`
+        <h2 class="chathome-welcome-title">Set up ${chatName}'s chat widget</h2>
+        <p class="chathome-welcome-sub">A text version of ${agent.name} for your website — same brain, knowledge and lead capture, no mic. Three quick steps and you're live.</p>
+        <div class="chathome-stepcards">
+          <button type="button" class="chathome-stepcard" onClick=${() => setChatTab("settings")}>
+            <span class="chathome-stepcard-n">1</span>
+            <span class="chathome-stepcard-t">Style it</span>
+            <span class="chathome-stepcard-d">Colours, logo, welcome message & starter questions</span>
+          </button>
+          <button type="button" class="chathome-stepcard" onClick=${() => setChatTab("knowledge")}>
+            <span class="chathome-stepcard-n">2</span>
+            <span class="chathome-stepcard-t">Write its system prompt</span>
+            <span class="chathome-stepcard-d">What to do & how to sound — auto-drafted for you</span>
+          </button>
+          <button type="button" class="chathome-stepcard" onClick=${() => setChatTab("golive")}>
+            <span class="chathome-stepcard-n">3</span>
+            <span class="chathome-stepcard-t">Go live</span>
+            <span class="chathome-stepcard-d">Paste one line on your site — no coding</span>
+          </button>
+        </div>
+        <button type="button" class="db-btn-primary" onClick=${() => setChatTab("settings")}>Get started →</button>
+      </div>
+    </section>
+  ` : html`
+    <div class="chatconv-layout chathome-layout">
+      <section class="db-panel chathome chatconv-list">
         <div class="db-panel-head">
           <div>
             <h3 class="db-panel-title">Chat overview</h3>
@@ -12728,9 +12737,44 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
           <button type="button" class="chathome-quicklink" onClick=${() => setChatTab("knowledge")}>System prompt →</button>
           <button type="button" class="chathome-quicklink" onClick=${() => setChatTab("conversations")}>Read conversations →</button>
         </div>
-      `}
-    </section>
-  ` : "";
+        <div class="db-panel-head" style=${{ marginTop: "18px" }}>
+          <div>
+            <h3 class="db-panel-title">Live now ${liveChats.length > 0 ? html`<span class="db-pill-live">🟢 ${liveChats.length}</span>` : ""}</h3>
+            <p class="db-panel-sub">Visitors chatting right now — click one to watch in real time or join as a human.</p>
+          </div>
+        </div>
+        ${liveChats.length > 0 ? html`
+          <ul class="call-log livechat-list">
+            ${liveChats.map((lc) => html`
+              <li key=${lc.sid} class=${"call-row livechat-live-row" + (liveSid === lc.sid ? " is-selected" : "")} onClick=${() => setLiveSid(lc.sid)}>
+                <div class="call-row-head">
+                  <span class="call-channel call-channel-web_chat">💬 Live</span>
+                  ${lc.human_control ? html`<span class="db-pill-soft livechat-pill-join">${lc.operator_name || "human"} in control</span>` : ""}
+                  <span class="call-time">started ${fmtTime(lc.started_at)}</span>
+                  <span class="call-dur">${lc.turns} turns</span>
+                  ${lc.watchers > 0 ? html`<span class="call-dur">👁 ${lc.watchers}</span>` : ""}
+                </div>
+                ${lc.last_visitor_text ? html`<div class="call-summary">“${lc.last_visitor_text}”</div>` : html`<div class="call-summary db-muted">No visitor message yet…</div>`}
+                <div class="livechat-row-cta">${lc.human_control ? "Open →" : "Watch / join →"}</div>
+              </li>
+            `)}
+          </ul>
+        ` : html`<div class="db-form-help" style=${{ padding: "10px 0" }}>No one's chatting right now — live visitors will show up here the moment they start typing.</div>`}
+      </section>
+      <section class="db-panel chatconv-detail">
+        ${liveSid
+          ? html`<${LiveChatModal} inline=${true} agent=${agent} sid=${liveSid} onClose=${() => setLiveSid(null)} />`
+          : html`
+            <div class="chatconv-empty">
+              <span class="chatconv-empty-glyph" aria-hidden="true">💬</span>
+              <div>${liveChats.length > 0
+                ? "Click a live visitor on the left to watch in real time or join as a human."
+                : "No one's chatting right now. Live visitors will show up on the left to watch or join."}</div>
+            </div>
+          `}
+      </section>
+    </div>
+  `) : "";
 
   // ── Go-live tab — layman-friendly "embed it in 3 steps" flow (build 369). ──
   const goLivePanel = hasChat ? html`

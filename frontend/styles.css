@@ -12024,8 +12024,10 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
   background: var(--chat-accent, #7c3aed); color: #fff; font-size: 13px; font-weight: 700; margin-bottom: 4px; }
 .chathome-stepcard-t { font-size: 14px; font-weight: 700; color: var(--fg, #1a1c25); }
 .chathome-stepcard-d { font-size: 12.5px; color: var(--fg-mute, #6b7080); line-height: 1.4; }
-.chathome-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 4px 0 18px; }
-@media (max-width: 720px) { .chathome-stats { grid-template-columns: repeat(2, 1fr); } }
+/* 2 columns, not 4 — Home's overview now lives in the narrower left pane of a
+   two-pane layout (build 383, alongside the live-visitor list), so a 4-across
+   row no longer has room; 2x2 fits it at any pane width. */
+.chathome-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 4px 0 18px; }
 .chathome-stat { display: flex; flex-direction: column; gap: 3px; padding: 16px; border-radius: 14px;
   border: 1px solid var(--border, #e6e8ef); background: var(--bg-1, #f6f7fb); }
 .chathome-stat-v { font-size: 24px; font-weight: 800; color: var(--fg, #1a1c25); line-height: 1; }

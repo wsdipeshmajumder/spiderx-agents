@@ -5,7 +5,45 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 382**
+**Last updated: build 385**
+
+**Build 383–385 (Home tab goes wide: live-visitor list + fix the watch/join
+auth bug it exposed):** tester ask: "the home tab also shud have the wide
+view" + "have live visitor list, to click and watch or join a conversation."
+
+- **383** — Home's configured state now uses the same two-pane
+  `.chatconv-layout` grid as Conversations (list pane + sticky detail pane,
+  filling the full 1440px width) instead of a single narrow card. Left pane:
+  stats + quick links + a new **Live now** section listing live visitors
+  (reusing the exact row markup/classes from the Conversations tab's live
+  list). Right pane: clicking a visitor renders `<LiveChatModal inline>` —
+  the same watch/join component Conversations already used — with an empty
+  state ("click a live visitor…") when nothing's selected. Also fixed
+  `.chathome-stats` (`repeat(4,1fr)`) overflowing the now-narrower list pane
+  by 127px — switched to a fixed `repeat(2,1fr)` 2x2 grid.
+- **384/385 — the watch/join feature itself was broken, pre-existing, on
+  BOTH Home and Conversations** (not introduced by 383 — verified identical
+  failure from the original Conversations tab first). `LiveChatModal`'s
+  WebSocket never authenticated: it connected bare, and the backend's
+  `chat_observe` mode requires an operator id (build 366 closed the
+  founder-fallback hole) — every watch/join attempt hit
+  `{"type":"error","message":"Not authorised."}`. **384** tried `withUser()`
+  (appends `?u=`) — still failed, because `ws_session`'s own query parsing
+  only reads `?user_id=` (see its docstring), a different alias than the
+  shared REST `current_user()` accepts. Root-caused with a raw WS test
+  against a real live session (`&u=1` → rejected, `&user_id=1` → connected
+  + got the `hello` transcript) before touching code. **385** fixes it:
+  `LiveChatModal` now builds `&user_id=${currentUserId()}` directly.
+
+**Verdict: PASS** — browser-verified the full loop end-to-end on `rohan`
+(org 1) using a real live visitor session (raw WS `mode=chat` connection):
+clicked a live visitor from the new Home list → `LiveChatModal` connected
+("watching", live transcript) → clicked **Join as human** → AI paused,
+"Dipesh is now in control." system message, sent an operator message that
+appeared as "You" → visitor row updated to a live "Dipesh in control" pill
++ watcher count. Re-verified from the original Conversations tab too — same
+fix, same component. `.chathome-stats` re-measured at 0px overflow post-fix.
+Evidence: **Behavioral** (live WS session, both entry points) + **Code**.
 
 **Build 382 (Chat-panel tabs: fix equal-width regression on narrower
 windows):** build 381's `flex: 1 1 0` made the 5 tabs equal-width, but only
