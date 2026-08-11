@@ -5,7 +5,33 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 379**
+**Last updated: build 380**
+
+**Build 380 (Chat panel: Home tab + layman Go-live tab):** the chat-widget
+panel (`AgentChatPage`) gains a **Home** tab (default) and a **Go live** tab,
+inserted before **Conversations** — tab order is now Home / Settings / System
+prompt / Go live / Conversations. Home shows a getting-started welcome screen
+(3-step "Style it → Write its system prompt → Go live" cards) until the chat
+is configured (`chatConfigured` = has logs, or a `welcome_message`/
+`instructions` set), then flips to an overview: conversations / live-now /
+positive-rating / human-handoffs stat tiles + quick links to Settings, System
+prompt, and Conversations. Go live is a non-technical 3-step embed flow (copy
+snippet → paste before `</body>` or into a site builder's custom-code box →
+open a live preview) — no code editing, no jargon. **Verdict: PASS** —
+browser-verified both Home variants live: `maya` (unconfigured, 0 chats) shows
+the welcome screen with working step-card + "Get started" nav to Settings/
+System prompt/Go live; `rohan` (org 1, 38 real `web_chat` conversations) shows
+the overview stats (38 conversations, 0 live, 0 handoffs) + working quick
+links. Go-live tab renders the real embed snippet and the paste-target step
+correctly as literal `</body>` (not an escaped `&lt;/body&gt;` entity — htm
+does not decode HTML entities in template strings, so the tag is interpolated
+as a JS string). Evidence: **Behavioral** (logged-in browser, both agents) +
+**Code**. Housekeeping: this shipped in the same commit as the build-379
+engine-aware-ledger work but the rubric entry was missed at push time,
+which also let `EVAL_RUBRIC.md`'s "Last updated" line drift behind
+`APP_BUILD` (380 vs 379) — `tests/test_offline.py`'s
+`test_rubric_last_updated_matches_build` catches exactly this and was
+failing; fixed by this entry.
 
 **Build 379 (Engine-aware cost ledger — Standard vs Pro):** the super-admin LLM
 ledger can now segment spend by voice engine, and the user picker states both
