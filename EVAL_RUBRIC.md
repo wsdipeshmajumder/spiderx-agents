@@ -5,7 +5,31 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 387**
+**Last updated: build 388**
+
+**Build 388 (Traffic filter for Conversations; fix ghost/primary buttons
+wrapping to two lines):** two tester items.
+
+- **Test/Real traffic filter** — "have a filter for test and real traffic."
+  Added an All / 🌎 Real / 🧪 Test segmented control (reusing the
+  `.db-embed-segment` pattern) to the Conversations tab's Recent-chats
+  toolbar, filtering the already-fetched `chatLogs` window client-side on
+  `extracted._is_test` (build 387). Empty state distinguishes "no chats at
+  all in this window" from "no chats match this filter."
+- **Button text wrapping** — screenshot showed the "↻ Refresh" button's icon
+  and label stacked on two lines instead of one. Root cause: the same class
+  of bug as build 382's tab fix — `.db-btn-ghost`/`.db-btn-primary` are flex
+  children of `.db-panel-head` (`justify-content: space-between`) with
+  neither `white-space: nowrap` nor `flex-shrink: 0`, so in the narrower
+  `chatconv-list` pane (post build-383's two-pane layout) the title/subtitle
+  squeezed the button below its content's natural width and its text
+  wrapped at the space. Added `white-space: nowrap; flex-shrink: 0;` to both
+  base classes — applies to every button using them, not just Refresh.
+
+**Verdict: PASS** — browser-verified on `rohan`: Refresh renders on one line
+in the (still-narrow) Recent-chats header; the traffic filter's Test/Real/All
+states each rendered the correct subset live (Test → 1 row, Real → the rest,
+All → everything). Evidence: **Behavioral** (logged-in browser) + **Code**.
 
 **Build 387 (Label preview-link visits "Test" vs real embed.js traffic
 "Real"):** tester ask: "when u see visits are from the preview link, show

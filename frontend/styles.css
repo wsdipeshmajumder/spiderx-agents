@@ -6933,6 +6933,7 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   cursor: pointer;
   transition: background 0.15s ease, box-shadow 0.15s ease;
   box-shadow: 0 2px 6px rgba(37, 99, 235, 0.20);
+  white-space: nowrap; flex-shrink: 0;
 }
 .db-btn-primary:hover { background: #1d4fd7; box-shadow: 0 4px 10px rgba(37, 99, 235, 0.30); }
 .db-btn-ghost {
@@ -6947,6 +6948,7 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   border: 1px solid #d8dae3;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
+  white-space: nowrap; flex-shrink: 0;
 }
 .db-btn-ghost:hover { background: #f5f6f8; border-color: #bcc0ce; }
 

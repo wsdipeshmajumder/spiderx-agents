@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 387;
+const SXAI_BUILD = 388;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -12157,6 +12157,13 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
     const t = setTimeout(loadChatLogs, 250);
     return () => clearTimeout(t);
   }, [dateFrom, dateTo]);
+  // Test (operator preview/standalone links) vs Real (embed.js widget) traffic
+  // filter for the Recent-chats list — client-side over the already-fetched
+  // window, since chatLogs already carries extracted._is_test (build 217).
+  const [trafficFilter, setTrafficFilter] = useState("all");   // all | real | test
+  const trafficFiltered = Array.isArray(chatLogs)
+    ? chatLogs.filter((c) => trafficFilter === "all" || (trafficFilter === "test") === !!c.extracted?._is_test)
+    : chatLogs;
   // Export the current (filtered) window as the client-ready XLSX report.
   // `includeTx` adds the full "Chat log" transcript sheet (opt-in — heavier).
   const [includeTx, setIncludeTx] = useState(false);
@@ -12622,6 +12629,11 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
         <label class="chatconv-datefld">To<input type="date" class="db-input" value=${dateTo} min=${dateFrom || undefined}
                  onInput=${(e) => setDateTo(e.target.value)} /></label>
         ${(dateFrom || dateTo) ? html`<button class="db-btn-ghost db-btn-sm" onClick=${() => { setDateFrom(""); setDateTo(""); }}>Clear</button>` : ""}
+        <div class="db-embed-segment" role="tablist" aria-label="Filter by traffic type">
+          <button type="button" class=${"db-embed-seg-btn" + (trafficFilter === "all" ? " active" : "")} onClick=${() => setTrafficFilter("all")}>All</button>
+          <button type="button" class=${"db-embed-seg-btn" + (trafficFilter === "real" ? " active" : "")} onClick=${() => setTrafficFilter("real")}>🌎 Real</button>
+          <button type="button" class=${"db-embed-seg-btn" + (trafficFilter === "test" ? " active" : "")} onClick=${() => setTrafficFilter("test")}>🧪 Test</button>
+        </div>
         <span class="chatconv-toolbar-spacer"></span>
         <label style=${{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 600, color: "var(--fg-mute, #6b7080)", cursor: "pointer", whiteSpace: "nowrap" }}
                title="Adds a full transcript sheet of every conversation — heavier file">
@@ -12636,8 +12648,9 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
       </div>
       ${chatLogs === null ? html`<div class="db-loading-sm">Loading…</div>`
         : chatLogs.length === 0 ? html`<div class="db-form-help" style=${{ padding: "10px 0" }}>No chats yet — conversations appear here once visitors start chatting.</div>`
+        : trafficFiltered.length === 0 ? html`<div class="db-form-help" style=${{ padding: "10px 0" }}>No ${trafficFilter === "test" ? "test" : "real"} chats in this window.</div>`
         : html`<ul class="call-log">
-            ${chatLogs.map((c) => html`
+            ${trafficFiltered.map((c) => html`
               <li key=${c.id} class=${"call-row call-row-clickable" + (detailId === c.id ? " is-selected" : "")} onClick=${() => { setDetailId(c.id); setLiveSid(null); }}>
                 <div class="call-row-head">
                   <span class=${"call-outcome call-outcome-" + (c.outcome || "unknown")}>${(c.outcome || "unknown").replace(/_/g, " ")}</span>
