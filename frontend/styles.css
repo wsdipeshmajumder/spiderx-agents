@@ -1457,11 +1457,17 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 .chatconv-empty { display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center; gap: 10px; padding: 48px 24px; color: var(--fg-dim, #9aa0ad); font-size: 13.5px; min-height: 220px; }
 .chatconv-empty-glyph { font-size: 30px; opacity: 0.6; }
-/* Date-filter + export toolbar above the recent-chats list (build 349). */
-.chatconv-toolbar { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap;
+/* Date-filter + export toolbar above the recent-chats list (build 349).
+   Two explicit rows (build 390) — narrow-down controls (dates + traffic
+   filter) on one line, export options on the next — instead of one flex-wrap
+   row, which left the checkbox stranded far right and Export report alone
+   on its own line once the traffic filter made the row too crowded. */
+.chatconv-toolbar { display: flex; flex-direction: column; gap: 10px;
   position: sticky; top: 0; z-index: 6; background: var(--bg-0, #fff);
   padding: 10px 0 12px; margin: 0 0 4px; border-bottom: 1px solid var(--border, #e6e8ef); }
 :root[data-theme="dark"] .chatconv-toolbar { background: var(--bg-0, #12141f); }
+.chatconv-toolbar-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.chatconv-toolbar-row:first-child { align-items: flex-end; }
 .chatconv-datefld { display: flex; flex-direction: column; gap: 3px; font-size: 11px; font-weight: 600;
   color: var(--fg-mute, #6b7080); text-transform: uppercase; letter-spacing: 0.02em; }
 .chatconv-datefld .db-input { padding: 6px 8px; font-size: 12.5px; min-width: 132px; text-transform: none; letter-spacing: 0; }
@@ -1476,8 +1482,8 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 .livechat-inline .livechat-log { flex: 1; min-height: 160px; overflow-y: auto; padding: 12px 2px; }
 .livechat-inline .livechat-controls,
 .livechat-inline .livechat-input { padding-left: 2px; padding-right: 2px; }
-.call-row.is-selected { background: #eef0ff; box-shadow: inset 3px 0 0 #4f46e5; }
-:root[data-theme="dark"] .call-row.is-selected { background: #1e2233; box-shadow: inset 3px 0 0 #6366f1; }
+.call-row.is-selected { background: #eef0ff; }
+:root[data-theme="dark"] .call-row.is-selected { background: #1e2233; }
 @media (max-width: 860px) { .chatconv-layout { grid-template-columns: 1fr; } .chatconv-detail { position: static; max-height: none; } }
 
 .chatdrawer-backdrop { position: fixed; inset: 0; z-index: 1000; background: rgba(15,23,42,0.32);

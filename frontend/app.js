@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 389;
+const SXAI_BUILD = 390;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -12624,27 +12624,32 @@ function AgentChatPage({ agent, agents, plan, onNav, refreshAgent }) {
         <button class="db-btn-ghost db-btn-sm" onClick=${loadChatLogs}>↻ Refresh</button>
       </div>
       <div class="chatconv-toolbar">
-        <label class="chatconv-datefld">From<input type="date" class="db-input" value=${dateFrom} max=${dateTo || undefined}
-                 onInput=${(e) => setDateFrom(e.target.value)} /></label>
-        <label class="chatconv-datefld">To<input type="date" class="db-input" value=${dateTo} min=${dateFrom || undefined}
-                 onInput=${(e) => setDateTo(e.target.value)} /></label>
-        ${(dateFrom || dateTo) ? html`<button class="db-btn-ghost db-btn-sm" onClick=${() => { setDateFrom(""); setDateTo(""); }}>Clear</button>` : ""}
-        <div class="db-embed-segment" role="tablist" aria-label="Filter by traffic type">
-          <button type="button" class=${"db-embed-seg-btn" + (trafficFilter === "all" ? " active" : "")} onClick=${() => setTrafficFilter("all")}>All</button>
-          <button type="button" class=${"db-embed-seg-btn" + (trafficFilter === "widget" ? " active" : "")} onClick=${() => setTrafficFilter("widget")}>🧩 Widget</button>
-          <button type="button" class=${"db-embed-seg-btn" + (trafficFilter === "test" ? " active" : "")} onClick=${() => setTrafficFilter("test")}>🧪 Test</button>
+        <div class="chatconv-toolbar-row">
+          <label class="chatconv-datefld">From<input type="date" class="db-input" value=${dateFrom} max=${dateTo || undefined}
+                   onInput=${(e) => setDateFrom(e.target.value)} /></label>
+          <label class="chatconv-datefld">To<input type="date" class="db-input" value=${dateTo} min=${dateFrom || undefined}
+                   onInput=${(e) => setDateTo(e.target.value)} /></label>
+          ${(dateFrom || dateTo) ? html`<button class="db-btn-ghost db-btn-sm" onClick=${() => { setDateFrom(""); setDateTo(""); }}>Clear</button>` : ""}
+          <span class="chatconv-toolbar-spacer"></span>
+          <div class="db-embed-segment" role="tablist" aria-label="Filter by traffic type">
+            <button type="button" class=${"db-embed-seg-btn" + (trafficFilter === "all" ? " active" : "")} onClick=${() => setTrafficFilter("all")}>All</button>
+            <button type="button" class=${"db-embed-seg-btn" + (trafficFilter === "widget" ? " active" : "")} onClick=${() => setTrafficFilter("widget")}>🧩 Widget</button>
+            <button type="button" class=${"db-embed-seg-btn" + (trafficFilter === "test" ? " active" : "")} onClick=${() => setTrafficFilter("test")}>🧪 Test</button>
+          </div>
         </div>
-        <span class="chatconv-toolbar-spacer"></span>
-        <label style=${{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 600, color: "var(--fg-mute, #6b7080)", cursor: "pointer", whiteSpace: "nowrap" }}
-               title="Adds a full transcript sheet of every conversation — heavier file">
-          <input type="checkbox" checked=${includeTx} onChange=${(e) => setIncludeTx(e.target.checked)} />
-          Include full transcripts
-        </label>
-        <button class="db-btn-primary db-btn-sm" onClick=${exportChatReport} disabled=${!chatLogs || chatLogs.length === 0}
-                title="Download a client-ready XLSX performance report for the selected dates">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
-          <span>Export report</span>
-        </button>
+        <div class="chatconv-toolbar-row">
+          <label style=${{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 600, color: "var(--fg-mute, #6b7080)", cursor: "pointer", whiteSpace: "nowrap" }}
+                 title="Adds a full transcript sheet of every conversation — heavier file">
+            <input type="checkbox" checked=${includeTx} onChange=${(e) => setIncludeTx(e.target.checked)} />
+            Include full transcripts
+          </label>
+          <span class="chatconv-toolbar-spacer"></span>
+          <button class="db-btn-primary db-btn-sm" onClick=${exportChatReport} disabled=${!chatLogs || chatLogs.length === 0}
+                  title="Download a client-ready XLSX performance report for the selected dates">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+            <span>Export report</span>
+          </button>
+        </div>
       </div>
       ${chatLogs === null ? html`<div class="db-loading-sm">Loading…</div>`
         : chatLogs.length === 0 ? html`<div class="db-form-help" style=${{ padding: "10px 0" }}>No chats yet — conversations appear here once visitors start chatting.</div>`

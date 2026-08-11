@@ -5,7 +5,32 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 389**
+**Last updated: build 390**
+
+**Build 390 (Drop the selected-row left border; reorganise the Recent-chats
+toolbar into two rows):** two tester items, both UI polish on the
+Conversations tab shipped in the last few builds.
+
+- **No left border** — `.call-row.is-selected` used an inset box-shadow to
+  fake a 3px indigo left border on the selected row; tester: "dont use a
+  left border." Dropped the `box-shadow`, kept the tint background as the
+  only selected-state indicator.
+- **Toolbar reorganised** — screenshot showed the "Include full transcripts"
+  checkbox stranded far right with a large empty gap, and "Export report"
+  alone on its own wrapped line. Cause: adding the build-388 traffic-filter
+  segment to the single flex-wrap toolbar row overflowed it, so the
+  `flex:1 1 auto` spacer + wrap pushed later items around unpredictably.
+  Split into two explicit `.chatconv-toolbar-row`s: row 1 = date range +
+  Clear + traffic filter (the "narrow down what you see" controls, spacer
+  pushes the filter to the right); row 2 = the transcript checkbox + Export
+  report (the "do something with it" controls, spacer pushes Export right).
+  Grouped by function instead of leaving flex-wrap to sort seven inline
+  items into arbitrary lines.
+
+**Verdict: PASS** — browser-verified on `rohan`: selecting a row shows only
+the tint, no border; the toolbar now renders as two clean rows with no
+stray gaps at any tested width. Evidence: **Behavioral** (logged-in
+browser) + **Code**.
 
 **Build 389 (Rename "Real" → "Widget" — don't overclaim verified traffic):**
 tester pushback: "'real' may be not real, so use some other word for it."
