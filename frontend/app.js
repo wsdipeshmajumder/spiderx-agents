@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 405;
+const SXAI_BUILD = 406;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -3666,8 +3666,18 @@ function _hhmmTo12(t) {
   return `${hh}:${String(m).padStart(2, "0")} ${ap}`;
 }
 
+// A sensible default second-window start: right after the last range's
+// close, clamped so it never runs past 23:59 (e.g. a 6pm-1am dinner window
+// added after an 11:30am-3pm lunch window still gets a plausible 6pm-10pm
+// default rather than overflowing past midnight).
+function _hhmmPlus(t, mins) {
+  const [h, m] = (t || "18:00").split(":").map(Number);
+  const total = Math.min(23 * 60 + 59, h * 60 + m + mins);
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
 function _serializeHours(state) {
-  const sig = (k) => state[k].open ? `${state[k].from}|${state[k].to}` : "closed";
+  const sig = (k) => state[k].open ? state[k].ranges.map((r) => `${r.from}|${r.to}`).join("&&") : "closed";
   const out = [];
   let i = 0;
   while (i < _HRS_DAYS.length) {
@@ -3676,7 +3686,8 @@ function _serializeHours(state) {
     while (j + 1 < _HRS_DAYS.length && sig(_HRS_DAYS[j + 1][0]) === s) j++;
     const lbl = i === j ? _HRS_DAYS[i][1] : `${_HRS_DAYS[i][1]}–${_HRS_DAYS[j][1]}`;
     const d = state[_HRS_DAYS[i][0]];
-    out.push(d.open ? `${lbl} ${_hhmmTo12(d.from)}–${_hhmmTo12(d.to)}` : `${lbl} closed`);
+    const times = d.open ? d.ranges.map((r) => `${_hhmmTo12(r.from)}–${_hhmmTo12(r.to)}`).join(" & ") : "";
+    out.push(d.open ? `${lbl} ${times}` : `${lbl} closed`);
     i = j + 1;
   }
   return out.join(", ");
@@ -3685,14 +3696,34 @@ function _serializeHours(state) {
 function _parseHours(text) {
   const keys = _HRS_DAYS.map((d) => d[0]);
   const idx = {}; keys.forEach((k, i) => { idx[k] = i; });
-  const state = {}; keys.forEach((k) => { state[k] = { open: false, from: "09:00", to: "18:00" }; });
+  const state = {}; keys.forEach((k) => { state[k] = { open: false, ranges: [{ from: "09:00", to: "18:00" }] }; });
   const fallbackOpen = () => keys.forEach((k) => { state[k].open = (k !== "sun"); });
   if (!text || typeof text !== "string" || !text.trim()) { fallbackOpen(); return state; }
   const norm = String(text).toLowerCase().replace(/[–—]/g, "-").replace(/[  ]/g, " ");
   const dayRe = /\b(mon|tue|wed|thu|fri|sat|sun)[a-z]*\b(?:\s*(?:-|to|through|thru)\s*\b(mon|tue|wed|thu|fri|sat|sun)[a-z]*\b)?/;
-  const timeRe = /(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|to)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/;
+  const timeRe = /(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|to)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/g;
   const to24 = (h, m, ap) => { h = +h; m = m ? +m : 0; if (ap === "pm" && h < 12) h += 12; if (ap === "am" && h === 12) h = 0; return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`; };
+  // Reads EVERY time range out of a clause (Build 406) — a day can list more
+  // than one window ("11:30 am-3 pm & 6 pm-1 am"), so `.exec` in a loop
+  // against the global regex instead of a single `.match`.
+  const readRanges = (part) => {
+    const out = [];
+    let tm;
+    timeRe.lastIndex = 0;
+    while ((tm = timeRe.exec(part))) {
+      let oap = tm[3], cap = tm[6];
+      if (!cap && oap) cap = oap;
+      if (!oap && cap) oap = (+tm[1] < +tm[4]) ? "am" : cap;   // "9-5pm" → 9am
+      out.push({ from: to24(tm[1], tm[2], oap || "am"), to: to24(tm[4], tm[5], cap || "pm") });
+    }
+    return out;
+  };
   let any = false;
+  // Day key(s) set by the most recently-seen day-prefixed clause — lets a
+  // FOLLOWING, day-less clause ("Wed 11:30am-3pm, 6pm-1am") attach as a
+  // second window on that same day rather than being dropped, matching how
+  // split hours are commonly typed/pasted (Build 406).
+  let lastGroup = null;
   // Split on newlines too (Build 302) — the settings HoursEditor serialises to
   // a newline-joined machine form ("mon: 09:00-18:00\ntue: …\nsun: closed").
   // Without \n each line wasn't its own clause, so a string containing any
@@ -3700,26 +3731,31 @@ function _parseHours(text) {
   // well makes both the comma human form and the newline machine form parse.
   norm.split(/[,;\n]+/).forEach((part) => {
     const dm = part.match(dayRe);
-    if (!dm) return;
+    if (!dm) {
+      if (lastGroup) {
+        const ranges = readRanges(part);
+        if (ranges.length) {
+          lastGroup.forEach((k) => { if (state[k].open) state[k].ranges.push(...ranges); });
+          any = true;
+        }
+      }
+      return;
+    }
     const a = idx[dm[1].slice(0, 3)];
     const b = dm[2] != null ? idx[dm[2].slice(0, 3)] : a;
     const range = [];
     if (a <= b) { for (let i = a; i <= b; i++) range.push(keys[i]); }
     else { for (let i = a; i < 7; i++) range.push(keys[i]); for (let i = 0; i <= b; i++) range.push(keys[i]); }
-    if (/clos|off|shut/.test(part)) { range.forEach((k) => { state[k].open = false; }); any = true; return; }
-    const tm = part.match(timeRe);
-    if (tm) {
-      let oap = tm[3], cap = tm[6];
-      if (!cap && oap) cap = oap;
-      if (!oap && cap) oap = (+tm[1] < +tm[4]) ? "am" : cap;   // "9-5pm" → 9am
-      const from = to24(tm[1], tm[2], oap || "am");
-      const to = to24(tm[4], tm[5], cap || "pm");
-      range.forEach((k) => { state[k] = { open: true, from, to }; });
+    if (/clos|off|shut/.test(part)) { range.forEach((k) => { state[k].open = false; }); lastGroup = null; any = true; return; }
+    const ranges = readRanges(part);
+    if (ranges.length) {
+      range.forEach((k) => { state[k] = { open: true, ranges: ranges.map((r) => ({ ...r })) }; });
       any = true;
     } else {
       range.forEach((k) => { state[k].open = true; });
       any = true;
     }
+    lastGroup = range;
   });
   if (!any) fallbackOpen();
   return state;
@@ -3739,7 +3775,30 @@ function WizardHoursEditor({ value, onChange }) {
 
   const commit = (next) => { touched.current = true; setDays(next); onChange(_serializeHours(next)); };
   const update = (k, patch) => commit({ ...days, [k]: { ...days[k], ...patch } });
-  const copyMonToAll = () => { const m = days.mon; const next = {}; _HRS_DAYS.forEach(([k]) => { next[k] = { ...m }; }); commit(next); };
+  // Multiple windows per day (Build 406) — restaurants etc. commonly split
+  // lunch/dinner service ("11:30am-3pm, 6pm-1am"); tester: "there could be
+  // multiple open and closing in same day". Each day keeps its own
+  // independent ranges array; add/remove/edit act on one range by index.
+  const updateRange = (k, idx, patch) => {
+    const ranges = days[k].ranges.map((r, i) => (i === idx ? { ...r, ...patch } : r));
+    update(k, { ranges });
+  };
+  const addRange = (k) => {
+    const last = days[k].ranges[days[k].ranges.length - 1];
+    const from = last ? _hhmmPlus(last.to, 60) : "18:00";
+    const to = _hhmmPlus(from, 180);
+    update(k, { ranges: [...days[k].ranges, { from, to }] });
+  };
+  const removeRange = (k, idx) => {
+    if (days[k].ranges.length <= 1) return;
+    update(k, { ranges: days[k].ranges.filter((_, i) => i !== idx) });
+  };
+  const copyMonToAll = () => {
+    const m = days.mon;
+    const next = {};
+    _HRS_DAYS.forEach(([k]) => { next[k] = { open: m.open, ranges: m.ranges.map((r) => ({ ...r })) }; });
+    commit(next);
+  };
 
   return html`
     <div class="wiz-hours">
@@ -3751,9 +3810,20 @@ function WizardHoursEditor({ value, onChange }) {
             ${days[k].open ? "Open" : "Closed"}
           </button>
           ${days[k].open ? html`
-            <input type="time" class="wiz-hours-time" value=${days[k].from} onInput=${(e) => update(k, { from: e.target.value })} />
-            <span class="wiz-hours-dash">–</span>
-            <input type="time" class="wiz-hours-time" value=${days[k].to} onInput=${(e) => update(k, { to: e.target.value })} />
+            <div class="wiz-hours-ranges">
+              ${days[k].ranges.map((r, idx) => html`
+                <div class="wiz-hours-range" key=${idx}>
+                  <input type="time" class="wiz-hours-time" value=${r.from} onInput=${(e) => updateRange(k, idx, { from: e.target.value })} />
+                  <span class="wiz-hours-dash">–</span>
+                  <input type="time" class="wiz-hours-time" value=${r.to} onInput=${(e) => updateRange(k, idx, { to: e.target.value })} />
+                  ${days[k].ranges.length > 1 ? html`
+                    <button type="button" class="wiz-hours-range-remove" aria-label=${`Remove this ${lbl} time range`}
+                            onClick=${() => removeRange(k, idx)}>×</button>
+                  ` : ""}
+                </div>
+              `)}
+              <button type="button" class="wiz-hours-add" onClick=${() => addRange(k)}>+ Add hours</button>
+            </div>
           ` : html`<span class="wiz-hours-closedlabel">Closed all day</span>`}
         </div>
       `)}
@@ -10344,31 +10414,51 @@ function HoursEditor({ value, onChange }) {
   // editor had its own strict line-parser that only matched the machine form,
   // so build-time hours silently fell back to the 9–18 default (tester #8).
   // Never throws — _parseHours falls back gracefully on unrecognised input.
+  // Build 406 — a day can carry MULTIPLE windows (split lunch/dinner
+  // service); `ranges` mirrors WizardHoursEditor's shape so a split-hours
+  // day set during onboarding round-trips here instead of collapsing to
+  // just its first window.
   const parse = (str) => {
-    const p = _parseHours(str);   // { mon: { open, from, to }, … }
+    const p = _parseHours(str);   // { mon: { open, ranges: [{from,to}, …] }, … }
     const rows = {};
     DAYS.forEach((d) => {
-      const r = p[d.id] || { open: true, from: "09:00", to: "18:00" };
+      const r = p[d.id] || { open: true, ranges: [{ from: "09:00", to: "18:00" }] };
       rows[d.id] = r.open
-        ? { closed: false, open: r.from || "09:00", close: r.to || "18:00" }
-        : { closed: true, open: "", close: "" };
+        ? { closed: false, ranges: r.ranges.map((rg) => ({ open: rg.from || "09:00", close: rg.to || "18:00" })) }
+        : { closed: true, ranges: [{ open: "", close: "" }] };
     });
     return rows;
   };
   const [rows, setRows] = useState(() => parse(value));
 
-  // Serialise back to the simple "mon: 09:00-18:00\nsun: closed" string the
-  // backend already stores, so the system prompt rendering doesn't change.
+  // Serialise back to the "mon: 09:00-18:00\nsun: closed" string the backend
+  // already stores; multiple windows on one day join with " & " (parses
+  // right back in via _parseHours's global time-range scan either way).
   const serialize = (next) => DAYS.map((d) => {
     const r = next[d.id];
     if (r.closed) return `${d.id}: closed`;
-    return `${d.id}: ${r.open}-${r.close}`;
+    return `${d.id}: ${r.ranges.map((rg) => `${rg.open}-${rg.close}`).join(" & ")}`;
   }).join("\n");
 
   const update = (id, patch) => {
     const next = { ...rows, [id]: { ...rows[id], ...patch } };
     setRows(next);
     onChange && onChange(serialize(next));
+  };
+  const updateRange = (id, idx, patch) => {
+    const ranges = rows[id].ranges.map((rg, i) => (i === idx ? { ...rg, ...patch } : rg));
+    update(id, { ranges });
+  };
+  const addRange = (id) => {
+    const ranges = rows[id].ranges;
+    const last = ranges[ranges.length - 1];
+    const open = last ? _hhmmPlus(last.close, 60) : "18:00";
+    const close = _hhmmPlus(open, 180);
+    update(id, { ranges: [...ranges, { open, close }] });
+  };
+  const removeRange = (id, idx) => {
+    if (rows[id].ranges.length <= 1) return;
+    update(id, { ranges: rows[id].ranges.filter((_, i) => i !== idx) });
   };
 
   return html`
@@ -10382,11 +10472,24 @@ function HoursEditor({ value, onChange }) {
               <input type="checkbox" checked=${r.closed} onChange=${(e) => update(d.id, { closed: e.target.checked })} />
               <span>Closed</span>
             </label>
-            <input class="db-input db-hours-time" type="time" disabled=${r.closed}
-                   value=${r.open || "09:00"} onInput=${(e) => update(d.id, { open: e.target.value })} />
-            <span class="db-hours-sep">–</span>
-            <input class="db-input db-hours-time" type="time" disabled=${r.closed}
-                   value=${r.close || "18:00"} onInput=${(e) => update(d.id, { close: e.target.value })} />
+            ${!r.closed ? html`
+              <div class="db-hours-ranges">
+                ${r.ranges.map((rg, idx) => html`
+                  <div class="db-hours-range" key=${idx}>
+                    <input class="db-input db-hours-time" type="time"
+                           value=${rg.open || "09:00"} onInput=${(e) => updateRange(d.id, idx, { open: e.target.value })} />
+                    <span class="db-hours-sep">–</span>
+                    <input class="db-input db-hours-time" type="time"
+                           value=${rg.close || "18:00"} onInput=${(e) => updateRange(d.id, idx, { close: e.target.value })} />
+                    ${r.ranges.length > 1 ? html`
+                      <button type="button" class="db-hours-range-remove" aria-label=${`Remove this ${d.label} time range`}
+                              onClick=${() => removeRange(d.id, idx)}>×</button>
+                    ` : ""}
+                  </div>
+                `)}
+                <button type="button" class="db-hours-add" onClick=${() => addRange(d.id)}>+ Add hours</button>
+              </div>
+            ` : html`<span class="db-hours-closedlabel">Closed all day</span>`}
           </div>
         `;
       })}

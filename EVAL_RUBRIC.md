@@ -5,7 +5,53 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 405**
+**Last updated: build 406**
+
+**Build 406 (Multi-window business hours — split lunch/dinner service):**
+tester feedback, prompted by a Google Business Profile hours screenshot next
+to our own onboarding "Hours" field: "for restaurant use cases and similar,
+there could be multiple open and closing in same day" (e.g. Wed 11:30
+AM–3:00 PM lunch + 6:00 PM–1:00 AM dinner). The Hours field (both the build
+wizard's `WizardHoursEditor` and the post-build settings `HoursEditor`) only
+supported ONE open/close pair per day — a real gap for restaurants, salons,
+and any business running split shifts.
+
+- `_parseHours`/`_serializeHours` (`frontend/app.js`) — the shared helpers
+  both editors already reused — now model each day as `{ open, ranges: […] }`
+  instead of a single `{ open, from, to }`. A single-range day still
+  serializes byte-identical to before ("Mon–Sat 9:30 AM–8:00 PM, Sun
+  closed"), so every existing stored `hours` string keeps parsing exactly as
+  it did — this is additive, not a breaking format change. A day with 2+
+  ranges joins them with " & " ("Wed 11:30 AM–3:00 PM & 6:00 PM–1:00 AM").
+  Parsing also handles the Google-style raw text where the second window has
+  no day prefix ("Wed 11:30am-3pm, 6pm-1am") by attaching a bare trailing
+  time-range clause to the most recently-seen day.
+- Both `WizardHoursEditor` (onboarding) and `HoursEditor` (Business profile
+  → Location & hours) got a "+ Add hours" link per day and a "×" remove
+  button once a day has 2+ ranges (hidden at exactly 1, since a day must
+  always keep at least one window). A new range defaults to starting an hour
+  after the previous one's close, clamped to 23:59 so it can never compute
+  an invalid wrap-past-midnight default.
+- `HoursEditor`'s CSS (`frontend/styles.css`) moved off a rigid 5-column
+  `grid-template-columns` keyed to nth-child position — that layout had no
+  room for a variable number of ranges — to a flex row with a
+  `.db-hours-ranges` stack, matching the pattern already used by
+  `WizardHoursEditor`. The old nth-child-based mobile media-query override
+  is gone with it (replaced by a plain `flex-basis: 100%` on the ranges
+  block).
+- Verified live end-to-end in the sandboxed browser: built a restaurant
+  agent through the wizard, added a second Wed window (11:30 AM–3:00 PM +
+  6:00 PM–1:00 AM), confirmed the "Saved as" preview matched exactly;
+  removed the second range and confirmed it cleanly collapsed back to a
+  single-range day with no stray "&"; separately, on an existing agent's
+  Business profile → Location & hours, added a split Wed, hit **Save
+  profile**, confirmed via the PATCH response that `variables.hours`
+  persisted as `"wed: 10:00-20:00 & 21:00-23:59"`, then did a full page
+  reload (fresh mount, not client nav) and confirmed the editor re-parsed
+  it back into two visible Wed rows with working remove buttons.
+
+Verdict: **PASS**. Evidence tier: Behavioral (live browser, both editors,
+full save → reload round-trip verified via network response + fresh mount).
 
 **Build 405 (Agent-switcher gradient + topbar logo size):** tester feedback
 from a screenshot of the topbar: "the drop down use a gradient color" +
