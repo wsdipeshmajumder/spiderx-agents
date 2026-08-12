@@ -6884,23 +6884,27 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
    content column + this rail without squeezing anything (narrower and it's
    suppressed rather than stealing width from real content). */
 .db-bgrail { display: none; }
-@media (min-width: 1920px) {
-  /* Widened 320px → 560px (build 399) — tester after 398's non-overlapping
-     rail shipped: "shud occupy this whole space" (boxed the full dashboard
-     area in feedback, clarified on follow-up to mean "make the rail itself
-     much bigger," not "go back to a shared background behind the cards" —
-     398's whole point was to make overlap structurally impossible, so that
-     stays). Gate raised 1680px → 1920px in lockstep so .db-main still has
-     genuine room for its widest pages (1440px-capped content + padding)
-     alongside the now-wider rail, instead of the two competing for space. */
+/* Build 400 — 399's single 1920px gate meant the rail was invisible on any
+   ordinary laptop window (most real screens/browser widths are well under
+   that), which is exactly what the tester hit next: boxed a normal page at
+   a normal width with no rail showing at all and asked for it again.
+   Tables in .db-main are fluid (width: 100%, no fixed px), so they just
+   reflow narrower rather than break — there's no real risk to lowering the
+   gate. Two tiers instead of one: a modest rail from 1440px (a genuinely
+   common laptop width) up, growing to the full 560px only past 1920px
+   where there's room to spare. */
+@media (min-width: 1440px) {
   .db-bgrail {
     display: block;
-    flex: 0 0 560px;
+    flex: 0 0 320px;
     background-image: url('/static/bg-lake.jpg');
     background-repeat: no-repeat;
     background-position: center;
     background-size: cover;
   }
+}
+@media (min-width: 1920px) {
+  .db-bgrail { flex: 0 0 560px; }
 }
 .db-main-wide .db-pageheader,
 .db-main-wide .db-content {

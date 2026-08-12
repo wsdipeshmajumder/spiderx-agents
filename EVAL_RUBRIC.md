@@ -5,7 +5,28 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 399**
+**Last updated: build 400**
+
+**Build 400 (Background rail: lower the visibility gate 1920px → 1440px):**
+tester boxed a completely different page (`Get a test call`) at their own,
+normal working window — no rail visible at all — and asked again for the
+background to fill the space. Root cause: 399's rail only widened what was
+already there past 1920px; the *entire feature* was still gated behind
+`min-width: 1920px`, which almost no real browser window (laptops included)
+actually reaches — the tester was never going to see it at their normal
+size. Verified the risk before lowering: `.db-table` is `width: 100%` with
+no fixed pixel width, so narrowing `.db-main`'s available space just
+reflows table columns, it doesn't clip or break them. Split into two
+tiers: 320px rail from 1440px (a genuinely common laptop width) up, growing
+to the full 560px only past 1920px where there's room to spare — instead
+of a single all-or-nothing breakpoint. **Verdict: PASS** — browser-verified
+at 1440×900 logged in: rail renders on the exact `Get a test call` page
+from the report, no card/content squeeze; `Call logs` (the widest
+table-heavy page in the app) reflows its columns cleanly at the same width
+with nothing clipped or broken; dark theme still hides the rail entirely
+(unchanged, verified on the same page). Evidence: **Behavioral**
+(logged-in browser, 1440×900, both the reported page and a stress-test
+table page) + **Code**.
 
 **Build 399 (Background rail widened 320px → 560px):** tester, after 398's
 non-overlapping rail shipped, boxed the *entire* dashboard area (cards
