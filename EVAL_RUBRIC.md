@@ -5,7 +5,45 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 397**
+**Last updated: build 398**
+
+**Build 398 (Background image as a genuine full-height right rail, not a
+shared background):** tester, after the build-396 size/position fix: "shud
+occupy full right side. Try again." Builds 393/394/396 all tried to paint
+the lake/forest image as `.db-main`'s own CSS `background` — which is
+fundamentally the wrong shape for "occupy the full right side": either it
+sits behind/under the tab row and page content (393, the original bug) or
+it has to shrink to a small corner watermark to avoid that (394/396,
+correctly avoided overlap but could never fill the side). A shared
+background can't both be full-height AND never overlap content, because
+it's literally in the same box as the content.
+
+Replaced it with a genuine layout element: `<aside class="db-bgrail">`
+added as a flex sibling of `<main class="db-main">` inside `.db-body`
+(`display: flex`), right after `</main>`. `.db-body` has no explicit
+`align-items` (defaults to `stretch`), so the new rail automatically
+matches the full height of the row for free — no explicit height needed.
+`flex: 0 0 320px` gives it a fixed width; `background-size: cover` fills
+that column edge-to-edge (cropping the image rather than letterboxing it,
+since the source is a wide landscape and the rail is narrow). Because it's
+a sibling column, not a background layer, it structurally cannot overlap
+`.db-main`'s content — there's no shared box for it to sit behind.
+
+Kept from build 396: hidden below `@media (min-width: 1680px)` (a rail
+stealing 320px would squeeze real content on ordinary laptop widths — the
+1440px-content-column math from build 396 still applies), and hidden
+outright in dark theme (`:root[data-theme="dark"] .db-bgrail { display:
+none; }` — a pastel watercolor doesn't belong in a dark UI regardless of
+where it sits). Removed the old `.db-main` background-image rule entirely
+(build 396) rather than layering the two approaches.
+
+**Verdict: PASS** — browser-verified on `rohan` at three states: 1920×1080
+light — the rail fills the full height of the right side, distinct from
+and non-overlapping with the two-pane Home content; 1920×1080 dark — rail
+fully hidden, pure dark canvas; 1440×900 light — rail hidden (below the
+1680px gate), content lays out exactly as it did before this feature
+existed, no squeeze. Evidence: **Behavioral** (logged-in browser, all
+three states) + **Code**.
 
 **Build 397 (Persistent, retryable error on a mid-call drop instead of
 silently bouncing to the dashboard; error boundary for the Google-login
