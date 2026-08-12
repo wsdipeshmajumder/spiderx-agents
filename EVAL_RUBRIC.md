@@ -5,7 +5,47 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 407**
+**Last updated: build 408**
+
+**Build 408 (Hours editor — mobile-width fix):** proactive follow-up
+after shipping build 406's multi-window hours editors — tester asked to
+"test hours editor on mobile width too". Resized the sandboxed browser to
+375px (iPhone-class width) and drove both editors live:
+
+- `WizardHoursEditor` (onboarding): a real bug. `.wiz-hours-row` had no
+  `flex-wrap`, so day(42px) + toggle(78px) + the ranges block couldn't
+  drop to their own line — the "to" time input got squeezed off the edge
+  of the card and the WHOLE PAGE gained horizontal scroll (confirmed via
+  screenshot: the topbar logo was visibly clipped/shifted). Fixed by
+  adding `flex-wrap: wrap` to `.wiz-hours-row` plus a `flex-basis: 100%`
+  on `.wiz-hours-ranges`/`.wiz-hours-closedlabel` inside the existing
+  600px mobile media query (same pattern already used for the settings
+  page's `.db-hours-row`), so day+toggle sit on one line and the time
+  ranges get the full card width on the line below.
+- That fix alone left a second, subtler bug once a day had 2+ windows:
+  the remove "×" button plus default 10px gaps left each
+  `<input type="time">` at only 101px measured width — Chrome's native
+  time control starts silently dropping its last character below ~117px
+  ("09:00 AM" → "09:00 AI"), which isn't visible as HTML-level overflow
+  (`scrollWidth === clientWidth` on the input) so it wouldn't have been
+  caught by a layout-overflow check alone, only by actually reading the
+  rendered text. Fixed by tightening `.wiz-hours-range`'s gap (10px→4px)
+  and shrinking `.wiz-hours-range-remove` (22px→18px) inside the same
+  mobile query, handing ~16px back to the two inputs — remeasured at
+  114px, confirmed rendering "09:00 AM"/"06:00 PM" etc. in full.
+- Settings-page `HoursEditor` (`.db-hours-*`) needed no changes — measured
+  128px per time input even with a 2-then-3-window Wed row, well above
+  the clipping threshold, and `document.documentElement.scrollWidth`
+  matched `window.innerWidth` throughout (no page-level overflow).
+- Re-verified desktop (1280px) afterward for both editors — visually
+  unchanged, confirming the fix is mobile-only via the existing
+  `@media (max-width: 600px)` block.
+
+Verdict: **PASS**. Evidence tier: Behavioral (live browser at 375px:
+found the overflow bug, fixed it, measured the residual character-clipping
+bug via `getBoundingClientRect()`, fixed that, then re-verified both
+editors — add/remove/toggle interactions — render correctly at both
+375px and 1280px).
 
 **Build 407 (Skip the mount-time /api/agents call when logged out —
 no more cosmetic 401 in the Network tab):** tester report (relayed):

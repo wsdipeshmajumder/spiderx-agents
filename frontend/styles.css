@@ -2828,7 +2828,7 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 /* Per-day business-hours editor (Build 299) */
 .wiz-hours { display: flex; flex-direction: column; gap: 6px;
   border: 1px solid #d8dae3; border-radius: 12px; padding: 10px 12px; background: #fafbfc; }
-.wiz-hours-row { display: flex; align-items: center; gap: 10px; min-height: 34px; }
+.wiz-hours-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; min-height: 34px; }
 .wiz-hours-row.is-closed { opacity: 0.72; }
 .wiz-hours-day { width: 42px; flex-shrink: 0; align-self: flex-start; margin-top: 6px; font-size: 13.5px; font-weight: 700; color: #1f2937; }
 .wiz-hours-toggle { width: 78px; flex-shrink: 0; align-self: flex-start; font: inherit; font-size: 12.5px; font-weight: 600;
@@ -2840,7 +2840,7 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
    service etc.), so the single from/to pair became a stacked list. */
 .wiz-hours-ranges { display: flex; flex-direction: column; gap: 6px; padding: 4px 0; flex: 1; min-width: 0; }
 .wiz-hours-range { display: flex; align-items: center; gap: 10px; }
-.wiz-hours-time { font: inherit; font-size: 13px; color: #1f2937; background: #fff;
+.wiz-hours-time { flex: 1 1 0; min-width: 0; font: inherit; font-size: 13px; color: #1f2937; background: #fff;
   border: 1px solid #d8dae3; border-radius: 8px; padding: 5px 8px; }
 .wiz-hours-time:focus { outline: none; border-color: #818cf8; box-shadow: 0 0 0 3px rgba(129,140,248,.18); }
 .wiz-hours-dash { color: #9aa0ad; }
@@ -12536,6 +12536,25 @@ textarea.db-modal-input { resize: vertical; min-height: 96px; font-family: inher
    * claim the full row width on a phone instead of squeezing in beside
    * the day label + Closed checkbox. */
   .db-hours-ranges, .db-hours-closedlabel { flex-basis: 100%; }
+  /* Same fix for the build-wizard's Hours field (.wiz-hours-row) — at
+   * phone widths, day(42px) + toggle(78px) left ~180px for the ranges
+   * block, not enough for two <input type="time"> side by side, so the
+   * "to" time overflowed the card and pushed the whole page into
+   * horizontal scroll (caught testing at 375px). Dropping the ranges
+   * block to its own full-width line below day+toggle gives each time
+   * input the room .wiz-hours-time's `flex:1 1 0` needs to shrink into. */
+  .wiz-hours-ranges, .wiz-hours-closedlabel { flex-basis: 100%; }
+  /* Once a day has a 2nd window, its remove "×" button plus the default
+   * 10px gaps ate enough of that reclaimed width that Chrome's native
+   * <input type="time"> started silently dropping its last character
+   * ("09:00 AM" → "09:00 AI") well before any HTML-visible overflow —
+   * confirmed by measuring: 101px per input vs. ~117px needed to render
+   * the full "hh:mm AM" text (a single-window row, with no remove button
+   * competing for space, measured 119px and rendered fine). Tightening
+   * the row's own gap and shrinking the remove button hands that ~16px
+   * back to the two inputs. */
+  .wiz-hours-range { gap: 4px; }
+  .wiz-hours-range-remove { width: 18px; height: 18px; font-size: 13px; }
 
   /* Outcome rows: the label + count layout (1fr auto) is already
    * reasonable, but the 18 px column gap eats space. Tighten it. */
