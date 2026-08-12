@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 402;
+const SXAI_BUILD = 403;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -19065,7 +19065,18 @@ function App() {
   }, []);
 
   const refreshAgents = useCallback(async () => {
-    try { setAgents(await (await fetch("/api/agents")).json()); } catch {}
+    // This fires unconditionally on mount (see the boot useEffect below),
+    // often before login finishes — an unauthenticated /api/agents 401s
+    // with an error-detail OBJECT, not a list. Without the Array.isArray
+    // guard that object was stored as-is; DashboardAgentsList's `agents.
+    // map(...)` then threw "filtered.map is not a function" and the
+    // AppErrorBoundary caught it as a blank "Something went wrong" right
+    // after a fresh login (build 403 — reproduced with a real OTP login).
+    try {
+      const r = await fetch("/api/agents");
+      const data = r.ok ? await r.json() : [];
+      setAgents(Array.isArray(data) ? data : []);
+    } catch { setAgents([]); }
   }, []);
 
   // call timer
@@ -19933,7 +19944,13 @@ function App() {
           try {
             const r = await fetch("/api/agents");
             const arr = r.ok ? await r.json() : [];
-            goRoute(Array.isArray(arr) && arr.length > 0 ? "/agents" : "/");
+            const list = Array.isArray(arr) ? arr : [];
+            // Feed the freshly-authenticated fetch straight into `agents`
+            // instead of leaving DashboardAgentsList to whatever the mount-time
+            // refreshAgents() call left behind — that one usually fires while
+            // still logged out and used to poison the state with a 401 body.
+            setAgents(list);
+            goRoute(list.length > 0 ? "/agents" : "/");
           } catch {
             goRoute("/agents");
           }

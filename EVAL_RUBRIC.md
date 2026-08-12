@@ -5,7 +5,42 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 402**
+**Last updated: build 403**
+
+**Build 403 (Fix "Something went wrong" crash right after login):** tester
+report: "logout and then after login this is coming" (the AppErrorBoundary
+card added in build 397). Reproduced on a completely fresh login too — no
+prior logout needed. Root-caused with a real OTP login against a local
+server (`EMAIL_PROVIDER=log` override so the code prints to the server log
+instead of a real inbox — no email sent) and read the actual console error
+instead of guessing from the screenshot: `TypeError: filtered.map is not a
+function` inside `DashboardAgentsList`.
+
+`App`'s `refreshAgents()` fires unconditionally on mount, before login
+completes on a cold load. An unauthenticated `/api/agents` 401s with an
+error-detail **object** (`{"detail": "authentication required"}`), not a
+list — and `refreshAgents` did `setAgents(await res.json())` with no
+`response.ok` check and no shape validation, storing that object as-is.
+Nothing re-fetches `agents` after login succeeds, so `DashboardAgentsList`
+later renders with that poisoned object; `agents.filter/.map(...)` throws,
+and `AppErrorBoundary` (build 397) catches it as a blank "Something went
+wrong" card instead of the crash being silent — an improvement over before,
+but the underlying crash itself was still unfixed until now.
+
+Fixed both ends: `refreshAgents` now checks `r.ok` and guards with
+`Array.isArray(data) ? data : []` (matches the safe pattern already used
+elsewhere, e.g. the admin healthcheck page). `onAuthed`'s own post-login
+`/api/agents` fetch (previously used only to decide the post-login route)
+now also feeds `setAgents(list)` directly — the freshly-authenticated
+fetch replaces whatever `refreshAgents` left behind while still logged
+out, rather than leaving that stale/poisoned state in place.
+
+**Verdict: PASS** — browser-verified end-to-end: cleared all local storage,
+loaded `/login` fresh, requested + entered a real OTP for the account with
+saved agents, landed on `/agents` with `agents` populated correctly and no
+crash (previously crashed 100% of the time on this exact path, verified
+before the fix with the same steps). Evidence: **Behavioral** (real login,
+console error captured before + confirmed clean after) + **Code**.
 
 **Build 402 (Native audio-player popup was clipped by the Call-log table's
 rounded-corner wrapper):** tester screenshot: a red box around the
