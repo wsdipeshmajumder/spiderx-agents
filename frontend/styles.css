@@ -6904,7 +6904,24 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   }
 }
 @media (min-width: 1920px) {
-  .db-bgrail { flex: 0 0 560px; }
+  /* Build 401 — first attempt just added max-width: 1600px to .db-main,
+     which did nothing: .db-main is `flex: 1` (grow: 1) and .db-bgrail was
+     `flex: 1 1 auto` (also grow: 1) — EQUAL grow factors split the row
+     50/50 during free-space distribution regardless of either box's
+     max-width, and a max-width only engages if a box's *assigned* share
+     would exceed it (960px assigned vs 1600px cap here — never triggers).
+     Measured live: mainWidth=960, railWidth=960 on a 1920px viewport with
+     no sidebar visible — confirms the 50/50 split, not a cap.
+
+     Fix: give .db-main `flex-grow: 0` in this tier so it stops competing
+     for free space at all — it's exactly `min(its content's natural width,
+     1600px)` instead of a fraction of the row — and let .db-bgrail (still
+     flex: 1 1 auto, the only grower left) claim 100% of whatever's left.
+     No page's own internal wrapper caps wider than 1500px (checked), so
+     1600px never clips real content — it just stops .db-main from
+     stretching into empty space it doesn't need. */
+  .db-main { flex: 0 1 auto; max-width: 1600px; }
+  .db-bgrail { flex: 1 1 auto; }
 }
 .db-main-wide .db-pageheader,
 .db-main-wide .db-content {
@@ -7290,13 +7307,23 @@ button.db-stat:disabled { cursor: default; opacity: 0.7; }
   background: #ffffff;
   border: 1px solid #e6e7ec;
   border-radius: 12px;
-  overflow: hidden;
+  /* No overflow: hidden — it clipped native browser popups anchored to
+     content inside the table, most visibly a recording <audio controls>'s
+     volume-slider popup on a row near the top of the table (nowhere to
+     render above the row without escaping this box). Same problem would
+     hit a native <select> dropdown or a title tooltip. Corners are rounded
+     on the outer table cells directly instead (build 402) — the standard
+     way to get a rounded table wrapper without overflow:hidden. */
 }
 .db-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
 }
+.db-table thead tr:first-child th:first-child { border-top-left-radius: 12px; }
+.db-table thead tr:first-child th:last-child { border-top-right-radius: 12px; }
+.db-table tbody tr:last-child td:first-child { border-bottom-left-radius: 12px; }
+.db-table tbody tr:last-child td:last-child { border-bottom-right-radius: 12px; }
 .db-table thead th {
   text-align: left;
   font-size: 11.5px;

@@ -5,7 +5,47 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 400**
+**Last updated: build 401**
+
+**Build 401 (Background rail: give it the majority of the row instead of a
+fixed strip):** tester screenshot of the Agents list (1 agent — sparse
+content) showed the rail as a bounded box with a big white gap of unused
+`.db-main` between the card and the image; "shud have been entire screen
+except left menu."
+
+First attempt (within this same fix) added `max-width: 1600px` to
+`.db-main` in the `min-width: 1920px` tier, expecting the rail to absorb
+whatever `.db-main` didn't use. Measured live and it did nothing:
+`.db-main` was still `flex: 1` (grow: 1) and the rail was `flex: 1 1 auto`
+(also grow: 1) — **equal** grow factors split the row 50/50 during flex
+free-space distribution regardless of either side's `max-width` (a
+`max-width` only engages if a box's *assigned* share would exceed it; at
+1920px a 50% share is 960px, nowhere near the 1600px cap, so it never
+triggered). Confirmed via `getBoundingClientRect()`: `mainWidth: 960,
+railWidth: 960` on a 1920px viewport.
+
+Real fix: `.db-main { flex: 0 1 auto; max-width: 1600px; }` in the
+`min-width: 1920px` tier — `flex-grow: 0` stops it competing for free
+space at all, so it sizes to its own content's natural width (shrink-wrap,
+capped at 1600px as a safety ceiling — no page's internal wrapper caps
+wider than 1500px, checked in build 401's first pass). `.db-bgrail`
+(`flex: 1 1 auto`, the only remaining grower) then claims 100% of
+whatever's left. Re-measured on the exact reported page (Agents list,
+1920px): `mainWidth: 816, railWidth: 1104` — the rail now gets the
+majority (57%) of the row, and the ratio is content-driven per page
+instead of a fixed split, so a denser page (more cards, a filled Chat
+overview) naturally leaves proportionally less for the rail without any
+per-page changes. The 1440–1919px tier (build 400) is untouched — this
+change is scoped to the `min-width: 1920px` block only.
+
+**Verdict: PASS** — browser-verified at 1920×1080 on both the reported
+page (`/agents`, sparse — rail now dominant, no dead gap) and a
+content-heavy page (Chat widget Home, two populated cards — rail still
+generous, no overlap or squeeze); re-verified the 1600px `/agent/.../chat`
+width (1440–1919px tier) renders identically to build 400, confirming no
+regression to the lower tier. Evidence: **Behavioral** (logged-in browser,
+`getBoundingClientRect()` measurements + screenshots, 3 viewport/page
+combinations) + **Code**.
 
 **Build 400 (Background rail: lower the visibility gate 1920px → 1440px):**
 tester boxed a completely different page (`Get a test call`) at their own,
