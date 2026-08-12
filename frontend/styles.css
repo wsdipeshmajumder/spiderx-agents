@@ -6884,10 +6884,18 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
    content column + this rail without squeezing anything (narrower and it's
    suppressed rather than stealing width from real content). */
 .db-bgrail { display: none; }
-@media (min-width: 1680px) {
+@media (min-width: 1920px) {
+  /* Widened 320px → 560px (build 399) — tester after 398's non-overlapping
+     rail shipped: "shud occupy this whole space" (boxed the full dashboard
+     area in feedback, clarified on follow-up to mean "make the rail itself
+     much bigger," not "go back to a shared background behind the cards" —
+     398's whole point was to make overlap structurally impossible, so that
+     stays). Gate raised 1680px → 1920px in lockstep so .db-main still has
+     genuine room for its widest pages (1440px-capped content + padding)
+     alongside the now-wider rail, instead of the two competing for space. */
   .db-bgrail {
     display: block;
-    flex: 0 0 320px;
+    flex: 0 0 560px;
     background-image: url('/static/bg-lake.jpg');
     background-repeat: no-repeat;
     background-position: center;

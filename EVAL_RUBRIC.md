@@ -5,7 +5,28 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 398**
+**Last updated: build 399**
+
+**Build 399 (Background rail widened 320px → 560px):** tester, after 398's
+non-overlapping rail shipped, boxed the *entire* dashboard area (cards
+included) in feedback and said the image "shud occupy this whole space."
+Ambiguous whether that meant "make the rail column itself bigger" or "go
+back to a shared background behind the cards" (which 393/394/396 already
+tried and reverted, each time because the image showed through behind real
+content). Asked directly rather than guess a 5th time — tester confirmed:
+widen the rail, keep the non-overlapping architecture (398's whole point
+was making overlap structurally impossible; that stays).
+`.db-bgrail`'s `flex: 0 0 320px` → `flex: 0 0 560px` (75% wider). Raised
+the visibility gate `@media (min-width: 1680px)` → `1920px` in lockstep —
+at the old gate width, sidebar + a reasonably wide page's content + a
+560px rail would genuinely compete for space; 1920px (a common real-world
+monitor width, not just a rare ultra-wide) leaves `.db-main` room for its
+widest pages (1440px-capped content + padding) alongside the bigger rail.
+**Verdict: PASS** — browser-verified at 1920×1080 logged in: rail renders
+visibly wider (~560px, roughly 30% of the viewport) with no content
+squeeze or overlap; dark theme and sub-1920px widths unaffected (both
+untouched by this change). Evidence: **Behavioral** (logged-in browser,
+1920×1080) + **Code**.
 
 **Build 398 (Background image as a genuine full-height right rail, not a
 shared background):** tester, after the build-396 size/position fix: "shud
