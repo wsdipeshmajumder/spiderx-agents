@@ -6871,57 +6871,41 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   flex-direction: column;
   background: #f7f8fa;
 }
-/* Ambient lake/forest scene as its OWN right-side rail (build 397 — builds
-   393/394 tried to paint it as .db-main's own background, which either sat
-   behind/under the tab row and page content (393) or shrank to a small
-   corner watermark to avoid that (394); tester wants the full right side
-   occupied, which a shared background can't do without either covering
-   content or being tiny. A genuine flex sibling of <main> — a dedicated
-   column — fills the entire height (default align-items: stretch on
-   .db-body) with `background-size: cover`, and can never overlap .db-main's
-   content because it isn't behind it, it's beside it. Hidden by default;
-   shown only when the viewport is wide enough to fit sidebar + a reasonable
-   content column + this rail without squeezing anything (narrower and it's
-   suppressed rather than stealing width from real content). */
-.db-bgrail { display: none; }
-/* Build 400 — 399's single 1920px gate meant the rail was invisible on any
-   ordinary laptop window (most real screens/browser widths are well under
-   that), which is exactly what the tester hit next: boxed a normal page at
-   a normal width with no rail showing at all and asked for it again.
-   Tables in .db-main are fluid (width: 100%, no fixed px), so they just
-   reflow narrower rather than break — there's no real risk to lowering the
-   gate. Two tiers instead of one: a modest rail from 1440px (a genuinely
-   common laptop width) up, growing to the full 560px only past 1920px
-   where there's room to spare. */
+/* Ambient lake/forest scene — build 402/403, a true CSS background on
+   .db-main itself (builds 397–401's separate flex/absolute "rail" element
+   was the wrong model: tester's correction — "this is a background image,
+   so all elements would be in front of it" — a rail that resizes or
+   overlays .db-main is a LAYOUT element competing for space, not a
+   background. A background-image always paints behind an element's own
+   children by definition, so .db-main keeps its original, completely
+   unmodified `flex: 1` — zero width/layout impact on any page.
+     403 fixes 402's sizing: `background-size: auto calc(100vh - 56px)`
+   (height-locked, width auto) seemed right in theory ("clip to a
+   right-hand slice") but in practice the computed width routinely landed
+   close to or under .db-main's actual box width — nearly the WHOLE photo
+   rendered (both its left and right tree clusters visible at once,
+   confirmed live: 844px‑tall render → ~1501px wide vs. a 1600px-wide box)
+   instead of a cropped slice, and on a densely-packed grid page the image
+   showed through *every* gap between cards, not just the true right edge
+   — busy and unintentional-looking rather than a clean accent.
+     `background-size: cover` instead: ALWAYS fills .db-main's entire box
+   exactly, in both dimensions, cropping instead of leaving any edge
+   unfilled — deterministic regardless of viewport or how much real
+   content there is, which is what "entire screen except the left menu"
+   actually requires (a fit-dependent slice can't guarantee that; a
+   uniform cover fill always does). Legibility unchanged from before: the
+   image's own top ~20% is a soft near-white fog blending into #f7f8fa,
+   opaque .db-panel cards occlude it completely wherever they sit, and
+   `background-position: center` keeps the photo's namesake lake (its
+   highest-contrast midsection) away from both the page-header/tab strip
+   at the very top and the page edges. */
 @media (min-width: 1440px) {
-  .db-bgrail {
-    display: block;
-    flex: 0 0 320px;
+  .db-main {
     background-image: url('/static/bg-lake.jpg');
     background-repeat: no-repeat;
     background-position: center;
     background-size: cover;
   }
-}
-@media (min-width: 1920px) {
-  /* Build 401 — first attempt just added max-width: 1600px to .db-main,
-     which did nothing: .db-main is `flex: 1` (grow: 1) and .db-bgrail was
-     `flex: 1 1 auto` (also grow: 1) — EQUAL grow factors split the row
-     50/50 during free-space distribution regardless of either box's
-     max-width, and a max-width only engages if a box's *assigned* share
-     would exceed it (960px assigned vs 1600px cap here — never triggers).
-     Measured live: mainWidth=960, railWidth=960 on a 1920px viewport with
-     no sidebar visible — confirms the 50/50 split, not a cap.
-
-     Fix: give .db-main `flex-grow: 0` in this tier so it stops competing
-     for free space at all — it's exactly `min(its content's natural width,
-     1600px)` instead of a fraction of the row — and let .db-bgrail (still
-     flex: 1 1 auto, the only grower left) claim 100% of whatever's left.
-     No page's own internal wrapper caps wider than 1500px (checked), so
-     1600px never clips real content — it just stops .db-main from
-     stretching into empty space it doesn't need. */
-  .db-main { flex: 0 1 auto; max-width: 1600px; }
-  .db-bgrail { flex: 1 1 auto; }
 }
 .db-main-wide .db-pageheader,
 .db-main-wide .db-content {
@@ -9659,7 +9643,6 @@ button.oc-kind:disabled { cursor: default; }
 
 /* Main canvas */
 :root[data-theme="dark"] .db-main { background: #0b0d14; }
-:root[data-theme="dark"] .db-bgrail { display: none; }
 :root[data-theme="dark"] .db-pageheader-title { color: #f5f7fb; }
 :root[data-theme="dark"] .db-pageheader-sub { color: #9aa0ad; }
 

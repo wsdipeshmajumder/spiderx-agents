@@ -5,7 +5,62 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 403**
+**Last updated: build 404**
+
+**Build 404 (Background image: true CSS background on `.db-main`, not a
+layout element):** tester correction: "u r pushing the elements on screen
+for the background images, as it means, this is a background image, so
+all elements would be in front of it." Builds 397–401's `<aside
+class="db-bgrail">` — a real flex/absolute sibling of `<main>` — was
+fundamentally the wrong model: a background never resizes or displaces
+content by definition, and a separate layout box competing for space (or
+overlaying with its own stacking context) does exactly that. Reworked from
+scratch:
+
+- Removed the `<aside class="db-bgrail">` DOM element entirely (reverted
+  the build-398 `DashboardShell` change) and every `.db-bgrail`/flex/
+  `max-width` rule from builds 397–401.
+- `.db-main` keeps its original, completely unmodified `flex: 1` — zero
+  width or layout impact on any page, sparse or dense, matching "all
+  elements in front of it": a CSS `background-image` always paints behind
+  an element's own children, so content needs no repositioning at all to
+  sit "in front" — it already does, structurally, by definition.
+- Sizing iterated twice in this same build. First tried
+  `background-size: auto calc(100vh - 56px)` (height-locked to `.db-main`'s
+  real box height, width auto) on the theory that the resulting width
+  would be much wider than any reasonable content box, so
+  `background-position: right` + `no-repeat` would clip to just a
+  right-hand slice sized to whatever's genuinely empty. Measured live and
+  it didn't hold: at 1600×900 the computed size was `auto 844px` → ≈1501px
+  wide against a 1600px-wide `.db-main` box — nearly the *entire* photo
+  rendered (both its left and right tree clusters visible at once), and on
+  a 27-card dense grid page it showed through every inter-card gutter, not
+  just the true right edge — busy rather than a clean accent. Switched to
+  `background-size: cover` (with `background-position: center`) instead:
+  deterministically fills `.db-main`'s entire box in both dimensions
+  regardless of viewport or content density, cropping rather than leaving
+  any edge unfilled — the only sizing mode that reliably delivers "entire
+  screen except the left menu" on every page, not just favorable ones.
+- Kept from build 400: `@media (min-width: 1440px)` gate (hidden below
+  that — no page's content is ever displaced either way, so this is purely
+  "don't bother painting it where there's no room to appreciate it", not a
+  squeeze-avoidance measure like it was for the old rail model). Kept dark
+  theme's existing `:root[data-theme="dark"] .db-main { background:
+  #0b0d14; }` full-shorthand override, which already resets
+  `background-image` to `none` via the cascade — removed the now-orphaned
+  `.db-bgrail` dark rule (the class no longer exists).
+
+**Verdict: PASS** — browser-verified at 1600×900 on the Chat widget Home
+tab (moderate content: two populated cards + a tab row): image fills
+`.db-main` edge-to-edge top-to-bottom, every card and every tab label
+fully legible on top of it, dark theme fully clean (image absent, pure
+`#0b0d14`), and 1280px width (below the gate) renders identically to
+before this feature existed. Also checked the 27-agent dense grid page at
+1600px to confirm `cover` deterministically fills the box there too (the
+image shows through the grid's own inter-card gutters on that specific
+page, which is expected and correct for a true background under a
+full-width grid — not a bug in this fix). Evidence: **Behavioral**
+(logged-in browser, both pages, light + dark) + **Code**.
 
 **Build 403 (Fix "Something went wrong" crash right after login):** tester
 report: "logout and then after login this is coming" (the AppErrorBoundary
