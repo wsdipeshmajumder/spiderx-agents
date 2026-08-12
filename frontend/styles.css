@@ -6427,7 +6427,24 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
 .db-switcher-trigger {
   margin-bottom: 0;   /* root handles spacing */
   display: flex; align-items: center; gap: 9px;
+  /* Build 405 — gradient trigger. Reuses the indigo brand gradient already
+     used elsewhere for primary actions (#4f46e5 → #6366f1) rather than the
+     pink/purple gradient reserved for the active sidebar item (build 230
+     comment above), so switching agents doesn't read as "you're on this
+     page." Text/icon flip to white for contrast against the darker fill. */
+  background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+  border-color: transparent;
+  color: #ffffff;
 }
+.db-switcher-trigger:hover { background: linear-gradient(135deg, #4338ca 0%, #4f46e5 100%); border-color: transparent; }
+.db-switcher-trigger svg { color: #ffffff; }
+:root[data-theme="dark"] .db-switcher-trigger {
+  background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+  border-color: transparent;
+  color: #ffffff;
+}
+:root[data-theme="dark"] .db-switcher-trigger:hover { background: linear-gradient(135deg, #4338ca 0%, #4f46e5 100%); }
+:root[data-theme="dark"] .db-switcher-trigger svg { color: #ffffff; }
 .db-switcher-label {
   flex: 1; min-width: 0;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

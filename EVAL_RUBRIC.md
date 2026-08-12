@@ -5,7 +5,35 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 404**
+**Last updated: build 405**
+
+**Build 405 (Agent-switcher gradient + topbar logo size):** tester feedback
+from a screenshot of the topbar: "the drop down use a gradient color" +
+"spiderx logo reduce by 10%, use ur judgement."
+
+- `.db-switcher-trigger` (the "Rohan"/agent-name pill at the top of the
+  sidebar, `AgentSwitcher` component) now uses `linear-gradient(135deg,
+  #4f46e5 0%, #6366f1 100%)` — the same indigo brand gradient already used
+  elsewhere for primary actions — instead of the flat `#f4f5f9` surface
+  from build 242. Deliberately NOT the pink→purple gradient reserved for
+  the active sidebar nav item (`.db-nav-item.active`, build 230): that
+  gradient means "you're on this page," and reusing it on the switcher
+  would blur that signal. Text/icon flip to white for contrast; hover
+  state darkens to `#4338ca → #4f46e5`; dark-theme override kept identical
+  (indigo reads fine on both `#f7f8fa` and `#0b0d14` canvases, needed no
+  separate palette).
+- Topbar `SpiderXLogo` height reduced from 44 to 40 (44 × 0.9 = 39.6,
+  rounded) — the one dashboard-shell usage (`DashboardShell`, matches the
+  tester's screenshot); the three other `height=` call sites elsewhere in
+  the app (homepage header, a different page header, footer) were left
+  untouched as out of scope.
+- Verified live in the sandboxed browser against `/agents/<id>` (Ria):
+  gradient pill renders correctly and stays legible in both light and
+  dark theme (`data-theme="dark"` toggle); logo visibly smaller relative
+  to the workspace-switcher pill beside it, no layout shift.
+
+Verdict: **PASS**. Evidence tier: Behavioral (live browser screenshot,
+both themes).
 
 **Build 404 (Background image: true CSS background on `.db-main`, not a
 layout element):** tester correction: "u r pushing the elements on screen
