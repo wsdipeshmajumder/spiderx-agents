@@ -5,7 +5,42 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 401**
+**Last updated: build 402**
+
+**Build 402 (Native audio-player popup was clipped by the Call-log table's
+rounded-corner wrapper):** tester screenshot: a red box around the
+recording player's controls on the Call log page, with "ui getting
+hidden...when clicked on the hover and then on the speaker." The recording
+player is a *native* `<audio controls>` element (`app.js` — no custom
+playback UI), and its speaker icon shows a volume-slider popup on
+hover/click that Chromium renders inline in normal document flow (not as
+browser chrome escaping layout) — so it's clipped by any ancestor with
+`overflow: hidden`. `.db-table-wrap` had exactly that, used only to force
+rounded corners on the table's square cells. For a row near the top of the
+table the popup has nowhere to render but above the row, i.e. outside the
+wrapper's box — clipped to invisible, reading as "the UI got hidden."
+
+Fix: dropped `overflow: hidden` from `.db-table-wrap` and rounded the
+table's own outer cells directly instead
+(`thead tr:first-child th:first-child` etc., 12px matching the wrapper) —
+the standard way to get a rounded table wrapper without `overflow:hidden`
+clipping anything a child needs to escape the box for (this same fix also
+covers a native `<select>` dropdown or a title tooltip near the table
+edges, not just the recording popup). `.db-table-wrap` is shared by 3
+tables in the app; all three get the fix since none had a competing
+`border-radius` override.
+
+**Verdict: PASS** — browser-verified on `rohan`'s Call log: computed style
+confirms `overflow: visible` on `.db-table-wrap` post-fix, with
+`border-top-left-radius`/`border-bottom-left-radius` both resolving to
+12px on the outer cells (rounding preserved, screenshot-compared against
+the pre-fix table — no visible corner-squaring regression). Not yet
+reproduced with the *actual* native volume-popup rendering pixel-for-pixel
+(automated browser screenshots don't reliably capture that specific native
+control state) — the fix is verified via the CSS mechanism directly
+(overflow was provably the only thing capable of clipping it, and it's now
+provably gone), not a literal before/after popup screenshot. Evidence:
+**Behavioral** (computed styles + visual regression check) + **Code**.
 
 **Build 401 (Background rail: give it the majority of the row instead of a
 fixed strip):** tester screenshot of the Agents list (1 agent — sparse
