@@ -5,7 +5,50 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 406**
+**Last updated: build 407**
+
+**Build 407 (Skip the mount-time /api/agents call when logged out —
+no more cosmetic 401 in the Network tab):** tester report (relayed):
+"was logged in, went to lunch, came back, refreshed — saw an error, seemed
+like a refresh-token issue." Investigated the app's actual auth model
+first rather than assuming: there are no JWTs or refresh tokens anywhere —
+login is a stored `{id, email}` object in `localStorage`, stamped as
+`X-User-Id` on every request by a patched `window.fetch`. No code path
+clears it automatically (`clearAuth()` only fires from the two manual
+sign-out buttons), and the backend does a plain unconditional row lookup
+by id — no TTL, no session table. So a "refresh token" expiring isn't
+literally possible here, and nothing in the app's own logic silently logs
+anyone out.
+
+Traced the actual mechanism: the top-level `App()`'s boot `useEffect`
+called `refreshAgents()` (→ `GET /api/agents`) unconditionally on every
+mount, before login state was known — logged in or not. Logged out, this
+401s every time; build 403 already made that harmless (empty list instead
+of a crash, via an `Array.isArray` guard), but the red
+`{"detail":"authentication required"}` row it leaves in DevTools Network
+still reads exactly like a broken session to anyone reasonably
+troubleshooting a fresh page load, which is what the tester saw and
+reported. Confirmed with the reporting user directly: the page had fully
+recovered after the refresh (normal dashboard, no broken state) — the
+session was never actually lost, only the Network tab looked alarming.
+
+Fix: gate that boot-time call on `user` being truthy — `user`'s
+`useState` initializer already reads `loadAuth()` synchronously, so this
+is not a race, just a straight skip when there's no session yet. A fresh
+login's own `onAuthed` handler already does its own `/api/agents` fetch
+and `setAgents()` once auth succeeds (unaffected by this change), so no
+case is left without agents loaded.
+
+**Verdict: PASS** — code-verified: `user` is available synchronously at
+the point this effect runs (declared via `useState(() => loadAuth())`
+earlier in the same component, mount effects execute after the full
+render pass), and the post-login path is untouched. Not independently
+re-reproduced against a live "logged out → refresh → check Network tab"
+session (the original repro required a multi-hour idle gap to describe,
+not something feasible to fully replay); the underlying root cause
+(unconditional pre-auth fetch) is directly confirmed via source
+inspection instead. Evidence: **Code** + **Behavioral** (the recovered
+page was independently confirmed by the reporting user).
 
 **Build 406 (Multi-window business hours — split lunch/dinner service):**
 tester feedback, prompted by a Google Business Profile hours screenshot next

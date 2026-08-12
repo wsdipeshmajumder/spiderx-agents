@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 406;
+const SXAI_BUILD = 407;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -19163,17 +19163,21 @@ function App() {
   useEffect(() => {
     fetch("/api/tweaks/schema").then((r) => r.json()).then(setSchema).catch(() => {});
     fetch("/api/presets").then((r) => r.json()).then(setPresets).catch(() => {});
-    refreshAgents();
+    // Only fetch agents if a session is already present at mount (`user` is
+    // seeded synchronously from localStorage — see its useState initializer
+    // — so this is never a race). Skipped when logged out: previously this
+    // fired unconditionally and 401'd every time, which build 403 made
+    // harmless (empty list, no crash) but still left a confusing red
+    // "authentication required" row in the Network tab for anyone
+    // reasonably assuming a 401 there means their session broke (build 407
+    // — tester report: "refreshed after lunch, saw an auth error" turned
+    // out to be this exact call, session was fine). A fresh login's own
+    // handler already fetches agents itself once auth succeeds, so this
+    // skip never leaves the list stale.
+    if (user) refreshAgents();
   }, []);
 
   const refreshAgents = useCallback(async () => {
-    // This fires unconditionally on mount (see the boot useEffect below),
-    // often before login finishes — an unauthenticated /api/agents 401s
-    // with an error-detail OBJECT, not a list. Without the Array.isArray
-    // guard that object was stored as-is; DashboardAgentsList's `agents.
-    // map(...)` then threw "filtered.map is not a function" and the
-    // AppErrorBoundary caught it as a blank "Something went wrong" right
-    // after a fresh login (build 403 — reproduced with a real OTP login).
     try {
       const r = await fetch("/api/agents");
       const data = r.ok ? await r.json() : [];
