@@ -790,18 +790,169 @@ Connector ids: {connectors}
 Map words to the closest existing id. Do not invent new ones."""
 
 
+_TEMPLATE_VAR_RE = re.compile(r"\{\{\s*([A-Za-z_][\w-]*)\s*\}\}")
+
+
 def _substitute_variables(text: str, variables: dict[str, Any] | None) -> str:
     """Replace `{{key}}` placeholders in `text` with values from `variables`.
     Used at session-open time so users can template per-agent values
-    (business_name, timezone, …) into greetings and system prompts."""
+    (business_name, timezone, …) into greetings and system prompts.
+
+    An unresolved placeholder is left as literal `{{key}}` text, unchanged —
+    do NOT "fix" this to blank it out. Some operators (e.g. Eva-authored
+    prompts) deliberately use `{{lower_snake_case}}` as in-prompt notation for
+    conversation state the MODEL fills in as it talks (`{{caller_name}}`,
+    `{{price_quoted}}`) — those were never meant to be resolved by this
+    function at all, and blanking them corrupts the template text the model
+    is reading as an instruction. Genuine deploy-time config gaps (an
+    `{{ALL_CAPS}}` constant nobody set under Variables) are surfaced
+    separately via `agent_config_warnings()` — that's a warning to fix the
+    data, not a reason to silently rewrite the prompt at runtime."""
     if not text or not variables:
         return text or ""
-    import re as _re
     def repl(m):
-        key = m.group(1).strip()
-        v = variables.get(key)
+        v = variables.get(m.group(1).strip())
         return str(v) if v is not None else m.group(0)
-    return _re.sub(r"\{\{\s*([A-Za-z_][\w-]*)\s*\}\}", repl, text)
+    return _TEMPLATE_VAR_RE.sub(repl, text)
+
+
+def _unresolved_template_vars(text: str, variables: dict[str, Any] | None, *, all_caps_only: bool = False) -> list[str]:
+    """Names of `{{key}}` placeholders in `text` that `variables` can't
+    resolve. Order-preserved, de-duplicated. Pure text scan — no model call,
+    safe to run on every save and every healthcheck tick.
+
+    `all_caps_only` restricts to `{{ALL_CAPS}}`-style names (matching
+    `^[A-Z][A-Z0-9_]*$`) — the near-universal convention for "deploy-time
+    constant to fill in", as distinct from `{{lower_snake_case}}` state-slot
+    notation a prompt author may legitimately leave unresolved on purpose
+    (see `_substitute_variables`). Used when scanning the freeform
+    system_prompt body, where that notation is common; NOT used for
+    persona/greeting/chat-instructions, which are short direct-output
+    strings unlikely to contain internal pseudo-code."""
+    if not text:
+        return []
+    variables = variables or {}
+    out: list[str] = []
+    for m in _TEMPLATE_VAR_RE.finditer(text):
+        key = m.group(1)
+        if all_caps_only and not re.match(r"^[A-Z][A-Z0-9_]*$", key):
+            continue
+        if variables.get(key) is None and key not in out:
+            out.append(key)
+    return out
+
+
+# Connector id → alternate names an operator/Eva might reasonably write in
+# prose when instructing the model to use it (the system_prompt is free text,
+# not code, so it isn't required to use the exact tool id).
+_CONNECTOR_PROMPT_ALIASES: dict[str, tuple[str, ...]] = {
+    "email_send":            ("email_send", "send_email"),
+    "sms_send":               ("sms_send", "send_sms"),
+    "calendar_book":          ("calendar_book",),
+    "calendar_check":         ("calendar_check",),
+    "knowledge_base_search":  ("knowledge_base_search",),
+    "crm_create_lead":        ("crm_create_lead",),
+    "payment_link":           ("payment_link",),
+    "order_status":           ("order_status",),
+    "http_webhook":           ("http_webhook",),
+}
+
+
+def agent_config_warnings(agent: dict[str, Any]) -> list[dict[str, str]]:
+    """Cheap, deterministic config-rot checks for a saved agent — no model
+    call, safe to run on every save AND every hourly healthcheck tick. Catches
+    two failure modes that silently drop leads/notifications in production
+    without ever showing up as a call-time error:
+
+      1. unresolved_variable — persona/greeting/chat-instructions reference
+         `{{some_var}}` but it's never set under Variables (those fields are
+         short direct-output strings, so ANY unresolved placeholder there is
+         a real gap); the freeform system_prompt is scanned too but ONLY for
+         `{{ALL_CAPS}}`-style names — the deploy-time-constant convention —
+         since operators/Eva commonly use `{{lower_snake_case}}` inside
+         system_prompt as intentional in-prompt notation for conversation
+         state the MODEL fills in as it talks (`{{caller_name}}`,
+         `{{price_quoted}}`), which is NOT a config gap and must not be
+         flagged (see `_substitute_variables`'s docstring for why runtime
+         substitution leaves those alone too).
+      2. connector_not_provisioned — the system_prompt instructs the model to
+         call a connector (e.g. "call send_email") that isn't in this agent's
+         `connectors` list. Gemini can't call a tool that isn't declared, so
+         the instruction is silently a no-op every single call.
+
+    Generic across every tenant/sector — this is the platform-level check the
+    per-agent healthcheck docstring already promised ("broke a template
+    variable reference") but never actually implemented."""
+    warnings: list[dict[str, str]] = []
+    variables = agent.get("variables") or {}
+    texts: dict[str, str] = {
+        "persona": agent.get("persona") or "",
+        "greeting": agent.get("greeting") or "",
+    }
+    chat_settings = agent.get("chat_settings")
+    if isinstance(chat_settings, dict) and chat_settings.get("instructions"):
+        texts["chat instructions"] = str(chat_settings.get("instructions"))
+
+    seen_vars: list[str] = []
+    for field, text in texts.items():
+        for name in _unresolved_template_vars(text, variables):
+            if name in seen_vars:
+                continue
+            seen_vars.append(name)
+            warnings.append({
+                "kind": "unresolved_variable",
+                "detail": f'{{{{{name}}}}} is used in {field} but isn\'t set under Variables.',
+            })
+    system_prompt = agent.get("system_prompt") or ""
+    for name in _unresolved_template_vars(system_prompt, variables, all_caps_only=True):
+        if name in seen_vars:
+            continue
+        seen_vars.append(name)
+        warnings.append({
+            "kind": "unresolved_variable",
+            "detail": f'{{{{{name}}}}} is used in system_prompt but isn\'t set under Variables.',
+        })
+
+    connector_ids = set(agent.get("connectors") or []) | {"end_call"}
+    prompt_text = system_prompt
+    for connector_id, aliases in _CONNECTOR_PROMPT_ALIASES.items():
+        if connector_id in connector_ids:
+            continue
+        for alias in aliases:
+            if re.search(rf"\b{re.escape(alias)}\b", prompt_text):
+                warnings.append({
+                    "kind": "connector_not_provisioned",
+                    "detail": f"system_prompt tells the agent to call '{alias}', but "
+                              f"'{connector_id}' isn't in this agent's Connectors — "
+                              f"the call will silently never happen.",
+                })
+                break
+
+    # Build 409 — Fish Audio is the platform-wide DEFAULT live-call voice
+    # engine (backend/telephony/base.py, "Default is 'fish'"), not merely a
+    # preview feature. If an agent resolves to Fish but never had a specific
+    # fish_voice_id chosen, every real call is voiced by Fish's own generic
+    # default (reference_id omitted from the API call entirely — see
+    # fish_audio.synthesize) rather than any deliberately picked voice.
+    # Confirmed live on agent 6 (Kavya, hi-IN automotive receptionist):
+    # voice_provider="fish", fish_voice_id="". Flagged rather than silently
+    # rerouted to Gemini — changing which engine actually speaks on every
+    # live call is a product decision for the operator, not something a
+    # config-lint should decide unilaterally.
+    voice_tweaks = agent.get("voice_tweaks") or {}
+    if isinstance(voice_tweaks, dict):
+        resolved_provider = str(voice_tweaks.get("voice_provider") or "fish").strip().lower()
+        fish_voice_id = str(voice_tweaks.get("fish_voice_id") or "").strip()
+        if resolved_provider == "fish" and not fish_voice_id:
+            warnings.append({
+                "kind": "fish_voice_not_selected",
+                "detail": "Voice engine is Fish Audio but no voice was chosen "
+                          "(fish_voice_id is empty) — calls use Fish's generic "
+                          "default voice instead of one picked for this agent's "
+                          "locale/persona. Pick a voice under Voice & behaviour.",
+            })
+
+    return warnings
 
 
 _ACTION_LABELS = {

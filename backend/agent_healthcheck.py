@@ -47,7 +47,7 @@ from typing import Any, Optional
 
 import websockets
 
-from . import db, events as _ev
+from . import db, events as _ev, gemini_bridge as _gb
 
 log = logging.getLogger("eva.agent_healthcheck")
 
@@ -219,6 +219,28 @@ async def _probe_one(agent: dict) -> dict:
         # the Level 3 probe uses; honours `healthcheck.email_on_failure`
         # + `healthcheck.email_recipients` settings.
         await _maybe_email_alert(agent, result, level=2)
+
+    # Static config-rot check — pure text scan (unresolved {{variables}},
+    # a prompt instructing a connector call that isn't provisioned), no
+    # Gemini cost. Runs every hour for every published agent regardless of
+    # whether the WS probe above passed, since prompt composition never
+    # raises on either failure mode — the call-quality symptom (a lead
+    # captured but never emailed/texted to the business) never shows up as
+    # a probe failure otherwise. Kept OUTSIDE the `agent.healthcheck.*`
+    # kind prefix so it can't shadow the connectivity dot's latest-event
+    # lookup (`latest_status_per_agent` filters on that prefix).
+    try:
+        config_warnings = _gb.agent_config_warnings(agent)
+    except Exception:  # noqa: BLE001
+        config_warnings = []
+    if config_warnings:
+        await _safe_emit(
+            "agent.config.warning", "warning",
+            f"{agent_name}: {len(config_warnings)} config issue(s) — " +
+            "; ".join(w["detail"] for w in config_warnings[:2]),
+            org_id, agent_id,
+            {"agent_id": agent_id, "agent_slug": agent.get("slug"), "warnings": config_warnings},
+        )
     return result
 
 
@@ -239,8 +261,13 @@ async def run_hourly_healthchecks() -> None:
     try:
         pool = await db.get_pool()
         async with pool.acquire() as conn:
+            # Build 409 — extra columns beyond id/name/slug/org_id so
+            # `agent_config_warnings()` (called from `_probe_one` below) has
+            # what it needs. Without these the config-rot check would run
+            # against an all-empty agent dict and silently find nothing.
             rows = await conn.fetch(
-                "SELECT id, name, slug, org_id FROM agents "
+                "SELECT id, name, slug, org_id, system_prompt, persona, greeting, "
+                "connectors, variables, voice_tweaks, chat_settings FROM agents "
                 "WHERE published = TRUE ORDER BY id ASC"
             )
         agents = [dict(r) for r in rows]

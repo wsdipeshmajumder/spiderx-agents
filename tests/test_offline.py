@@ -566,6 +566,178 @@ class TestRecordingWriterAlignment(unittest.TestCase):
         self.assertLess(abs(caller_duration_s - agent_duration_s), 0.2)
 
 
+class TestAgentConfigWarnings(unittest.TestCase):
+    """build 409 — config-rot detector. Root-caused against production agent
+    id 6 (Gajraj Hyundai / 'Kavya'): its system_prompt mandates `send_email`
+    for every lead but `email_send` was never added to the agent's
+    `connectors`, and its SMS-to-sales body used `{{GAJRAJ_SALES_SMS}}`
+    which was never set under Variables — both silent, both meaning every
+    captured lead was dropped with no error anywhere. Neither failure mode
+    trips a call-time exception (prompt composition never raises), so this
+    is a pure-text static check run on every save + hourly healthcheck,
+    generic across every tenant/sector — not a Gajraj-specific patch.
+
+    IMPORTANT prior mistake, caught by sanity-checking against the real
+    agent-6 row before shipping: an earlier version of this fix also made
+    `_substitute_variables` blank out any unresolved `{{key}}` at runtime.
+    That looked safer in isolation but actively corrupted Kavya's prompt —
+    it has a whole "STATE VARIABLES" section using `{{lower_snake_case}}`
+    as intentional in-prompt notation for conversation state the MODEL
+    fills in as it talks (`{{caller_name}}`, `{{price_quoted}}`, 20+ more),
+    never meant to be resolved by this function at all. Blanking those
+    turned instructions like 'Namaste {{caller_name}}, thank you for
+    calling' into 'Namaste , thank you for calling' for every one of them.
+    Runtime substitution is reverted to its original leave-literal
+    behaviour; detection is scoped instead (`all_caps_only` in the freeform
+    system_prompt) so it flags the 4 genuine gaps (SHOWROOM_ADDRESS,
+    SHOWROOM_HOURS, SHOWROOM_MAPS_HINT, GAJRAJ_SALES_SMS — all ALL_CAPS
+    deploy-time constants) without the 20+ state-variable false positives."""
+
+    def setUp(self):
+        _ensure_loop()
+        import backend.gemini_bridge as gb
+        self.gb = gb
+
+    def test_substitute_variables_leaves_unresolved_placeholder_literal(self):
+        # Must NOT blank/rewrite an unresolved placeholder — see class
+        # docstring for why (state-variable notation must survive intact).
+        out = self.gb._substitute_variables("to: {{SALES_SMS}}", {})
+        self.assertEqual(out, "to: {{SALES_SMS}}")
+
+    def test_substitute_variables_still_fills_known_keys(self):
+        out = self.gb._substitute_variables("Hi from {{business_name}}", {"business_name": "Acme"})
+        self.assertEqual(out, "Hi from Acme")
+
+    def test_substitute_variables_mixed_known_and_unknown(self):
+        out = self.gb._substitute_variables("{{city}} / {{missing}}", {"city": "Kolkata"})
+        self.assertEqual(out, "Kolkata / {{missing}}")
+
+    def test_unresolved_template_vars_reports_missing_only(self):
+        names = self.gb._unresolved_template_vars(
+            "{{a}} and {{b}} and {{a}}", {"a": "x"})
+        self.assertEqual(names, ["b"])  # de-duplicated, "a" resolved
+
+    def test_unresolved_template_vars_empty_when_all_resolved(self):
+        self.assertEqual(
+            self.gb._unresolved_template_vars("{{a}}", {"a": "1"}), [])
+
+    def test_unresolved_template_vars_all_caps_only_filters_lowercase(self):
+        names = self.gb._unresolved_template_vars(
+            "{{SHOWROOM_ADDRESS}} and {{caller_name}} and {{ACTIVE_LANGUAGE}}",
+            {}, all_caps_only=True)
+        self.assertEqual(names, ["SHOWROOM_ADDRESS", "ACTIVE_LANGUAGE"])
+
+    def test_agent_config_warnings_flags_unresolved_variable_in_system_prompt(self):
+        agent = {
+            "system_prompt": 'send_sms to="{{GAJRAJ_SALES_SMS}}"',
+            "connectors": ["sms_send"],
+            "variables": {},
+        }
+        warnings = self.gb.agent_config_warnings(agent)
+        kinds = [w["kind"] for w in warnings]
+        self.assertIn("unresolved_variable", kinds)
+        detail = next(w["detail"] for w in warnings if w["kind"] == "unresolved_variable")
+        self.assertIn("GAJRAJ_SALES_SMS", detail)
+
+    def test_agent_config_warnings_ignores_state_variable_notation_in_system_prompt(self):
+        # The false positive this class's docstring describes: state-slot
+        # notation the model fills in itself must never be flagged.
+        agent = {
+            "system_prompt": (
+                "STATE VARIABLES: {{caller_name}} {{phone_number}} {{price_quoted}}\n"
+                'Say: "Namaste {{caller_name}}, thank you for calling."'
+            ),
+            "connectors": [],
+            "variables": {},
+            "voice_tweaks": {"voice_provider": "gemini"},
+        }
+        self.assertEqual(self.gb.agent_config_warnings(agent), [])
+
+    def test_agent_config_warnings_flags_unresolved_variable_in_persona(self):
+        # persona/greeting/chat-instructions are short direct-output strings
+        # — ANY unresolved placeholder there (even lower_snake_case) is a
+        # real gap, unlike the freeform system_prompt body.
+        agent = {
+            "system_prompt": "",
+            "persona": "Friendly receptionist for {{business_name}}.",
+            "connectors": [],
+            "variables": {},
+            "voice_tweaks": {"voice_provider": "gemini"},
+        }
+        warnings = self.gb.agent_config_warnings(agent)
+        self.assertTrue(any("business_name" in w["detail"] for w in warnings))
+
+    def test_agent_config_warnings_flags_unprovisioned_connector(self):
+        # Prompt tells the model to call send_email; connectors list doesn't
+        # include email_send — Gemini has no such tool declared, so it's a
+        # guaranteed no-op every call. This is the exact Gajraj/Kavya shape.
+        agent = {
+            "system_prompt": "When done, call send_email with the lead details.",
+            "connectors": ["calendar_check", "calendar_book", "sms_send", "knowledge_base_search"],
+            "variables": {},
+        }
+        warnings = self.gb.agent_config_warnings(agent)
+        kinds = [w["kind"] for w in warnings]
+        self.assertIn("connector_not_provisioned", kinds)
+        detail = next(w["detail"] for w in warnings if w["kind"] == "connector_not_provisioned")
+        self.assertIn("email_send", detail)
+
+    def test_agent_config_warnings_clean_agent_has_none(self):
+        agent = {
+            "system_prompt": "Greet the caller and call end_call when done.",
+            "persona": "Friendly receptionist for {{business_name}}.",
+            "greeting": "Hi, thanks for calling {{business_name}}!",
+            "connectors": ["calendar_check", "calendar_book"],
+            "variables": {"business_name": "Acme Dental"},
+            "voice_tweaks": {"voice_provider": "gemini"},
+        }
+        self.assertEqual(self.gb.agent_config_warnings(agent), [])
+
+    def test_agent_config_warnings_end_call_never_flagged(self):
+        # end_call is always force-included at session-open regardless of
+        # the agent's `connectors` list (see gemini_bridge's tool_ids build)
+        # — must never be flagged as "not provisioned".
+        agent = {
+            "system_prompt": "Wrap up by calling end_call with the outcome.",
+            "connectors": [],
+            "variables": {},
+            "voice_tweaks": {"voice_provider": "gemini"},
+        }
+        self.assertEqual(self.gb.agent_config_warnings(agent), [])
+
+    def test_agent_config_warnings_flags_fish_without_voice_id(self):
+        # Fish Audio is the platform-wide DEFAULT live-call voice engine
+        # (backend/telephony/base.py) — confirmed live on agent 6: an agent
+        # can resolve to Fish with no fish_voice_id ever chosen, so Fish
+        # speaks in its own generic default voice on every real call.
+        agent = {"system_prompt": "", "connectors": [], "variables": {},
+                  "voice_tweaks": {"voice_provider": "fish", "fish_voice_id": ""}}
+        warnings = self.gb.agent_config_warnings(agent)
+        self.assertEqual([w["kind"] for w in warnings], ["fish_voice_not_selected"])
+
+    def test_agent_config_warnings_flags_fish_default_when_voice_tweaks_absent(self):
+        # voice_provider defaults to "fish" when voice_tweaks is missing
+        # entirely, not just when it's explicitly set to "fish".
+        agent = {"system_prompt": "", "connectors": [], "variables": {}}
+        warnings = self.gb.agent_config_warnings(agent)
+        self.assertEqual([w["kind"] for w in warnings], ["fish_voice_not_selected"])
+
+    def test_agent_config_warnings_fish_with_voice_id_is_clean(self):
+        agent = {"system_prompt": "", "connectors": [], "variables": {},
+                  "voice_tweaks": {"voice_provider": "fish", "fish_voice_id": "abc123"}}
+        self.assertEqual(self.gb.agent_config_warnings(agent), [])
+
+    def test_agent_config_warnings_scans_chat_instructions_too(self):
+        agent = {
+            "system_prompt": "",
+            "chat_settings": {"instructions": "Sign off as {{support_agent_name}}."},
+            "connectors": [],
+            "variables": {},
+        }
+        warnings = self.gb.agent_config_warnings(agent)
+        self.assertTrue(any("support_agent_name" in w["detail"] for w in warnings))
+
+
 class TestImportSanity(unittest.TestCase):
     def setUp(self):
         _ensure_loop()   # backend.settings builds an asyncio.Lock() at import time

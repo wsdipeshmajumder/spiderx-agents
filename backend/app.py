@@ -132,7 +132,7 @@ async def _shutdown() -> None:
 # SXAI_BUILD constant in app.js MUST match this. The /api/build endpoint
 # advertises this number so the SPA can self-detect a stale bundle on boot
 # and force-reload once (see app.js for the sentinel logic).
-APP_BUILD = 408
+APP_BUILD = 409
 
 
 # ────────────────────────── auth (stub) ──────────────────────────
@@ -1617,6 +1617,15 @@ def _public_agent(agent: dict) -> dict:
             p: ({k: v for k, v in c.items() if k != "secret_enc"} if isinstance(c, dict) else c)
             for p, c in tc.items()
         }
+    # Owner-only config-rot check (unresolved {{variables}}, prompt referencing
+    # a connector that isn't provisioned) — cheap pure-text scan, computed on
+    # every read/write so the dashboard can surface it immediately rather than
+    # waiting for the hourly healthcheck. Never included in the public embed
+    # shape (_public_agent_embed) — it can name internal config gaps.
+    try:
+        out["config_warnings"] = gemini_bridge.agent_config_warnings(agent)
+    except Exception:  # noqa: BLE001
+        out["config_warnings"] = []
     return out
 
 

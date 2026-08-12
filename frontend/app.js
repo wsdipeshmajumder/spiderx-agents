@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 408;
+const SXAI_BUILD = 409;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -6169,6 +6169,28 @@ function AgentOverviewPage({ agent, agents, presets, plan, stats, onTest, onGoLi
           </ol>
         </aside>
       </div>
+
+      <!-- Config-rot banner — unresolved {{variables}} or a system_prompt
+           instructing a connector call that isn't provisioned. These are
+           silent in a test call (no error, no crash) but mean a real lead
+           never reaches the business by email/SMS, so they're surfaced
+           here rather than only in Observability. Computed server-side on
+           every read (backend/app.py::_public_agent), same check runs
+           hourly in the healthcheck regardless of whether this page is
+           ever opened. -->
+      ${Array.isArray(agent.config_warnings) && agent.config_warnings.length > 0 ? html`
+        <section class="db-config-warning" role="status">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L14.7 3.86a2 2 0 0 0-3.4 0Z"/></svg>
+          <div class="db-config-warning-body">
+            <div class="db-config-warning-title">
+              Setup incomplete — ${agent.config_warnings.length} issue${agent.config_warnings.length === 1 ? "" : "s"} found
+            </div>
+            <ul class="db-config-warning-list">
+              ${agent.config_warnings.map((w, i) => html`<li key=${i}>${w.detail}</li>`)}
+            </ul>
+          </div>
+        </section>
+      ` : ""}
 
       <!--
         Core purpose moved to its own dashboard page (/agent/<slug>/purpose).

@@ -7318,6 +7318,25 @@ button.db-stat:disabled { cursor: default; opacity: 0.7; }
 :root[data-theme="dark"] .db-headline-text { color: #f1f3f8; }
 :root[data-theme="dark"] .db-headline-sub { color: #9aa0ad; }
 
+/* Config-rot banner (unresolved {{variables}} / unprovisioned connector
+ * referenced in the prompt) — amber, distinct from the neutral headline. */
+.db-config-warning {
+  display: flex; gap: 10px; align-items: flex-start;
+  margin: 8px 0 14px; padding: 14px 16px;
+  background: #fffaf0; border: 1px solid #f3d9a4; border-radius: 12px;
+  color: #7a5200;
+}
+.db-config-warning > svg { flex: none; margin-top: 1px; color: #b8860b; }
+.db-config-warning-title { font-size: 14px; font-weight: 700; }
+.db-config-warning-list {
+  margin: 6px 0 0; padding-left: 18px; font-size: 13px; line-height: 1.55;
+}
+.db-config-warning-list li { margin: 2px 0; }
+:root[data-theme="dark"] .db-config-warning {
+  background: #241d0d; border-color: #4a3a12; color: #e8c777;
+}
+:root[data-theme="dark"] .db-config-warning > svg { color: #e8c777; }
+
 .db-table-wrap {
   background: #ffffff;
   border: 1px solid #e6e7ec;
