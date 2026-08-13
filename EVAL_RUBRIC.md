@@ -5,7 +5,32 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 414**
+**Last updated: build 415**
+
+**Build 415 (Hide the left nav sidebar's scrollbar):** tester: "the left
+menu scroll bar, shud be hidden." `.db-nav` (the left sidebar) has had
+`overflow-y: auto` since it was introduced, so once its nav-group list
+outgrows the viewport height it shows a visible scrollbar track/thumb
+next to the nav items.
+
+Fix: added `scrollbar-width: none` (Firefox) + `-ms-overflow-style: none`
+(legacy Edge/IE) on `.db-nav`, plus a `.db-nav::-webkit-scrollbar {
+display: none; }` rule for Chrome/Safari/Edge-Chromium — the standard
+three-rule combo to hide a scrollbar while leaving the element's own
+`overflow-y: auto` scrolling fully functional (mouse wheel, trackpad,
+keyboard, touch all still work). No JS or DOM changes; the mobile
+off-canvas drawer variant (`@media (max-width: 900px)`) only repositions
+`.db-nav`, it doesn't redeclare `overflow-y`, so it inherits the same
+hidden-scrollbar treatment automatically.
+
+**Verdict: PASS** — browser-verified on `rohan`: `getComputedStyle`
+confirms `scrollbar-width: none` on `.db-nav`, and `scrollHeight (877px)
+> clientHeight (844px)` with `overflow-y: auto` still in place, i.e. the
+sidebar has more content than fits and remains scrollable, just without
+a visible scrollbar. Evidence: **Behavioral** (computed styles + scroll
+dimensions) + **Code**.
+
+
 
 **Build 414 (Dashboard ambient background now reuses the landing page's
 brand gradient instead of a tinted photo):** tester on build 413's grey

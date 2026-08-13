@@ -6401,7 +6401,13 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
   flex-direction: column;
   padding: 16px 14px;
   overflow-y: auto;
+  /* Build 415 — still scrolls (overflow-y: auto above), just doesn't show
+   * the scrollbar track/thumb; a long nav list shouldn't put chrome next
+   * to the sidebar's own content. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
+.db-nav::-webkit-scrollbar { display: none; }
 .db-nav-primary {
   /* Build 242 — toned down. Was a saturated blue→indigo gradient with
      a heavy box-shadow that competed with the actual active nav item
