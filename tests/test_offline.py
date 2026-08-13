@@ -1058,6 +1058,66 @@ class TestAgentConfigWarnings(unittest.TestCase):
         self.assertTrue(any("support_agent_name" in w["detail"] for w in warnings))
 
 
+class TestReconnectSteerNeverInvitesSelfAnswer(unittest.TestCase):
+    """build 418 — the REAL root cause behind the "agent keeps talking on
+    its own" reports (builds 410, 416, 417 all targeted wrong or incomplete
+    causes; this is the one production logs actually confirmed). Evidence:
+    a single 25s silent test call showed 3 "reconnects" ~5-8s apart, every
+    one logged 'gemini stream ended cleanly' with NO exception and NO
+    go_away — i.e. session.receive()'s generator ending after roughly one
+    turn cycle is NORMAL, not a real connection failure. Every such cycle
+    re-entered the resume_handle reconnect branch, whose kickoff text used
+    to end "...if the caller's most recent question is still unanswered,
+    answer it now, directly...". Mira's last utterance was typically HER
+    OWN half-finished question ("what date works for you?") — which she'd
+    then read as unanswered and answer herself, live, with the caller
+    saying nothing at all. Mic peaks logged for that call (203, 1276, 2785)
+    were far below the 12000 barge-in/echo threshold, ruling out echo
+    bleed as the mechanism this time. Fix: no discretion — resuming after a
+    drop must produce silence, unconditionally, until the caller actually
+    speaks. This test can't invoke live Gemini, so it guards the source
+    text directly (same style as TestBuildLockstep below) — the one thing
+    a unit test CAN prove is that the loophole phrase is gone and the
+    mandatory-silence replacement is present."""
+
+    def setUp(self):
+        self.src = (REPO / "backend/gemini_bridge.py").read_text()
+
+    def _resume_handle_branch(self) -> str:
+        start = self.src.index("elif resume_handle:")
+        end = self.src.index("elif memory.turns:", start)
+        return self.src[start:end]
+
+    def _resume_handle_kickoff_text(self) -> str:
+        # Isolate just the string literal the model actually receives —
+        # NOT the surrounding comment, which deliberately quotes the old,
+        # removed phrasing as an explanation and would otherwise false-
+        # positive against a naive substring check over the whole branch.
+        branch = self._resume_handle_branch()
+        start = branch.index("kickoff_text = (")
+        end = branch.index(")\n", start)
+        return branch[start:end]
+
+    def test_answer_it_now_loophole_is_gone(self):
+        kickoff = self._resume_handle_kickoff_text()
+        self.assertNotIn("answer it", kickoff.lower(),
+            "the reconnect-steer kickoff must not give the model discretion "
+            "to answer its OWN dangling question when resuming — that's "
+            "exactly what caused the runaway self-conversation bug")
+
+    def test_mandatory_silence_instruction_present(self):
+        branch = self._resume_handle_branch()
+        self.assertIn("COMPLETELY SILENT", branch)
+        self.assertIn("do not continue or answer your own last question".upper(),
+                       branch.upper())
+
+    def test_kickoff_still_sent_with_turn_complete_true(self):
+        # Confirms this fix didn't accidentally change the SDK call shape —
+        # only the instruction text — which would be a much bigger, less
+        # certain change to make without live Gemini access to verify.
+        self.assertIn('turn_complete=True', self.src)
+
+
 class TestImportSanity(unittest.TestCase):
     def setUp(self):
         _ensure_loop()   # backend.settings builds an asyncio.Lock() at import time

@@ -5265,19 +5265,43 @@ async def run_session(
                             # broke up — could you say that again?") or re-answers the
                             # caller's last turn (tester #12). The handle means we don't
                             # need to replay the transcript, but we DO need to steer it:
-                            # don't acknowledge, don't re-ask, answer the pending
-                            # question. Previously this sent nothing, so the model's own
-                            # prior took over.
+                            # don't acknowledge, don't re-ask.
+                            #
+                            # Build 418 — CRITICAL fix. This branch previously ended
+                            # "...If the caller's most recent question is still
+                            # unanswered, answer it now, directly. Otherwise stay
+                            # silent...". That escape hatch was the root cause of a
+                            # reported "agent keeps talking on its own, two-way AI
+                            # talking" bug: `session.receive()`'s generator ends
+                            # after roughly ONE turn cycle even with NO real drop
+                            # (confirmed via production logs — 3 "reconnects" in a
+                            # single 25s test call, ~5-8s apart, all "gemini stream
+                            # ended cleanly", no exception, no go_away — this is
+                            # normal per-turn cycling, not a real connection
+                            # failure). Every one of those cycles re-entered this
+                            # branch with Mira's own last utterance typically a
+                            # half-finished question of HER OWN ("what date works
+                            # for you?") — which the model reasonably read as "my
+                            # question is unanswered" and answered ITSELF, live,
+                            # with the caller saying nothing at all. A silent tester
+                            # deliberately holding the line open hits this every
+                            # single cycle, producing exactly the runaway
+                            # self-conversation reported. Fix: no discretion — the
+                            # ONLY acceptable output on a resume is silence. A real
+                            # caller's genuinely unanswered question gets answered
+                            # once THEY actually speak again and trigger a real
+                            # VAD-detected turn; that path is untouched by this.
                             kickoff_text = (
                                 "[SYSTEM NOTICE: brief reconnect — the session resumed WITH "
                                 "full context. You and the caller are MID-CONVERSATION. " + NO_GREET
                                 + " Do NOT acknowledge the drop, do NOT say sorry, do NOT ask them "
-                                "to repeat, do NOT re-answer or re-ask anything already handled. If "
-                                "the caller's most recent question is still unanswered, answer it "
-                                "now, directly. Otherwise stay silent and wait for their next "
-                                "utterance.]"
+                                "to repeat, do NOT re-answer or re-ask anything already handled, "
+                                "and do NOT continue or answer your own last question. Stay "
+                                "COMPLETELY SILENT right now — produce no audio at all. Wait for "
+                                "the caller to actually speak; only THEIR next utterance should "
+                                "get a response.]"
                             )
-                            log.info("reconnect: resume-handle steer (no-ack, answer-pending)")
+                            log.info("reconnect: resume-handle steer (silent-wait, no self-answer)")
                         elif memory.turns:
                             # Full-transcript replay — BOTH sides, so the new
                             # Gemini session sees not just what the user said
