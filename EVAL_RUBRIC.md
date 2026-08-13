@@ -5,7 +5,34 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 412**
+**Last updated: build 413**
+
+**Build 413 (Greyer, higher-contrast scrim gradient on dense dashboard
+pages):** tester follow-up on build 411's scrim: "use a greyish gradient
+fill for more contrast." The build-411 scrim used a flat, near-white fill
+(`rgba(247,248,250,0.88)` on both ends of the gradient) meant to read as
+"the same canvas, just dimmed" — but in practice it sat too close to the
+page's own `#f7f8fa` base colour, so it barely dulled the photo and gave
+the white foreground cards/tables too little contrast to pop against.
+
+Fix: swapped the flat fill for a genuine two-stop grey diagonal gradient —
+`linear-gradient(160deg, rgba(199,202,211,0.82) 0%, rgba(148,152,165,0.82)
+100%)` — still stacked as the top `background-image` layer over the photo
+via the same comma-separated layers technique from build 411, no DOM or
+structural change. `activeKey === "agents"` still gets the bare photo,
+unaffected.
+
+**Verdict: PASS** — browser-verified on `rohan` at a 1440px+ viewport:
+Agents list computed `background-image` is still the bare photo URL
+(`db-main` only, no `-scrim` class, unchanged from build 411); Call log's
+`.db-main.db-main-scrim` computed `background-image` is the new two-stop
+grey gradient (`rgba(199,202,211,0.82)` → `rgba(148,152,165,0.82)` at
+`160deg`) stacked over the photo — confirmed via `getComputedStyle` on
+both pages, and visually the grey tint reads clearly against the white
+foreground cards where the prior near-white fill did not. Evidence:
+**Behavioral** (computed styles, both pages) + **Code**.
+
+
 
 **Build 408 (Hours editor — mobile-width fix):** proactive follow-up
 after shipping build 406's multi-window hours editors — tester asked to

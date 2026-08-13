@@ -6937,13 +6937,15 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
     background-position: center;
     background-size: cover;
   }
-  /* Scrim (build 408) — the sparse Agents-list page (`activeKey="agents"`,
-     the only page rendered WITHOUT this class — see DashboardShell) shows
-     the photo at full strength; every other page is a denser dashboard
-     (tables, stat tiles, forms) where the same image showing through every
-     gap competes with the foreground content instead of accenting it. A
-     second background-image LAYER — a flat scrim tinted to the page's own
-     base colour (#f7f8fa) — stacks on top of the photo (comma-separated
+  /* Scrim (build 411, greyer + a real 2-stop gradient in build 413 — a flat
+     near-white fill read as too close to the page's own #f7f8fa, not enough
+     contrast against the white foreground cards) — the sparse Agents-list
+     page (`activeKey="agents"`, the only page rendered WITHOUT this class —
+     see DashboardShell) shows the photo at full strength; every other page
+     is a denser dashboard (tables, stat tiles, forms) where the same image
+     showing through every gap competes with the foreground content instead
+     of accenting it. A second background-image LAYER — a neutral-grey
+     diagonal gradient — stacks on top of the photo (comma-separated
      background-image layers paint first-listed-on-top); no extra DOM
      element, no opacity on .db-main itself (which would dim the real
      content, not just the photo behind it). Dark mode is unaffected: its
@@ -6952,7 +6954,7 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
      colour, so there's no photo there to scrim in the first place. */
   .db-main.db-main-scrim {
     background-image:
-      linear-gradient(rgba(247, 248, 250, 0.88), rgba(247, 248, 250, 0.88)),
+      linear-gradient(160deg, rgba(199, 202, 211, 0.82) 0%, rgba(148, 152, 165, 0.82) 100%),
       url('/static/bg-lake.jpg');
     background-repeat: no-repeat, no-repeat;
     background-position: center, center;
