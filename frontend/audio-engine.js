@@ -61,14 +61,12 @@ export class AudioEngine {
         console.log("[mic] worklet running:", e.data);
         return;
       }
-      // ArrayBuffer of Int16 samples at 16 kHz — forward to caller…
-      this.onMicChunk(e.data);
-      // …and locally detect user speech for instant barge-in. If the user
-      // is talking while Eva is audibly playing, kill the playback queue
-      // RIGHT NOW so Eva yields the line. Don't wait for Gemini's
-      // server-side `interrupted` event — it's not reliable or fast enough
-      // for a natural back-and-forth.
-      this._checkBargeIn(e.data);
+      // Locally detect user speech for instant barge-in AND decide whether
+      // this chunk is safe to forward — see _checkBargeIn's docstring for
+      // why forwarding is gated during Eva's own speech.
+      if (this._checkBargeIn(e.data)) {
+        this.onMicChunk(e.data);
+      }
     };
     src.connect(this.micNode);
     // Worklet must connect to something to keep running in some browsers
@@ -96,6 +94,9 @@ export class AudioEngine {
    * Local barge-in: if the user is CLEARLY talking (sustained high-peak audio
    * across multiple chunks) AND Eva is currently audible, flush her playback
    * immediately so the user takes the floor without waiting for the server.
+   * Returns true if this chunk should be forwarded to the server at all —
+   * see the ECHO-GATE note below for why forwarding is now also gated here,
+   * not just the local flush.
    *
    * False positives are unacceptable: speaker bleed of Eva's own voice (when
    * the user is on laptop speakers) can hit peaks of 5000–8000 between her
@@ -113,6 +114,25 @@ export class AudioEngine {
    *
    * Net: Eva finishes her sentences. User has to clearly interrupt
    * (sustained, loud) to barge in.
+   *
+   * ECHO-GATE (build 410): `echoCancellation: true` above reduces but does
+   * NOT eliminate speaker bleed — the 5000–8000 peaks this function already
+   * measures are proof bleed still reaches the mic. Previously every mic
+   * chunk was forwarded to the server regardless of this check, so bleed
+   * below the 12000 barge-in threshold (i.e. exactly the range this
+   * function was already tuned around) still reached Gemini's server-side
+   * VAD, got transcribed as "user speech", and the model replied to its own
+   * echoed voice — a self-sustaining loop with no real caller input at all.
+   * Root-caused against production call logs (agents 6 and 8, last 48h):
+   * every turn in the affected calls was role="model", none role="user",
+   * yet the agent kept advancing through multi-step dialogue as if replying
+   * to someone. Fix: while Eva is audibly playing (EVA_TALKING) and the
+   * signal doesn't clear the same sustained-loud bar used for barge-in
+   * (USER_TALKING), don't forward the chunk at all. This costs nothing for
+   * real interrupts — NO_INTERRUPTION on the server means Eva finishes her
+   * sentence regardless, and per the note above, genuine interrupts already
+   * land "once the model turn completes", i.e. after EVA_TALKING goes
+   * false, when forwarding is unconditional again exactly as before.
    */
   _checkBargeIn(arrayBuffer) {
     try {
@@ -151,8 +171,14 @@ export class AudioEngine {
           if (this.onBargeIn) this.onBargeIn();
         }
       }
+      // ECHO-GATE: see docstring. evaJustStarted deliberately does NOT
+      // affect this — a sustained 12000+ signal is real speech regardless
+      // of grace window, and is always safe (indeed important) to forward.
+      return !(EVA_TALKING && !USER_TALKING);
     } catch {
-      /* if anything goes wrong with the peak scan, fall back silently */
+      /* if anything goes wrong with the peak scan, forward — fail open so a
+       * scan bug never silently breaks the whole mic path. */
+      return true;
     }
   }
 
