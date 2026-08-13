@@ -61,6 +61,31 @@ def is_configured() -> bool:
     return bool((os.environ.get("FISH_AUDIO_API_KEY") or "").strip())
 
 
+def resolve_voice_engine(voice_tweaks: Optional[dict]) -> tuple[bool, Optional[str]]:
+    """Resolve an agent's voice_tweaks to (fish_active, fish_voice_id).
+
+    Single source of truth for every live-call path (telephony's `_bridge`
+    AND the browser test path's `run_session`), and for the
+    `fish_voice_not_selected` config-warning check — so this resolution
+    can't drift out of sync between copies again.
+
+    Build 416 incident: a real production call (agent 5 "Mira",
+    voice_provider defaulting to "fish" with no fish_voice_id ever chosen)
+    showed that activating Fish with `reference_id` omitted is NOT safe —
+    the free backbone doesn't reliably pick the same voice per request, and
+    an intermittent synth failure flips the existing degrade-to-Gemini
+    safety net mid-call, so the caller hears the voice change mid-call,
+    which reads as two AIs talking over each other. Requiring an explicit
+    fish_voice_id before Fish activates at all (falling back to Gemini's
+    own reliable voice otherwise) is the fix — this function is where that
+    requirement is now enforced, once, for every caller."""
+    vt = voice_tweaks or {}
+    provider = str(vt.get("voice_provider") or "fish").strip().lower()
+    voice_id = (str(vt.get("fish_voice_id") or "").strip() or None)
+    active = provider == "fish" and voice_id is not None and is_configured()
+    return active, voice_id
+
+
 async def synthesize(
     text: str,
     *,

@@ -574,16 +574,26 @@ async def _bridge(
     new_handle: Optional[str] = None
     rec = agent.get("_recording_writer")   # may be None (recording off / failed)
 
-    # ── Voice engine selection (Build 377) ──────────────────────────────
+    # ── Voice engine selection (Build 377, tightened build 416) ─────────
     # voice_provider lives in the agent's voice_tweaks JSON. Default is "fish"
     # (platform-wide default): Gemini stays the brain, Fish speaks. "gemini"
-    # keeps the native Gemini voice (today's path). If Fish is selected but not
-    # configured (no API key), we silently stay on Gemini — never break a call.
+    # keeps the native Gemini voice. If Fish is selected but not configured
+    # (no API key) OR no fish_voice_id was ever chosen, we silently stay on
+    # Gemini — never break a call.
+    #
+    # Build 416: a REAL production call (agent 5 "Mira", no fish_voice_id set)
+    # showed why the fish_voice_id requirement matters — with reference_id
+    # omitted, Fish's free backbone doesn't consistently pick the SAME voice
+    # per request, AND intermittent synth failures mid-call flip fx["active"]
+    # to False (the existing degrade-to-Gemini safety net), so the caller
+    # heard the voice change mid-conversation and, combined with the
+    # transition glitches, perceived it as two AIs talking over each other.
+    # Both symptoms trace back to one root cause: activating Fish with no
+    # voice actually picked. Every published agent was silently exposed to
+    # this (voice_provider defaults to "fish" even when an operator never
+    # touched the field) — not just agents that explicitly chose Fish.
     from .. import fish_audio
-    _vt = agent.get("voice_tweaks") or {}
-    _voice_provider = str(_vt.get("voice_provider") or "fish").strip().lower()
-    _fish_voice_id = (str(_vt.get("fish_voice_id") or "").strip() or None)
-    _fish_on = (_voice_provider == "fish" and fish_audio.is_configured())
+    _fish_on, _fish_voice_id = fish_audio.resolve_voice_engine(agent.get("voice_tweaks"))
     # fx: shared mutable state between the receive loop and the Fish player.
     #   active — currently speaking via Fish (flips to False on any Fish error,
     #            degrading the rest of the call to Gemini's voice)

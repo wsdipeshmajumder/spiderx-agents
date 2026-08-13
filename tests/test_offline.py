@@ -275,14 +275,15 @@ def _resp(*, ot=None, audio=None, turn_complete=False, interrupted=False):
 
 
 class TestBridgeFishPath(unittest.TestCase):
-    def _run(self, voice_provider, synth_impl):
+    def _run(self, voice_provider, synth_impl, *, fish_voice_id="voice-abc123"):
         from backend import fish_audio
         from backend.gemini_bridge import _ConversationMemory
         orig_synth, orig_cfg = fish_audio.synthesize, fish_audio.is_configured
         fish_audio.synthesize = synth_impl
         fish_audio.is_configured = lambda: True
         try:
-            agent = {"id": 1, "voice_tweaks": {"voice_provider": voice_provider},
+            agent = {"id": 1, "voice_tweaks": {"voice_provider": voice_provider,
+                                                "fish_voice_id": fish_voice_id},
                      "recording_enabled": False}
             ws, provider = _FakeWS(), _FakeProvider()
             call_state = {"stream_id": "SID", "persisted": False}
@@ -331,6 +332,20 @@ class TestBridgeFishPath(unittest.TestCase):
             return make_wav()
         n = self._run("gemini", good)
         self.assertTrue(0 < n < 32, "gemini path streams Gemini audio as before")
+
+    def test_no_fish_voice_id_falls_back_to_gemini(self):
+        # Build 416 regression: a real production call (agent 5 "Mira")
+        # had voice_provider defaulting to "fish" with no fish_voice_id
+        # ever chosen. Fish must NOT activate in that shape — it must fall
+        # back to Gemini's own voice, exactly like test_gemini_provider_
+        # path_unchanged above, not synthesize with reference_id omitted
+        # (which is what caused the reported "voice changed every time,
+        # 2-way AI talking" bug: Fish's free backbone doesn't reliably pick
+        # the same voice per request without one).
+        async def good(text, **k):
+            return make_wav()
+        n = self._run("fish", good, fish_voice_id="")
+        self.assertTrue(0 < n < 32, f"expected Gemini fallback frames, got {n}")
 
 
 class _FakeWSBrowser:
@@ -574,6 +589,64 @@ class TestFishAudioClient(unittest.TestCase):
         from backend import fish_audio
         e = fish_audio.FishAudioError("nope", status=402)
         self.assertEqual(e.status, 402)
+
+
+class TestResolveVoiceEngine(unittest.TestCase):
+    """build 416 — the exact regression a real production call surfaced
+    (agent 5 'Mira', reported: kept talking on its own, wouldn't let the
+    caller in, voice changed every time — a garbled two-source mix). Root
+    cause: voice_provider defaults to "fish" for every agent that never
+    touched the field, and Fish was activating with no fish_voice_id set —
+    reference_id omitted, so Fish's free backbone doesn't reliably pick the
+    same voice per request, and an intermittent synth failure flips the
+    existing degrade-to-Gemini safety net mid-call. `resolve_voice_engine`
+    is now the ONE place both live-call paths (telephony + browser test)
+    resolve this, so they can't drift out of sync on the fix again."""
+
+    def setUp(self):
+        from backend import fish_audio
+        self.fa = fish_audio
+        self._orig_is_configured = fish_audio.is_configured
+        fish_audio.is_configured = lambda: True
+
+    def tearDown(self):
+        self.fa.is_configured = self._orig_is_configured
+
+    def test_fish_with_voice_id_activates(self):
+        active, voice_id = self.fa.resolve_voice_engine(
+            {"voice_provider": "fish", "fish_voice_id": "abc123"})
+        self.assertTrue(active)
+        self.assertEqual(voice_id, "abc123")
+
+    def test_fish_without_voice_id_does_not_activate(self):
+        active, voice_id = self.fa.resolve_voice_engine(
+            {"voice_provider": "fish", "fish_voice_id": ""})
+        self.assertFalse(active)
+        self.assertIsNone(voice_id)
+
+    def test_missing_voice_tweaks_defaults_to_fish_but_no_voice_id_so_inactive(self):
+        # The exact agent-5 "Mira" shape: voice_tweaks present but with no
+        # voice_provider/fish_voice_id keys at all (never touched).
+        active, voice_id = self.fa.resolve_voice_engine(
+            {"ambience": "quiet", "sensitivity": "low"})
+        self.assertFalse(active)
+        self.assertIsNone(voice_id)
+
+    def test_none_voice_tweaks_is_safe(self):
+        active, voice_id = self.fa.resolve_voice_engine(None)
+        self.assertFalse(active)
+        self.assertIsNone(voice_id)
+
+    def test_explicit_gemini_provider_never_activates_fish(self):
+        active, voice_id = self.fa.resolve_voice_engine(
+            {"voice_provider": "gemini", "fish_voice_id": "abc123"})
+        self.assertFalse(active)
+
+    def test_not_configured_overrides_everything(self):
+        self.fa.is_configured = lambda: False
+        active, _ = self.fa.resolve_voice_engine(
+            {"voice_provider": "fish", "fish_voice_id": "abc123"})
+        self.assertFalse(active)
 
 
 # ─── 5. build-number lockstep convention ─────────────────────────────────

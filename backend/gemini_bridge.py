@@ -928,17 +928,18 @@ def agent_config_warnings(agent: dict[str, Any]) -> list[dict[str, str]]:
                 })
                 break
 
-    # Build 409 — Fish Audio is the platform-wide DEFAULT live-call voice
-    # engine (backend/telephony/base.py, "Default is 'fish'"), not merely a
-    # preview feature. If an agent resolves to Fish but never had a specific
-    # fish_voice_id chosen, every real call is voiced by Fish's own generic
-    # default (reference_id omitted from the API call entirely — see
-    # fish_audio.synthesize) rather than any deliberately picked voice.
-    # Confirmed live on agent 6 (Kavya, hi-IN automotive receptionist):
-    # voice_provider="fish", fish_voice_id="". Flagged rather than silently
-    # rerouted to Gemini — changing which engine actually speaks on every
-    # live call is a product decision for the operator, not something a
-    # config-lint should decide unilaterally.
+    # Build 409, behavior tightened build 416 — Fish Audio is the
+    # platform-wide DEFAULT live-call voice engine (backend/telephony/base.py
+    # + gemini_bridge.py's browser path), not merely a preview feature. Both
+    # now REQUIRE fish_voice_id before activating Fish at all — a real
+    # production call on agent 5 ("Mira") with no fish_voice_id set showed
+    # that Fish's free backbone without reference_id doesn't reliably pick
+    # the same voice per request, and a mid-call synth failure flips the
+    # existing degrade-to-Gemini safety net on, so the caller hears the
+    # voice change mid-conversation. So this agent is currently, safely,
+    # running on Gemini's own voice regardless of the voice_provider="fish"
+    # setting — flagged so the operator knows WHY, not because anything is
+    # broken right now.
     voice_tweaks = agent.get("voice_tweaks") or {}
     if isinstance(voice_tweaks, dict):
         resolved_provider = str(voice_tweaks.get("voice_provider") or "fish").strip().lower()
@@ -947,9 +948,11 @@ def agent_config_warnings(agent: dict[str, Any]) -> list[dict[str, str]]:
             warnings.append({
                 "kind": "fish_voice_not_selected",
                 "detail": "Voice engine is Fish Audio but no voice was chosen "
-                          "(fish_voice_id is empty) — calls use Fish's generic "
-                          "default voice instead of one picked for this agent's "
-                          "locale/persona. Pick a voice under Voice & behaviour.",
+                          "(fish_voice_id is empty) — calls currently use "
+                          "Gemini's own voice instead (Fish only activates once "
+                          "a voice is picked, to avoid an inconsistent/unreliable "
+                          "voice). Pick a voice under Voice & behaviour to "
+                          "actually switch this agent to Fish.",
             })
 
     return warnings
@@ -3921,12 +3924,23 @@ async def run_session(
             # Voice engine selection — same resolution telephony.base uses
             # ("fish" is the platform-wide default when unset), so a saved
             # agent sounds identical in the browser test as on a real call.
-            _fish_voice_id = (str(agent_tweaks.get("fish_voice_id") or "").strip() or None)
-            _voice_provider = str(agent_tweaks.get("voice_provider") or "fish").strip().lower()
-            if _voice_provider == "fish" and fish_audio.is_configured():
+            # Build 416: REQUIRE an explicit fish_voice_id, matching
+            # telephony.base's own build-416 tightening. A real call on
+            # agent 5 ("Mira", voice_provider defaulted to "fish" with no
+            # fish_voice_id ever chosen) showed why: with reference_id
+            # omitted, Fish's free backbone doesn't consistently pick the
+            # same voice per request, and an intermittent synth failure
+            # flips fx["active"] off mid-call (the existing degrade-to-
+            # Gemini safety net) — so the caller heard the voice change
+            # mid-conversation, which read as two AIs talking over each
+            # other. Falling back to Gemini's own (reliable, already-tuned)
+            # voice when nobody actually picked a Fish voice is correct
+            # behavior, not a config-lint overreaching.
+            _fish_on, _fish_voice_id = fish_audio.resolve_voice_engine(agent_tweaks)
+            if _fish_on:
                 fx["active"] = True
                 log.info("run_session: voice=fish agent=%s voice_id=%s",
-                          agent.get("id"), _fish_voice_id or "default")
+                          agent.get("id"), _fish_voice_id)
                 fish_player_task = asyncio.create_task(
                     _fish_player_for_ws(ws, fish_q, fx, agent, _fish_voice_id)
                 )

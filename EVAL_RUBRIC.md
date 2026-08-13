@@ -5,89 +5,7 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 415**
-
-**Build 415 (Hide the left nav sidebar's scrollbar):** tester: "the left
-menu scroll bar, shud be hidden." `.db-nav` (the left sidebar) has had
-`overflow-y: auto` since it was introduced, so once its nav-group list
-outgrows the viewport height it shows a visible scrollbar track/thumb
-next to the nav items.
-
-Fix: added `scrollbar-width: none` (Firefox) + `-ms-overflow-style: none`
-(legacy Edge/IE) on `.db-nav`, plus a `.db-nav::-webkit-scrollbar {
-display: none; }` rule for Chrome/Safari/Edge-Chromium — the standard
-three-rule combo to hide a scrollbar while leaving the element's own
-`overflow-y: auto` scrolling fully functional (mouse wheel, trackpad,
-keyboard, touch all still work). No JS or DOM changes; the mobile
-off-canvas drawer variant (`@media (max-width: 900px)`) only repositions
-`.db-nav`, it doesn't redeclare `overflow-y`, so it inherits the same
-hidden-scrollbar treatment automatically.
-
-**Verdict: PASS** — browser-verified on `rohan`: `getComputedStyle`
-confirms `scrollbar-width: none` on `.db-nav`, and `scrollHeight (877px)
-> clientHeight (844px)` with `overflow-y: auto` still in place, i.e. the
-sidebar has more content than fits and remains scrollable, just without
-a visible scrollbar. Evidence: **Behavioral** (computed styles + scroll
-dimensions) + **Code**.
-
-
-
-**Build 414 (Dashboard ambient background now reuses the landing page's
-brand gradient instead of a tinted photo):** tester on build 413's grey
-scrim: "not good looking, use the background used in agents.spiderx.ai/".
-Every prior scrim iteration (builds 411, 413) dimmed the `.db-main` lake
-photo with a fill/gradient layer on top of it; the tester instead wanted
-the exact soft, three-radial-gradient wash the landing page's `body`
-already paints site-wide (`--bg-gradient` under
-`:root[data-theme="light"]`: a lavender wash top-center, sky-blue
-bottom-right, pink bottom-left, all over the `#f7f8fa` base).
-
-Fix: `.db-main.db-main-scrim` now sets `background-image` to that same
-three-`radial-gradient()` stack (identical stop colours/positions/alphas
-to `--bg-gradient`) plus `background-color: #f7f8fa`, replacing the lake
-photo entirely on every non-agents page — no more photo-plus-scrim
-layering. `activeKey === "agents"` is unaffected (still no `-scrim`
-class, still the bare photo at full strength). Dark mode unaffected as
-before (its own `.db-main { background: #0b0d14 }` already replaces the
-whole background).
-
-**Verdict: PASS** — browser-verified on `rohan` at a 1600px light-mode
-viewport: Agents list computed `background-image` is still the bare
-photo URL (`db-main db-main-wide`, no `-scrim` class); Call log's
-`.db-main.db-main-scrim` computed `background-image` matches the
-landing page's `--bg-gradient` stack byte-for-byte (three radial
-gradients, same stop colours/positions). Evidence: **Behavioral**
-(computed styles, cross-checked against the live landing page's own
-computed `body` background) + **Code**.
-
-
-
-**Build 413 (Greyer, higher-contrast scrim gradient on dense dashboard
-pages):** tester follow-up on build 411's scrim: "use a greyish gradient
-fill for more contrast." The build-411 scrim used a flat, near-white fill
-(`rgba(247,248,250,0.88)` on both ends of the gradient) meant to read as
-"the same canvas, just dimmed" — but in practice it sat too close to the
-page's own `#f7f8fa` base colour, so it barely dulled the photo and gave
-the white foreground cards/tables too little contrast to pop against.
-
-Fix: swapped the flat fill for a genuine two-stop grey diagonal gradient —
-`linear-gradient(160deg, rgba(199,202,211,0.82) 0%, rgba(148,152,165,0.82)
-100%)` — still stacked as the top `background-image` layer over the photo
-via the same comma-separated layers technique from build 411, no DOM or
-structural change. `activeKey === "agents"` still gets the bare photo,
-unaffected.
-
-**Verdict: PASS** — browser-verified on `rohan` at a 1440px+ viewport:
-Agents list computed `background-image` is still the bare photo URL
-(`db-main` only, no `-scrim` class, unchanged from build 411); Call log's
-`.db-main.db-main-scrim` computed `background-image` is the new two-stop
-grey gradient (`rgba(199,202,211,0.82)` → `rgba(148,152,165,0.82)` at
-`160deg`) stacked over the photo — confirmed via `getComputedStyle` on
-both pages, and visually the grey tint reads clearly against the white
-foreground cards where the prior near-white fill did not. Evidence:
-**Behavioral** (computed styles, both pages) + **Code**.
-
-
+**Last updated: build 416**
 
 **Build 408 (Hours editor — mobile-width fix):** proactive follow-up
 after shipping build 406's multi-window hours editors — tester asked to
@@ -1665,6 +1583,17 @@ Follow-up to Round 6's echo-bleed fix. Operator asked what happens on Fish Audio
 | U35 | Shared sentence-flush logic (`_fish_flush`/`_drain_queue`) has one implementation, not two copies to drift | PASS | Code | 412 | Moved from `telephony/base.py` into `fish_audio.py` (a leaf module neither `gemini_bridge.py` nor `telephony/base.py` needs to import from each other to reach — avoids a circular import, since `telephony.base` already imports FROM `gemini_bridge`). Re-exported from `telephony/base.py` under the same names so existing imports/tests (`from backend.telephony.base import _fish_flush, _drain_queue`) needed no changes |
 | U36 | A leaked/orphaned Fish player task (WS closed without reaching an explicit stop signal) doesn't run forever | PASS | Unit | 412 | `run_session` has several early-`return` exit paths inside its inner reconnect loop that an explicit stop signal can't reach (same accepted shape as this file's pre-existing `_wrap_up_watchdog`, whose own cleanup comment documents the identical trade-off). `_fish_player_for_ws` self-bounds instead: checks `ws.client_state != CONNECTED` at the top of every loop iteration, and wraps its queue wait in a 30s timeout so it re-checks even with no new segments arriving — worst-case leak is bounded to ~30s, not permanent. An explicit `fish_q.put_nowait(None)` stop signal is still sent at the one hot-path transition that reliably reaches it (builder→agent handoff) for the fast path |
 | — | Test-harness note (not a product bug) | — | — | — | Building the test coverage for U34 surfaced a Python 3.9-only asyncio quirk: constructing `asyncio.Queue()`/`asyncio.Event()` in a test's synchronous setup code (outside the `async def go(): ...; asyncio.run(go())` coroutine) can bind to a stale loop left behind by an earlier test in the same process, raising "Future attached to a different loop" — only when the queue is shared across two independently-scheduled tasks. Fixed by constructing them inside `go()`, matching how `run_session` already does it in production (already running inside FastAPI's one long-lived loop, so it was never actually at risk) |
+
+## Round 8 (critical production incident — build 412's Fish browser feature regressed live calls)
+
+Operator, testing agent 5 ("Mira", Dipesh workspace) shortly after build 412 shipped: "It kept talking on its own, didnt let me talk, this time it was 2 way AI talking, and every time the voice changed. This is not right." Root-caused against the same production call-log method as Round 6 — call 335 (agent 5, timestamped right at the report) showed the identical 100%-`role:"model"`/zero-`role:"user"` shape as the Round 6 incident, i.e. the self-talk symptom was back, now compounded by "voice changed every time."
+
+Root cause: agent 5's `voice_tweaks` has no `voice_provider`/`fish_voice_id` keys at all (never touched by the operator) — `voice_provider` resolves to the platform default, `"fish"`, and build 412 activated Fish for the browser test path under that exact condition, same as telephony already did. With `fish_voice_id` unset, `fish_audio.synthesize()` omits `reference_id` entirely — Fish's free backbone does not reliably pick the same voice per request without one, AND any single intermittent synth failure flips the existing (correct, intentional) degrade-to-Gemini safety net mid-call. Both together: the caller hears the voice change mid-conversation, and the transition (Fish audio still queued/playing while Gemini's own audio starts) reads as two AIs talking over each other. This was a **latent bug in the existing telephony path too** (agents 6/8 have the identical unset shape) — build 412 didn't introduce the underlying flaw, it just gave the browser path a second way to reach it, and this was the first time it hit a real conversation instead of only fake-WS unit tests.
+
+| Item | Acceptance criterion | Verdict | Tier | Build | Notes |
+|---|---|---|---|---|---|
+| U37 | Fish Audio never activates on a live call (browser OR phone) without an explicitly chosen voice | PASS | Unit | 416 | New `fish_audio.resolve_voice_engine(voice_tweaks) -> (active, voice_id)` is now the ONE place both `telephony/base.py::_bridge` and `gemini_bridge.py::run_session` resolve the voice engine — requires `fish_voice_id` truthy (in addition to the existing `voice_provider == "fish"` and `is_configured()` checks) before `active` is `True`. Unifying into one function closes the drift risk that let telephony and the browser path silently share the same gap. Falls back to Gemini's own already-reliable voice whenever no voice was picked — the exact safe default the incident showed was missing. 6 new direct unit tests (`TestResolveVoiceEngine`) cover the agent-5 shape specifically (`voice_tweaks` present but with neither key touched), plus explicit-gemini, not-configured, and None-tweaks edge cases. `agent_config_warnings`'s `fish_voice_not_selected` message updated to describe the new (safe) behavior — "calls currently use Gemini's own voice" instead of the old "Fish's generic default voice", since that's no longer what happens |
+| — | Should Fish have been disabled platform-wide instead of gated per-agent? | Considered, rejected | — | — | A blanket "disable Fish entirely until every agent has a voice picked" would have silently regressed any agent an operator DID deliberately configure with Fish + a real voice_id (none exist in production today, but the mechanism should stay correct for when one does). Gating on the presence of an explicit `fish_voice_id` — the one operator action that was actually missing — fixes the reported bug without disabling a feature that's correct once configured |
 
 ## Out-of-band tooling (not a tester item, no build number)
 - **`backend/sip/` (`sipd`)** — native SIP UAS that accepts inbound INVITEs straight from a Grandstream UCM and bridges call audio to a Gemini agent (no Twilio/Plivo). Run as a **separate LAN process** (`python -m backend.sip`), NOT part of the Railway web app — `backend/app.py` does not import it, so it's inert for the deploy. Committed to the repo so it can be pulled onto a LAN box. Transport (SIP/RTP/G.711/digest) is unit- + loopback-proven; the live Gemini audio bridge (`gemini_handler.py`) is pending a first live call. Reuses `gemini_bridge._agent_system_prompt`/`_live_config`/connectors + `db.get_agent`; no new deps.
