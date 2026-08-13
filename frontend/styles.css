@@ -6937,6 +6937,27 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
     background-position: center;
     background-size: cover;
   }
+  /* Scrim (build 408) — the sparse Agents-list page (`activeKey="agents"`,
+     the only page rendered WITHOUT this class — see DashboardShell) shows
+     the photo at full strength; every other page is a denser dashboard
+     (tables, stat tiles, forms) where the same image showing through every
+     gap competes with the foreground content instead of accenting it. A
+     second background-image LAYER — a flat scrim tinted to the page's own
+     base colour (#f7f8fa) — stacks on top of the photo (comma-separated
+     background-image layers paint first-listed-on-top); no extra DOM
+     element, no opacity on .db-main itself (which would dim the real
+     content, not just the photo behind it). Dark mode is unaffected: its
+     own later, higher-specificity `.db-main { background: #0b0d14 }`
+     already replaces the whole background (image included) with a flat
+     colour, so there's no photo there to scrim in the first place. */
+  .db-main.db-main-scrim {
+    background-image:
+      linear-gradient(rgba(247, 248, 250, 0.88), rgba(247, 248, 250, 0.88)),
+      url('/static/bg-lake.jpg');
+    background-repeat: no-repeat, no-repeat;
+    background-position: center, center;
+    background-size: cover, cover;
+  }
 }
 .db-main-wide .db-pageheader,
 .db-main-wide .db-content {

@@ -5,7 +5,41 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 410**
+**Last updated: build 411**
+
+**Build 411 (Scrim the ambient background on dense dashboard pages, keep
+it full-strength on the Agents list):** tester: "the background image is
+fine for the home, [agents] list page. but for other pages, can u add a
+filter gradient layer so that focus is on the dashboard elements in
+foreground." The build-402/403 ambient lake photo on `.db-main` (≥1440px)
+applies uniformly to every page in the shell — fine on the sparse Agents
+list (few cards, lots of empty canvas for it to show through), but on
+data-dense pages (tables, stat-tile rows, forms) it shows through every
+gap between elements and competes with the real content instead of
+accenting it.
+
+Fix: `DashboardShell` already threads an `activeKey` prop per page
+(`"agents"` for the list, `"calls"`/`"overview"`/`"persona"`/etc.
+everywhere else) — added a `db-main-scrim` class to `.db-main` for every
+page except `activeKey === "agents"`. The scrim itself is a second
+`background-image` layer (a flat `rgba(247,248,250,0.88)` fill — the
+page's own base colour, so it reads as "the same canvas, just dimmed"
+rather than a mismatched tint) stacked on top of the photo via comma-
+separated background layers — no extra DOM element, and doesn't touch
+`.db-main`'s own opacity (which would also dim the real foreground
+content, not just the photo behind it). Dark mode needed no change: its
+own later, higher-specificity `.db-main { background: #0b0d14 }` already
+replaces the whole background including the image, so there's no photo to
+scrim there in the first place.
+
+**Verdict: PASS** — browser-verified on `rohan` at a 1600px light-mode
+viewport: Agents list computed `background-image` is the bare photo URL
+(`db-main` only, no `-scrim` class); Call log computed `background-image`
+is the gradient-plus-photo two-layer stack (`db-main db-main-scrim`) —
+confirmed via `getComputedStyle` on both pages, and visually the Call
+log's background is clearly washed out relative to the Agents list's
+full-strength photo in side-by-side screenshots. Evidence: **Behavioral**
+(computed styles + visual comparison, both pages) + **Code**.
 
 **Build 408 (Hours editor — mobile-width fix):** proactive follow-up
 after shipping build 406's multi-window hours editors — tester asked to
