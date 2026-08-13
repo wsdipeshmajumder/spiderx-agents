@@ -1,11 +1,12 @@
-"""Fish Audio TTS provider (Phase 1 — voice-engine option).
+"""Fish Audio TTS provider — a SELECTABLE voice engine alongside Gemini's
+native audio.
 
-A thin async client over Fish Audio's REST TTS API (https://fish.audio),
-added as a SELECTABLE voice engine alongside the default Gemini native audio.
-Phase 1 wires the provider + a synthesis path used by the "Preview voice"
-button in Voice & behaviour; it does NOT touch the live Gemini phone pipeline
-(that stays the default and unchanged). Phase 2 would route live calls through
-an STT → LLM → Fish-TTS cascade.
+A thin async client over Fish Audio's REST TTS API (https://fish.audio).
+Drives the "Preview voice" button in Voice & behaviour, AND (build 377+)
+live call audio on both the telephony path (`backend/telephony/base.py`,
+Fish is the platform-wide default there) and the browser test-call path
+(`backend/gemini_bridge.py::run_session`, build 410+) — Gemini stays the
+STT + reasoning + tool-calling brain in both, Fish just speaks the words.
 
 API shape validated against the live service: `POST /v1/tts` with a Bearer key,
 a `model:` header selecting the TTS backbone (default `s2.1-pro-free` — Fish's
@@ -17,6 +18,7 @@ free backbone.
 from __future__ import annotations
 
 import os
+import re
 from typing import Any, Optional
 
 import httpx
@@ -132,3 +134,50 @@ async def list_voices(*, limit: int = 12, language: str = "en") -> list[dict[str
         return out or list(DEFAULT_VOICES)
     except Exception:  # noqa: BLE001
         return list(DEFAULT_VOICES)
+
+
+# ─── Sentence-boundary flush queue ────────────────────────────────────────
+#
+# Shared by every live-call Fish integration (telephony's `_bridge` AND the
+# browser test path's `run_session`) so both synthesize+play incrementally,
+# sentence-by-sentence, instead of waiting for a whole model turn — lower
+# time-to-first-audio. Lives here (not in either caller) because gemini_bridge
+# and telephony.base already have a one-way import relationship
+# (telephony.base imports from gemini_bridge) — putting shared Fish helpers
+# in this leaf module, which neither of them needs to import FROM the other
+# to reach, avoids a circular import.
+
+_SENT_BOUNDARY = re.compile(r"[.!?…]+[\s\"'\)\]]*")
+# Flush a run-on fragment even without punctuation once it gets this long, so a
+# comma-spliced monologue doesn't stall the voice waiting for a full stop.
+_FISH_MAX_FRAGMENT = 200
+
+
+def _fish_flush(q: "asyncio.Queue", fx: dict[str, Any], *, final: bool) -> None:
+    """Move ready text out of the fx buffer onto the synth queue, tagged with
+    the current barge-in generation so stale segments can be dropped."""
+    text = fx.get("text") or ""
+    seg = None
+    if final:
+        seg, fx["text"] = text.strip(), ""
+    else:
+        bounds = list(_SENT_BOUNDARY.finditer(text))
+        if bounds:
+            idx = bounds[-1].end()
+            seg, fx["text"] = text[:idx].strip(), text[idx:]
+        elif len(text) > _FISH_MAX_FRAGMENT:
+            seg, fx["text"] = text.strip(), ""
+    if seg:
+        try:
+            q.put_nowait((seg, fx["gen"]))
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _drain_queue(q: "asyncio.Queue") -> None:
+    """Discard everything queued (barge-in: the caller cut the agent off)."""
+    while True:
+        try:
+            q.get_nowait()
+        except Exception:  # noqa: BLE001
+            break

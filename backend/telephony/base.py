@@ -17,7 +17,6 @@ import base64
 import json
 import logging
 import os
-import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Optional, Union
@@ -48,6 +47,12 @@ from .audio import (
     ulaw_to_pcm16k,
     wav_to_pcm16_mono,
 )
+# Sentence-boundary flush queue — shared with the browser test path
+# (gemini_bridge.run_session, build 410+), so it lives in fish_audio.py
+# (a leaf module) rather than here. Re-exported under the same names so
+# existing imports/tests (`from backend.telephony.base import _fish_flush,
+# _drain_queue`) keep working unchanged.
+from ..fish_audio import _fish_flush, _drain_queue  # noqa: F401
 
 log = logging.getLogger("eva.telephony")
 
@@ -60,43 +65,6 @@ log = logging.getLogger("eva.telephony")
 # output_transcription) are spoken through Fish Audio instead. Because Gemini's
 # audio is still arriving in parallel, any Fish failure degrades gracefully
 # back to Gemini's voice mid-call (the hard rule: never break a call).
-#
-# Sentence-boundary flushing so we can synthesize+play incrementally instead of
-# waiting for a whole turn (lower time-to-first-audio).
-_SENT_BOUNDARY = re.compile(r"[.!?…]+[\s\"'\)\]]*")
-# Flush a run-on fragment even without punctuation once it gets this long, so a
-# comma-spliced monologue doesn't stall the voice waiting for a full stop.
-_FISH_MAX_FRAGMENT = 200
-
-
-def _fish_flush(q: "asyncio.Queue", fx: dict[str, Any], *, final: bool) -> None:
-    """Move ready text out of the fx buffer onto the synth queue, tagged with
-    the current barge-in generation so stale segments can be dropped."""
-    text = fx.get("text") or ""
-    seg = None
-    if final:
-        seg, fx["text"] = text.strip(), ""
-    else:
-        bounds = list(_SENT_BOUNDARY.finditer(text))
-        if bounds:
-            idx = bounds[-1].end()
-            seg, fx["text"] = text[:idx].strip(), text[idx:]
-        elif len(text) > _FISH_MAX_FRAGMENT:
-            seg, fx["text"] = text.strip(), ""
-    if seg:
-        try:
-            q.put_nowait((seg, fx["gen"]))
-        except Exception:  # noqa: BLE001
-            pass
-
-
-def _drain_queue(q: "asyncio.Queue") -> None:
-    """Discard everything queued (barge-in: the caller cut the agent off)."""
-    while True:
-        try:
-            q.get_nowait()
-        except Exception:  # noqa: BLE001
-            break
 
 
 # ─── Normalised event vocabulary ─────────────────────────────────────────

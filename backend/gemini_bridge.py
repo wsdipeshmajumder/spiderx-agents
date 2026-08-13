@@ -35,7 +35,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from google import genai
 from google.genai import types
 
-from . import db
+from . import db, fish_audio
 from .connectors import CONNECTOR_DECLS, build_tools as build_connector_tools, handle as handle_connector
 from .presets import (
     CONNECTOR_TYPES,
@@ -2872,6 +2872,74 @@ async def _send_bytes(ws: WebSocket, data: bytes) -> None:
         pass
 
 
+# Chunk size for streamed Fish playback on the browser path — ~100ms of
+# PCM16 mono @ 24kHz (matches audio-engine.js's outCtx sample rate, so no
+# client-side resampling is needed). Chunked (rather than one big send) so a
+# barge-in can abort mid-clip by bumping fx["gen"] between chunks, mirroring
+# the telephony path's frame-by-frame gen check.
+_FISH_WS_CHUNK_BYTES = 4800
+
+
+async def _fish_player_for_ws(
+    ws: WebSocket,
+    fish_q: "asyncio.Queue",
+    fx: dict[str, Any],
+    agent: dict[str, Any],
+    fish_voice_id: Optional[str],
+) -> None:
+    """Browser-path counterpart to telephony.base's fish_player — same
+    queue/gen protocol (see fish_audio._fish_flush/_drain_queue), but encodes
+    for the browser's raw-PCM16@24kHz wire format (audio-engine.js's playPcm)
+    instead of telephony's mu-law-8kHz carrier frames.
+
+    Self-terminates rather than requiring a guaranteed external stop signal:
+    `run_session` has many early-return exit paths inside its inner reconnect
+    loop (errors, exhausted retries, no-usable-model) that this task has no
+    reach into — the SAME accepted trade-off already used for this file's
+    `_wrap_up_watchdog` (see its cleanup comment). A live WS gets an explicit
+    stop (`fish_q.put_nowait(None)`) at the handoff/exit points that CAN see
+    it; anything that slips through is bounded to at most ~30s of idle work
+    by the timeout + `client_state` check below, not a permanent leak."""
+    from starlette.websockets import WebSocketState
+    from .telephony.audio import wav_to_pcm16_mono, pcm16_resample
+    while True:
+        if ws.client_state != WebSocketState.CONNECTED:
+            return
+        try:
+            item = await asyncio.wait_for(fish_q.get(), timeout=30.0)
+        except asyncio.TimeoutError:
+            continue  # loop back to the client_state check above
+        if item is None:
+            return
+        seg, gen = item
+        if gen != fx["gen"] or not seg:
+            continue
+        try:
+            wav = await fish_audio.synthesize(seg, reference_id=fish_voice_id, fmt="wav")
+        except Exception as e:  # noqa: BLE001
+            log.warning("run_session: fish synth failed (%s) — degrading to Gemini voice", e)
+            fx["active"] = False
+            continue
+        if gen != fx["gen"]:
+            continue  # barged mid-synthesis — this segment is stale, drop it
+        try:
+            pcm, rate = wav_to_pcm16_mono(wav)
+            pcm24k = pcm16_resample(pcm, rate, 24000) if rate != 24000 else pcm
+        except Exception as e:  # noqa: BLE001
+            log.warning("run_session: fish decode/resample failed: %s", e)
+            continue
+        writer = agent.get("_recording_writer")
+        if writer is not None:
+            try:
+                writer.write_agent(pcm24k)
+            except Exception:  # noqa: BLE001
+                pass
+        for i in range(0, len(pcm24k), _FISH_WS_CHUNK_BYTES):
+            if gen != fx["gen"] or ws.client_state != WebSocketState.CONNECTED:
+                break  # barged mid-playback — abandon the rest of this clip
+            await _send_bytes(ws, pcm24k[i:i + _FISH_WS_CHUNK_BYTES])
+
+
 class _Handoff:
     """Set by a tool handler to request a session swap after the current turn.
 
@@ -3215,7 +3283,14 @@ async def _pump_gemini_to_client(
     on_turn_complete_hook=None,
     on_select_build_template=None,
     on_record_template_answer=None,
+    fx: Optional[dict[str, Any]] = None,
+    fish_q: Optional["asyncio.Queue"] = None,
 ) -> None:
+    # fx/fish_q are None for callers that never touch Fish (run_helper_session
+    # doesn't pass them). Normalise to an always-inactive dict so every branch
+    # below can just check fx["active"] without a None-guard at each site.
+    if fx is None:
+        fx = {"active": False, "gen": 0, "text": ""}
     try:
         async for response in session.receive():
             if stop.is_set():
@@ -3224,6 +3299,15 @@ async def _pump_gemini_to_client(
             if sc:
                 if sc.interrupted:
                     await _send_json(ws, {"type": "interrupted"})
+                    # Caller barged in. Bump the Fish generation (in-flight
+                    # synthesis + anything already queued gets dropped by
+                    # _fish_player_for_ws's gen check) and clear the pending
+                    # text buffer — mirrors telephony.base's _bridge.
+                    if fx["active"]:
+                        fx["gen"] += 1
+                        fx["text"] = ""
+                        if fish_q is not None:
+                            fish_audio._drain_queue(fish_q)
                 if sc.model_turn and sc.model_turn.parts:
                     # Any model_turn payload means Eva is mid-utterance.
                     # Set the active flag so the build watchdog won't
@@ -3235,6 +3319,13 @@ async def _pump_gemini_to_client(
                             # AUDIO modality — PCM chunks for the client
                             # audio engine.
                             state.audio_out_chunks += 1
+                            # Fish is speaking this turn → discard Gemini's
+                            # own voice entirely (audio + agent-channel
+                            # recording both come from _fish_player_for_ws
+                            # instead). Gemini is still the STT/reasoning
+                            # brain — only its own TTS output is suppressed.
+                            if fx["active"]:
+                                continue
                             # Build 206 — tap the outbound TTS chunk for the
                             # call recording writer (agent channel).
                             if state.recording_writer is not None:
@@ -3263,12 +3354,19 @@ async def _pump_gemini_to_client(
                     # role already said and doesn't re-recommend / re-ask.
                     memory.feed_output_transcription(sc.output_transcription.text)
                     await _send_json(ws, {"type": "transcript", "role": "model", "text": sc.output_transcription.text})
+                    # Fish path: accumulate the agent's words and synthesize
+                    # sentence-by-sentence for low time-to-first-audio.
+                    if fx["active"] and fish_q is not None:
+                        fx["text"] += sc.output_transcription.text
+                        fish_audio._fish_flush(fish_q, fx, final=False)
                 if sc.turn_complete:
                     state.turns += 1
                     state.model_turn_active = False
                     # Flush any partial fragments that didn't end with a
                     # sentence terminator (rare but happens at turn end).
                     memory.on_turn_complete()
+                    if fx["active"] and fish_q is not None:
+                        fish_audio._fish_flush(fish_q, fx, final=True)  # speak the tail
                     await _send_json(ws, {"type": "turn_complete"})
                     # Fire the per-turn hook BEFORE the handoff check so
                     # the eavesdropping extractor + transcript persistence
@@ -3717,6 +3815,16 @@ async def run_session(
         agent: Optional[dict[str, Any]] = None
         connector_ids: list[str] = []
 
+        # Fish Audio voice path (build 410) — mirrors telephony.base's `_bridge`
+        # so a saved agent's chosen voice engine sounds the same in the
+        # browser test as it does on a real phone call. Inactive by default;
+        # the `else` branch below flips fx["active"] on for a real saved
+        # agent whose voice_tweaks resolve to Fish. See _fish_player_for_ws's
+        # docstring for the queue/gen protocol and cleanup story.
+        fx: dict[str, Any] = {"active": False, "gen": 0, "text": ""}
+        fish_q: "asyncio.Queue" = asyncio.Queue()
+        fish_player_task: Optional[asyncio.Task] = None
+
         if kind == "builder":
             system_prompt = await _builder_system_prompt(
                 client_locale=client_locale, client_tz=client_tz, user_id=user_id,
@@ -3809,6 +3917,19 @@ async def run_session(
             # close a call with a typed outcome + record.
             tool_ids = list(connector_ids) + (["end_call"] if "end_call" not in connector_ids else [])
             tools = build_connector_tools(tool_ids)
+
+            # Voice engine selection — same resolution telephony.base uses
+            # ("fish" is the platform-wide default when unset), so a saved
+            # agent sounds identical in the browser test as on a real call.
+            _fish_voice_id = (str(agent_tweaks.get("fish_voice_id") or "").strip() or None)
+            _voice_provider = str(agent_tweaks.get("voice_provider") or "fish").strip().lower()
+            if _voice_provider == "fish" and fish_audio.is_configured():
+                fx["active"] = True
+                log.info("run_session: voice=fish agent=%s voice_id=%s",
+                          agent.get("id"), _fish_voice_id or "default")
+                fish_player_task = asyncio.create_task(
+                    _fish_player_for_ws(ws, fish_q, fx, agent, _fish_voice_id)
+                )
 
         await _send_json(ws, {"type": "session_starting", "kind": kind, "agent": agent})
 
@@ -5241,6 +5362,8 @@ async def run_session(
                                 on_record_template_answer=(
                                     on_record_template_answer if kind == "builder" else None
                                 ),
+                                fx=fx,
+                                fish_q=fish_q,
                             ),
                         )
                         if kind == "builder":
@@ -5573,6 +5696,18 @@ async def run_session(
             # client closed, fall through to the outer while.
             if handoff.next is not None:
                 break
+
+        # Stop this iteration's Fish player before either looping back (a
+        # fresh fx/fish_q gets created at the top for the next kind/agent) or
+        # falling out of the function entirely. Best-effort, matching the
+        # watchdog cleanup below — the self-terminating timeout in
+        # _fish_player_for_ws is the backstop for exit paths that don't reach
+        # this line (see its docstring).
+        if fish_player_task is not None and not fish_player_task.done():
+            try:
+                fish_q.put_nowait(None)
+            except Exception:  # noqa: BLE001
+                pass
 
         if handoff.next is not None:
             # Kind transition (builder → agent test). Flush the builder

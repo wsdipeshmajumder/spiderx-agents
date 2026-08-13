@@ -333,6 +333,215 @@ class TestBridgeFishPath(unittest.TestCase):
         self.assertTrue(0 < n < 32, "gemini path streams Gemini audio as before")
 
 
+class _FakeWSBrowser:
+    """Minimal WebSocket fake for the browser voice-test path. Distinct from
+    _FakeWS above (shaped for telephony's send_text-only carrier protocol) —
+    _pump_gemini_to_client / _fish_player_for_ws call send_bytes (binary PCM
+    frames) and read client_state (the self-termination check), neither of
+    which _FakeWS supports."""
+
+    def __init__(self):
+        from starlette.websockets import WebSocketState
+        self.sent_text: list[str] = []
+        self.sent_bytes: list[bytes] = []
+        self.client_state = WebSocketState.CONNECTED
+
+    async def send_text(self, s):
+        self.sent_text.append(s)
+
+    async def send_bytes(self, b):
+        self.sent_bytes.append(b)
+
+
+class TestBrowserFishPath(unittest.TestCase):
+    """build 410 — Fish Audio now also drives live audio on the BROWSER
+    voice-test path (gemini_bridge.run_session), not only telephony. Same
+    queue/gen protocol as TestBridgeFishPath above, adapted to the browser's
+    raw PCM16@24kHz wire format (_send_bytes) instead of telephony's mu-law
+    carrier frames. Explicit ask: "based on the agent voice model selected,
+    the web demo shud work for both providers" — previously the browser
+    ALWAYS played Gemini's own voice regardless of a saved agent's
+    voice_tweaks.voice_provider, so "Test in your browser" never actually
+    previewed what a Fish-voiced agent (the platform-wide default) sounds
+    like on a real call. This closes that gap."""
+
+    def _run(self, voice_provider, synth_impl, *, fish_voice_id=""):
+        from backend import fish_audio
+        from backend.gemini_bridge import (
+            _ConversationMemory, _SessionState, _Handoff,
+            _pump_gemini_to_client, _fish_player_for_ws,
+        )
+        orig_synth, orig_cfg = fish_audio.synthesize, fish_audio.is_configured
+        fish_audio.synthesize = synth_impl
+        fish_audio.is_configured = lambda: True
+        try:
+            ws = _FakeWSBrowser()
+            script = [
+                _resp(ot="Hello there! How can I help you today?"),
+                _resp(audio=b"\x01\x02" * 2400),     # Gemini's own voice (0.1s @24k = 4800 bytes)
+                _resp(turn_complete=True),
+                _resp(ot="Second sentence here."),
+                _resp(audio=b"\x01\x02" * 2400),
+                _resp(turn_complete=True),
+            ]
+            session = _FakeSession(script)
+            state = _SessionState()
+            memory = _ConversationMemory()
+            handoff = _Handoff()
+            fx = {"active": voice_provider == "fish", "gen": 0, "text": ""}
+            agent = {"id": 1, "_recording_writer": None}
+
+            async def _noop(*a, **k):
+                return {"ok": True}
+
+            async def go():
+                # stop/fish_q are asyncio primitives — must be constructed
+                # INSIDE the loop that will await them (asyncio.run() below
+                # always spins up a fresh loop; a Queue/Event built outside
+                # it in this test process, after prior tests already left an
+                # older loop as "current", raises "attached to a different
+                # loop" under Python 3.9's eager loop-binding). Production
+                # code doesn't hit this — run_session already runs inside
+                # FastAPI's one long-lived loop, so its `asyncio.Queue()` is
+                # always constructed "inside" the right loop already.
+                stop = asyncio.Event()
+                fish_q: "asyncio.Queue" = asyncio.Queue()
+                pump = asyncio.create_task(_pump_gemini_to_client(
+                    ws, session, stop, state, memory,
+                    handoff=handoff, on_save_agent=_noop, on_select_agent=_noop,
+                    on_connector_call=_noop, fx=fx, fish_q=fish_q,
+                ))
+                fish_task = None
+                if fx["active"]:
+                    fish_task = asyncio.create_task(
+                        _fish_player_for_ws(ws, fish_q, fx, agent, fish_voice_id or None)
+                    )
+                await asyncio.wait_for(pump, timeout=15)
+                if fish_task is not None:
+                    await asyncio.sleep(0.3)   # let queued Fish segments finish playing
+                    fish_q.put_nowait(None)
+                    await asyncio.wait_for(fish_task, timeout=5)
+
+            asyncio.run(go())
+            return sum(len(b) for b in ws.sent_bytes)
+        finally:
+            fish_audio.synthesize, fish_audio.is_configured = orig_synth, orig_cfg
+            _ensure_loop()
+
+    def test_fish_drives_audio_and_suppresses_gemini(self):
+        wav = make_wav(rate=44100, secs=0.4)
+        async def good(text, **k):
+            return wav
+        n = self._run("fish", good)
+        # 2 sentences @ 0.4s, resampled to PCM16@24kHz ≈ 2 * 19200 bytes.
+        # Gemini's own two 4800-byte clips (9600 total) would be far smaller
+        # if NOT suppressed — a high count proves Fish drove the audio.
+        self.assertGreater(n, 20000, "Fish audio should dominate; Gemini suppressed")
+
+    def test_synth_failure_degrades_to_gemini_voice(self):
+        from backend import fish_audio
+        async def boom(text, **k):
+            raise fish_audio.FishAudioError("boom", status=502)
+        n = self._run("fish", boom)
+        # Fish emits nothing; falls back to exactly Gemini's own two
+        # 4800-byte clips instead of going silent — never break a call.
+        self.assertEqual(n, 9600, f"expected exactly Gemini's own audio bytes, got {n}")
+
+    def test_gemini_provider_path_unchanged(self):
+        async def good(text, **k):
+            return make_wav()
+        n = self._run("gemini", good)
+        self.assertEqual(n, 9600, "gemini path streams Gemini audio unchanged")
+
+    def test_fx_none_defaults_to_inactive(self):
+        # Callers that don't pass fx/fish_q at all (run_helper_session) must
+        # behave exactly as before this build — no Fish branching at all.
+        from backend.gemini_bridge import _ConversationMemory, _SessionState, _Handoff, _pump_gemini_to_client
+        ws = _FakeWSBrowser()
+        script = [_resp(ot="Hi"), _resp(audio=b"\x01\x02" * 2400), _resp(turn_complete=True)]
+        session = _FakeSession(script)
+        state = _SessionState()
+        memory = _ConversationMemory()
+        handoff = _Handoff()
+
+        async def _noop(*a, **k):
+            return {"ok": True}
+
+        async def go():
+            stop = asyncio.Event()   # constructed inside the loop — see TestBrowserFishPath._run
+            await asyncio.wait_for(_pump_gemini_to_client(
+                ws, session, stop, state, memory,
+                handoff=handoff, on_save_agent=_noop, on_select_agent=_noop,
+                on_connector_call=_noop,
+            ), timeout=15)
+
+        asyncio.run(go())
+        _ensure_loop()
+        self.assertEqual(sum(len(b) for b in ws.sent_bytes), 4800)
+
+    def test_interrupted_bumps_fish_gen_and_drains_queue(self):
+        from backend.gemini_bridge import _ConversationMemory, _SessionState, _Handoff, _pump_gemini_to_client
+        ws = _FakeWSBrowser()
+        script = [
+            _resp(ot="Partial sentence without a stop"),
+            _resp(interrupted=True),
+            _resp(turn_complete=True),
+        ]
+        session = _FakeSession(script)
+        state = _SessionState()
+        memory = _ConversationMemory()
+        handoff = _Handoff()
+        fx = {"active": True, "gen": 0, "text": ""}
+        result: dict[str, Any] = {}
+
+        async def _noop(*a, **k):
+            return {"ok": True}
+
+        async def go():
+            stop = asyncio.Event()   # constructed inside the loop — see TestBrowserFishPath._run
+            fish_q: "asyncio.Queue" = asyncio.Queue()
+            fish_q.put_nowait(("stale segment", 0))  # pretend something was already queued
+            await asyncio.wait_for(_pump_gemini_to_client(
+                ws, session, stop, state, memory,
+                handoff=handoff, on_save_agent=_noop, on_select_agent=_noop,
+                on_connector_call=_noop, fx=fx, fish_q=fish_q,
+            ), timeout=15)
+            result["queue_empty"] = fish_q.empty()
+
+        asyncio.run(go())
+        _ensure_loop()
+        self.assertEqual(fx["gen"], 1)
+        self.assertEqual(fx["text"], "")
+        self.assertTrue(result["queue_empty"])
+
+    def test_fish_player_self_terminates_when_ws_already_disconnected(self):
+        from starlette.websockets import WebSocketState
+        from backend.gemini_bridge import _fish_player_for_ws
+        ws = _FakeWSBrowser()
+        ws.client_state = WebSocketState.DISCONNECTED
+        fx = {"active": True, "gen": 0, "text": ""}
+
+        async def go():
+            fish_q: "asyncio.Queue" = asyncio.Queue()   # constructed inside the loop
+            await asyncio.wait_for(_fish_player_for_ws(ws, fish_q, fx, {"id": 1}, None), timeout=2)
+
+        asyncio.run(go())
+        _ensure_loop()
+
+    def test_fish_player_stops_on_none_sentinel(self):
+        from backend.gemini_bridge import _fish_player_for_ws
+        ws = _FakeWSBrowser()
+        fx = {"active": True, "gen": 0, "text": ""}
+
+        async def go():
+            fish_q: "asyncio.Queue" = asyncio.Queue()   # constructed inside the loop
+            fish_q.put_nowait(None)
+            await asyncio.wait_for(_fish_player_for_ws(ws, fish_q, fx, {"id": 1}, None), timeout=2)
+
+        asyncio.run(go())
+        _ensure_loop()
+
+
 # ─── 4. fish_audio client shape ──────────────────────────────────────────
 
 

@@ -5,41 +5,7 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 411**
-
-**Build 411 (Scrim the ambient background on dense dashboard pages, keep
-it full-strength on the Agents list):** tester: "the background image is
-fine for the home, [agents] list page. but for other pages, can u add a
-filter gradient layer so that focus is on the dashboard elements in
-foreground." The build-402/403 ambient lake photo on `.db-main` (≥1440px)
-applies uniformly to every page in the shell — fine on the sparse Agents
-list (few cards, lots of empty canvas for it to show through), but on
-data-dense pages (tables, stat-tile rows, forms) it shows through every
-gap between elements and competes with the real content instead of
-accenting it.
-
-Fix: `DashboardShell` already threads an `activeKey` prop per page
-(`"agents"` for the list, `"calls"`/`"overview"`/`"persona"`/etc.
-everywhere else) — added a `db-main-scrim` class to `.db-main` for every
-page except `activeKey === "agents"`. The scrim itself is a second
-`background-image` layer (a flat `rgba(247,248,250,0.88)` fill — the
-page's own base colour, so it reads as "the same canvas, just dimmed"
-rather than a mismatched tint) stacked on top of the photo via comma-
-separated background layers — no extra DOM element, and doesn't touch
-`.db-main`'s own opacity (which would also dim the real foreground
-content, not just the photo behind it). Dark mode needed no change: its
-own later, higher-specificity `.db-main { background: #0b0d14 }` already
-replaces the whole background including the image, so there's no photo to
-scrim there in the first place.
-
-**Verdict: PASS** — browser-verified on `rohan` at a 1600px light-mode
-viewport: Agents list computed `background-image` is the bare photo URL
-(`db-main` only, no `-scrim` class); Call log computed `background-image`
-is the gradient-plus-photo two-layer stack (`db-main db-main-scrim`) —
-confirmed via `getComputedStyle` on both pages, and visually the Call
-log's background is clearly washed out relative to the Agents list's
-full-strength photo in side-by-side screenshots. Evidence: **Behavioral**
-(computed styles + visual comparison, both pages) + **Code**.
+**Last updated: build 412**
 
 **Build 408 (Hours editor — mobile-width fix):** proactive follow-up
 after shipping build 406's multi-window hours editors — tester asked to
@@ -1606,6 +1572,17 @@ Operator: "If I test a call using the web demo, and remain silent, the AI keeps 
 | U31 | Diagnose: is the agent actually generating unprompted turns, or is this a UI/logging illusion? | CONFIRMED real | Behavioral | — | Every one of the last several voice-test calls (ids 331–334 checked in full) has **100% `role: "model"` turns and zero `role: "user"` turns**, yet the agent visibly progresses through a multi-step dialogue as if answering someone — e.g. call 333: asks "personal or commercial?" then, with no intervening turn, moves straight to "would you like a test drive?", and includes a bare "Umm, yes, I understand." with nothing preceding it to understand. `_ConversationMemory`/`sc.input_transcription` in `gemini_bridge.py` does capture real user turns when they occur (confirmed by reading the code), so this isn't a transcript-logging gap — the model genuinely had no real caller input driving these turns |
 | U32 | Root-cause: why does the model generate turns with no real input? | CONFIRMED — speaker-bleed echo | Code | — | `frontend/audio-engine.js`'s own long-standing comment (present since the initial commit, build 177) already names this exact failure mode: without echo cancellation, "Eva's audio bleeds back through laptop speakers into the mic, Gemini's input transcription catches phrases Eva just said, the model generates a parallel response to its own voice." `echoCancellation: true` was already on, but the SAME file's `_checkBargeIn` documents that bleed still reaches the mic at peaks of 5000–8000 (measured empirically, hence its barge-in threshold being set to 12000) — and **every mic chunk was forwarded to the server unconditionally**, `_checkBargeIn` only decided whether to interrupt local playback, never whether to transmit. So bleed under the local 12000 barge-in bar still reached Gemini's server-side VAD, got transcribed as real speech, and the model replied to itself — a self-sustaining loop with the caller completely silent, matching the operator's report exactly |
 | U33 | Fix: stop echo bleed from reaching the server as fake user speech | PASS | Code | 410 | `_checkBargeIn` now returns whether the chunk should be forwarded at all, not just whether to flush playback; the caller in `start()` only calls `onMicChunk` when it returns true. Gate: while Eva is audibly playing (`EVA_TALKING`) and the chunk does NOT clear the existing sustained-loud bar (`USER_TALKING`, peak > 12000 for 4 consecutive chunks — the exact same threshold already tuned against measured bleed), the chunk is dropped, not sent. Deliberately reuses the existing threshold rather than inventing a new one — it was already proven to sit above bleed and below real speech. Costs nothing for genuine interrupts: `NO_INTERRUPTION` on the server means Eva finishes her sentence regardless of a mid-turn interrupt, and the code's own prior comment already documented that real interrupts land "once the model turn completes" — i.e. after `EVA_TALKING` goes false, where forwarding is unconditional exactly as before. No Python-testable surface (pure client-side WebAudio logic, and this repo has no JS test harness); verification is: re-pull production call transcripts after deploy and confirm no further calls with 100% model-role turns and zero user turns |
+
+## Round 7 (feature ask: "based on the agent voice model selected, the web demo shud work for both providers")
+
+Follow-up to Round 6's echo-bleed fix. Operator asked what happens on Fish Audio; investigation found the browser voice-test path (`gemini_bridge.run_session`, reached via `/ws/session` with no `mode=` param) had ZERO Fish Audio integration — it always played Gemini's own native voice regardless of a saved agent's `voice_tweaks.voice_provider`, unlike the real Twilio/Plivo call path (`telephony/base.py::_bridge`) where Fish is the platform-wide default. Confirmed no "browser" entry exists in the telephony provider registry (only `twilio`/`plivo`), so this genuinely couldn't be reached any other way. Operator then explicitly asked for this to be closed.
+
+| Item | Acceptance criterion | Verdict | Tier | Build | Notes |
+|---|---|---|---|---|---|
+| U34 | The browser voice-test path plays through the SAME voice engine (Fish vs Gemini) a real phone call for that agent would use | PASS | Unit | 412 | Ported telephony.base's Fish integration into `gemini_bridge.py`: `_pump_gemini_to_client` gains optional `fx`/`fish_q` params (default `None` → fully inactive, so `run_helper_session`'s existing call site is untouched) that mirror `_bridge`'s protocol — accumulate `output_transcription` into sentence-boundary segments, synthesize via Fish, suppress Gemini's own `inline_data` audio for that turn, bump `fx["gen"]` + drain the queue on `sc.interrupted` (barge-in). New `_fish_player_for_ws` is the browser-wire-format counterpart to telephony's `fish_player()` — decodes Fish's WAV, resamples to PCM16@24kHz (matching `audio-engine.js`'s `outCtx` sample rate, so the client needs zero changes — the browser already treats Fish-origin and Gemini-origin bytes identically via `_send_bytes`/`playPcm`), and streams it chunked so a barge-in can abort mid-clip. `run_session` activates it in the non-builder branch using the exact same resolution telephony uses (`voice_tweaks.voice_provider` or "fish" default, gated on `fish_audio.is_configured()`) |
+| U35 | Shared sentence-flush logic (`_fish_flush`/`_drain_queue`) has one implementation, not two copies to drift | PASS | Code | 412 | Moved from `telephony/base.py` into `fish_audio.py` (a leaf module neither `gemini_bridge.py` nor `telephony/base.py` needs to import from each other to reach — avoids a circular import, since `telephony.base` already imports FROM `gemini_bridge`). Re-exported from `telephony/base.py` under the same names so existing imports/tests (`from backend.telephony.base import _fish_flush, _drain_queue`) needed no changes |
+| U36 | A leaked/orphaned Fish player task (WS closed without reaching an explicit stop signal) doesn't run forever | PASS | Unit | 412 | `run_session` has several early-`return` exit paths inside its inner reconnect loop that an explicit stop signal can't reach (same accepted shape as this file's pre-existing `_wrap_up_watchdog`, whose own cleanup comment documents the identical trade-off). `_fish_player_for_ws` self-bounds instead: checks `ws.client_state != CONNECTED` at the top of every loop iteration, and wraps its queue wait in a 30s timeout so it re-checks even with no new segments arriving — worst-case leak is bounded to ~30s, not permanent. An explicit `fish_q.put_nowait(None)` stop signal is still sent at the one hot-path transition that reliably reaches it (builder→agent handoff) for the fast path |
+| — | Test-harness note (not a product bug) | — | — | — | Building the test coverage for U34 surfaced a Python 3.9-only asyncio quirk: constructing `asyncio.Queue()`/`asyncio.Event()` in a test's synchronous setup code (outside the `async def go(): ...; asyncio.run(go())` coroutine) can bind to a stale loop left behind by an earlier test in the same process, raising "Future attached to a different loop" — only when the queue is shared across two independently-scheduled tasks. Fixed by constructing them inside `go()`, matching how `run_session` already does it in production (already running inside FastAPI's one long-lived loop, so it was never actually at risk) |
 
 ## Out-of-band tooling (not a tester item, no build number)
 - **`backend/sip/` (`sipd`)** — native SIP UAS that accepts inbound INVITEs straight from a Grandstream UCM and bridges call audio to a Gemini agent (no Twilio/Plivo). Run as a **separate LAN process** (`python -m backend.sip`), NOT part of the Railway web app — `backend/app.py` does not import it, so it's inert for the deploy. Committed to the repo so it can be pulled onto a LAN box. Transport (SIP/RTP/G.711/digest) is unit- + loopback-proven; the live Gemini audio bridge (`gemini_handler.py`) is pending a first live call. Reuses `gemini_bridge._agent_system_prompt`/`_live_config`/connectors + `db.get_agent`; no new deps.
