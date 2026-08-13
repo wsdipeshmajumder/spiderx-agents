@@ -15,7 +15,7 @@ import { marked } from "https://esm.sh/marked@12.0.2";
 // mount time with a brief retry loop in case the script hasn't finished
 // parsing before React's first paint.
 
-import { AudioEngine } from "/static/audio-engine.js?v=23";
+import { AudioEngine } from "/static/audio-engine.js?v=24";
 import { VoiceBlob } from "/static/voice-blob.js?v=34";
 
 const html = htm.bind(React.createElement);
@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 416;
+const SXAI_BUILD = 417;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })

@@ -680,6 +680,44 @@ class TestBuildLockstep(unittest.TestCase):
         self.assertIn("styles.css?v={BUILD}", idx)
 
 
+class TestStaticImportCacheBust(unittest.TestCase):
+    """build 417 incident: app.js imports audio-engine.js via a STATIC ES
+    `import` with its OWN manually-maintained `?v=N` query param — separate
+    from and NOT covered by the SXAI_BUILD/APP_BUILD lockstep above (a
+    static `import` specifier must be a string literal, so it can't
+    reference the SXAI_BUILD constant directly). build 410 edited
+    audio-engine.js (the mic-echo-gate fix for "agent keeps talking on its
+    own") and bumped SXAI_BUILD — but NOT audio-engine.js's own `?v=23`,
+    so any browser with that exact URL already cached kept running the
+    PRE-FIX file indefinitely. A live tester reproduced the bug on build
+    416 while deliberately staying silent specifically to verify the fix —
+    it hadn't actually reached their browser. This test hashes
+    audio-engine.js's content against a known snapshot: if the file
+    changes, the hash mismatches, forcing whoever's editing it to ALSO
+    bump `?v=N` in app.js's import line — a build check, not just a
+    comment someone can miss."""
+
+    def test_audio_engine_content_change_forces_a_version_bump(self):
+        import hashlib
+        content = (REPO / "frontend/audio-engine.js").read_text()
+        actual = hashlib.sha256(content.encode()).hexdigest()[:16]
+        # Snapshot as of build 417 (?v=24 in app.js). If this assertion
+        # fails: you changed audio-engine.js — bump `?v=N` in app.js's
+        # `import { AudioEngine } from "/static/audio-engine.js?v=N"` AND
+        # update the hash below to the new content's hash.
+        expected = "66b2886eca837f15"
+        self.assertEqual(actual, expected,
+            "audio-engine.js changed but its cache-bust wasn't updated — "
+            "bump `?v=N` in frontend/app.js's import AND this test's "
+            "expected hash, or browsers with a cached copy of the old URL "
+            "will keep running stale code (see class docstring).")
+
+    def test_audio_engine_import_has_a_version_query_param(self):
+        app_js = (REPO / "frontend/app.js").read_text()
+        m = re.search(r'audio-engine\.js\?v=(\d+)', app_js)
+        self.assertIsNotNone(m, "audio-engine.js import lost its ?v=N cache-bust")
+
+
 # ─── 6. import sanity (catches import-time breakage before deploy) ───────
 
 
