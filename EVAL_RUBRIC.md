@@ -5,7 +5,37 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 413**
+**Last updated: build 414**
+
+**Build 414 (Dashboard ambient background now reuses the landing page's
+brand gradient instead of a tinted photo):** tester on build 413's grey
+scrim: "not good looking, use the background used in agents.spiderx.ai/".
+Every prior scrim iteration (builds 411, 413) dimmed the `.db-main` lake
+photo with a fill/gradient layer on top of it; the tester instead wanted
+the exact soft, three-radial-gradient wash the landing page's `body`
+already paints site-wide (`--bg-gradient` under
+`:root[data-theme="light"]`: a lavender wash top-center, sky-blue
+bottom-right, pink bottom-left, all over the `#f7f8fa` base).
+
+Fix: `.db-main.db-main-scrim` now sets `background-image` to that same
+three-`radial-gradient()` stack (identical stop colours/positions/alphas
+to `--bg-gradient`) plus `background-color: #f7f8fa`, replacing the lake
+photo entirely on every non-agents page — no more photo-plus-scrim
+layering. `activeKey === "agents"` is unaffected (still no `-scrim`
+class, still the bare photo at full strength). Dark mode unaffected as
+before (its own `.db-main { background: #0b0d14 }` already replaces the
+whole background).
+
+**Verdict: PASS** — browser-verified on `rohan` at a 1600px light-mode
+viewport: Agents list computed `background-image` is still the bare
+photo URL (`db-main db-main-wide`, no `-scrim` class); Call log's
+`.db-main.db-main-scrim` computed `background-image` matches the
+landing page's `--bg-gradient` stack byte-for-byte (three radial
+gradients, same stop colours/positions). Evidence: **Behavioral**
+(computed styles, cross-checked against the live landing page's own
+computed `body` background) + **Code**.
+
+
 
 **Build 413 (Greyer, higher-contrast scrim gradient on dense dashboard
 pages):** tester follow-up on build 411's scrim: "use a greyish gradient

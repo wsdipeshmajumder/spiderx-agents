@@ -6937,28 +6937,24 @@ button { border: 0; background: transparent; cursor: pointer; padding: 0; color:
     background-position: center;
     background-size: cover;
   }
-  /* Scrim (build 411, greyer + a real 2-stop gradient in build 413 — a flat
-     near-white fill read as too close to the page's own #f7f8fa, not enough
-     contrast against the white foreground cards) — the sparse Agents-list
-     page (`activeKey="agents"`, the only page rendered WITHOUT this class —
-     see DashboardShell) shows the photo at full strength; every other page
-     is a denser dashboard (tables, stat tiles, forms) where the same image
-     showing through every gap competes with the foreground content instead
-     of accenting it. A second background-image LAYER — a neutral-grey
-     diagonal gradient — stacks on top of the photo (comma-separated
-     background-image layers paint first-listed-on-top); no extra DOM
-     element, no opacity on .db-main itself (which would dim the real
-     content, not just the photo behind it). Dark mode is unaffected: its
-     own later, higher-specificity `.db-main { background: #0b0d14 }`
-     already replaces the whole background (image included) with a flat
-     colour, so there's no photo there to scrim in the first place. */
+  /* Scrim (build 411 tinted-photo, build 413 greyer 2-stop gradient, build
+     414 swapped for the landing page's own brand wash — tester: "not good
+     looking, use the background used in agents.spiderx.ai/"). Every prior
+     version dimmed the lake photo; this instead drops the photo entirely
+     on dense pages and reuses the exact three-radial-gradient background
+     `body` already paints site-wide (see `--bg-gradient` under
+     `:root[data-theme="light"]`) over the same #f7f8fa base, so the
+     dashboard's ambient background matches the brand instead of fighting
+     a tinted photo. Only `activeKey === "agents"` (no `-scrim` class —
+     see DashboardShell) still shows the lake photo at full strength. Dark
+     mode is unaffected: its own later, higher-specificity `.db-main {
+     background: #0b0d14 }` already replaces the whole background. */
   .db-main.db-main-scrim {
     background-image:
-      linear-gradient(160deg, rgba(199, 202, 211, 0.82) 0%, rgba(148, 152, 165, 0.82) 100%),
-      url('/static/bg-lake.jpg');
-    background-repeat: no-repeat, no-repeat;
-    background-position: center, center;
-    background-size: cover, cover;
+      radial-gradient(80% 60% at 50% -10%, rgba(196, 181, 253, 0.20) 0%, transparent 60%),
+      radial-gradient(50% 50% at 100% 100%, rgba(125, 211, 252, 0.16) 0%, transparent 65%),
+      radial-gradient(50% 40% at 0% 90%, rgba(244, 114, 182, 0.10) 0%, transparent 70%);
+    background-color: #f7f8fa;
   }
 }
 .db-main-wide .db-pageheader,
