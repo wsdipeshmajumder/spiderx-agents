@@ -261,10 +261,10 @@ class _FakeSession:
             yield item
 
 
-def _resp(*, ot=None, audio=None, turn_complete=False, interrupted=False):
+def _resp(*, ot=None, it=None, audio=None, turn_complete=False, interrupted=False):
     sc = types.SimpleNamespace(
         interrupted=interrupted,
-        input_transcription=None,
+        input_transcription=(types.SimpleNamespace(text=it) if it else None),
         output_transcription=(types.SimpleNamespace(text=ot) if ot else None),
         turn_complete=turn_complete,
         model_turn=(types.SimpleNamespace(parts=[types.SimpleNamespace(
@@ -555,6 +555,81 @@ class TestBrowserFishPath(unittest.TestCase):
 
         asyncio.run(go())
         _ensure_loop()
+
+
+class TestPostReconnectSuppression(unittest.TestCase):
+    """build 419 — the code-level backstop behind build 418's prompt fix.
+    Root cause (confirmed via production Railway logs on call 337/338):
+    gemini-3.1-flash-live-preview has a Google-acknowledged, still-open bug
+    (googleapis/python-genai#2580) ignoring our automatic_activity_detection.
+    silence_duration_ms config, so session.receive() exhausts after roughly
+    one turn far more often than the "few minutes" the reconnect machinery
+    was designed around — every ~5-10s on a silent test call. Build 418's
+    "stay COMPLETELY SILENT" reconnect instruction helps but a live call
+    still showed the model speaking anyway on a later reconnect — LLM
+    instruction-following isn't 100% reliable, especially against a model
+    with confirmed timing bugs. This is the guarantee: whatever the model
+    says right after a reconnect is discarded in code — not queued, not
+    played, not persisted — until genuine caller speech (`input_transcription`)
+    actually arrives, no matter what the model does or doesn't obey."""
+
+    def _run_turn(self, *, suppressed_at_start, script):
+        from backend.gemini_bridge import _ConversationMemory, _SessionState, _Handoff, _pump_gemini_to_client
+        ws = _FakeWSBrowser()
+        session = _FakeSession(script)
+        state = _SessionState()
+        state.suppress_until_real_input = suppressed_at_start
+        memory = _ConversationMemory()
+        handoff = _Handoff()
+
+        async def _noop(*a, **k):
+            return {"ok": True}
+
+        async def go():
+            stop = asyncio.Event()
+            await asyncio.wait_for(_pump_gemini_to_client(
+                ws, session, stop, state, memory,
+                handoff=handoff, on_save_agent=_noop, on_select_agent=_noop,
+                on_connector_call=_noop,
+            ), timeout=15)
+
+        asyncio.run(go())
+        _ensure_loop()
+        return ws, state, memory
+
+    def test_phantom_turn_after_reconnect_produces_no_audio(self):
+        script = [
+            _resp(ot="Umm, let me just check that for you."),
+            _resp(audio=b"\x01\x02" * 2400),
+            _resp(turn_complete=True),
+        ]
+        ws, state, memory = self._run_turn(suppressed_at_start=True, script=script)
+        self.assertEqual(ws.sent_bytes, [], "no audio should reach the client while suppressed")
+        self.assertEqual(memory.turns, [], "a suppressed phantom turn must not enter conversation memory")
+        self.assertTrue(state.suppress_until_real_input,
+                         "the model's own output must never lift suppression")
+
+    def test_real_caller_speech_lifts_suppression_and_next_turn_plays(self):
+        script = [
+            _resp(it="Want to know more."),
+            _resp(ot="Sure, let me check that for you."),
+            _resp(audio=b"\x01\x02" * 2400),
+            _resp(turn_complete=True),
+        ]
+        ws, state, memory = self._run_turn(suppressed_at_start=True, script=script)
+        self.assertFalse(state.suppress_until_real_input, "real input_transcription must clear it")
+        self.assertEqual(ws.sent_bytes, [b"\x01\x02" * 2400], "the response to REAL input must play")
+        self.assertEqual([t["role"] for t in memory.turns], ["user", "model"])
+
+    def test_not_suppressed_by_default_unchanged_behavior(self):
+        script = [
+            _resp(ot="Hi there."),
+            _resp(audio=b"\x01\x02" * 2400),
+            _resp(turn_complete=True),
+        ]
+        ws, state, memory = self._run_turn(suppressed_at_start=False, script=script)
+        self.assertEqual(ws.sent_bytes, [b"\x01\x02" * 2400])
+        self.assertEqual([t["role"] for t in memory.turns], ["model"])
 
 
 # ─── 4. fish_audio client shape ──────────────────────────────────────────

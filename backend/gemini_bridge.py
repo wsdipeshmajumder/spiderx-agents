@@ -2999,6 +2999,21 @@ class _SessionState:
         # that opted out. Failure to open the writer leaves this as
         # None (writer's open() returns False, the bridge swallows).
         self.recording_writer = None  # Optional[recordings.RecordingWriter]
+        # Build 419 — code-level (not just prompt-level) enforcement of
+        # post-reconnect silence. Confirmed root cause of "agent keeps
+        # talking on its own": gemini-3.1-flash-live-preview has a
+        # Google-acknowledged, still-open bug (googleapis/python-genai#2580)
+        # where it ignores our automatic_activity_detection.silence_duration_ms
+        # config, ending turns/sessions far more aggressively than configured
+        # — hence the ~10s reconnect cycling seen even on a genuinely silent
+        # caller. Build 418's "stay COMPLETELY SILENT" reconnect instruction
+        # helps but isn't 100% reliable (LLM instruction-following never is).
+        # This flag is the backstop: while True, `_pump_gemini_to_client`
+        # discards any audio/text the model produces WITHOUT playing or
+        # persisting it, no matter what the model does — cleared the instant
+        # genuine caller speech (`sc.input_transcription`) actually arrives.
+        # Guarantees silence on resume regardless of model obedience.
+        self.suppress_until_real_input: bool = False
 
 
 _SENTENCE_SPLIT_RE = re.compile(r'(?<=[.?!।؟])\s+')
@@ -3322,6 +3337,14 @@ async def _pump_gemini_to_client(
                             # AUDIO modality — PCM chunks for the client
                             # audio engine.
                             state.audio_out_chunks += 1
+                            # Build 419 — post-reconnect grace window. The
+                            # model hasn't heard genuine caller speech since
+                            # resuming; discard whatever it says rather than
+                            # trust the "stay silent" prompt instruction to
+                            # hold 100% of the time (it doesn't — see
+                            # _SessionState.suppress_until_real_input).
+                            if state.suppress_until_real_input:
+                                continue
                             # Fish is speaking this turn → discard Gemini's
                             # own voice entirely (audio + agent-channel
                             # recording both come from _fish_player_for_ws
@@ -3348,20 +3371,36 @@ async def _pump_gemini_to_client(
                         # re-enable behind a `text_only` check.
                 if sc.input_transcription and sc.input_transcription.text:
                     log.info("USER heard: %r", sc.input_transcription.text)
+                    # Genuine caller speech — lift the post-reconnect grace
+                    # window (build 419). This is the ONLY thing that clears
+                    # it; the model's own output never does.
+                    state.suppress_until_real_input = False
                     memory.feed_input_transcription(sc.input_transcription.text)
                     await _send_json(ws, {"type": "transcript", "role": "user", "text": sc.input_transcription.text})
                 if sc.output_transcription and sc.output_transcription.text:
-                    # Critical for repetition-fix: also feed the model's own
-                    # transcribed audio into the conversation memory so that
-                    # on a Gemini reconnect, the new session sees what THIS
-                    # role already said and doesn't re-recommend / re-ask.
-                    memory.feed_output_transcription(sc.output_transcription.text)
-                    await _send_json(ws, {"type": "transcript", "role": "model", "text": sc.output_transcription.text})
-                    # Fish path: accumulate the agent's words and synthesize
-                    # sentence-by-sentence for low time-to-first-audio.
-                    if fx["active"] and fish_q is not None:
-                        fx["text"] += sc.output_transcription.text
-                        fish_audio._fish_flush(fish_q, fx, final=False)
+                    if state.suppress_until_real_input:
+                        # Build 419 — the model spoke anyway despite the
+                        # reconnect kickoff's "stay silent" instruction (the
+                        # known gemini-3.1-flash-live-preview VAD-timing bug,
+                        # googleapis/python-genai#2580, makes this common).
+                        # Log it for diagnosis but don't surface it anywhere
+                        # a real caller or the persisted transcript would see
+                        # it — it never reached the client's speakers either
+                        # (see the audio-suppression check above).
+                        log.info("suppressed post-reconnect phantom turn: %r",
+                                  sc.output_transcription.text)
+                    else:
+                        # Critical for repetition-fix: also feed the model's own
+                        # transcribed audio into the conversation memory so that
+                        # on a Gemini reconnect, the new session sees what THIS
+                        # role already said and doesn't re-recommend / re-ask.
+                        memory.feed_output_transcription(sc.output_transcription.text)
+                        await _send_json(ws, {"type": "transcript", "role": "model", "text": sc.output_transcription.text})
+                        # Fish path: accumulate the agent's words and synthesize
+                        # sentence-by-sentence for low time-to-first-audio.
+                        if fx["active"] and fish_q is not None:
+                            fx["text"] += sc.output_transcription.text
+                            fish_audio._fish_flush(fish_q, fx, final=False)
                 if sc.turn_complete:
                     state.turns += 1
                     state.model_turn_active = False
@@ -5349,6 +5388,12 @@ async def run_session(
 
                         state = _SessionState()
                         state.resume_handle = resume_handle
+                        # Build 419 — code-level backstop for EVERY reconnect
+                        # kickoff branch (not just resume_handle): discard
+                        # whatever the model says until the caller genuinely
+                        # speaks. See _SessionState.suppress_until_real_input
+                        # docstring for why prompt wording alone isn't enough.
+                        state.suppress_until_real_input = is_reconnect
                         # Wire the agent dict + active model into state so the
                         # receive-pump can stamp token totals back onto the
                         # agent for the end_call rollup.
