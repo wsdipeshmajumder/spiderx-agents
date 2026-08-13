@@ -50,15 +50,26 @@ from .presets import (
 log = logging.getLogger("eva.bridge")
 
 DEFAULT_MODEL = os.environ.get("GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview")
-# Single model policy: Gemini 3.1 Flash Live (cascade Live).
+# Single model policy: Gemini 3.1 Flash Live.
 #
-# Every behaviour in this bridge — the NO_INTERRUPTION activity handling, the
-# tightened LOW-sensitivity VAD, the reconnect preamble + transcript recap,
-# the never-re-greet system prompt block — was tuned and verified against
-# this model. The native-audio family ignores `realtime_input_config` and
-# `language_code`, accepts a different set of generation params, and has its
-# own drop pattern, so falling back to it would silently undo all of the
-# above and re-introduce the bugs we just fixed.
+# Build 420 correction: this is a NATIVE-AUDIO model, not cascade — verified
+# against Google's own migration guide and Live API capabilities doc
+# (ai.google.dev, checked 2026-08-13): gemini-3.1-flash-live-preview is the
+# documented successor to gemini-2.5-flash-native-audio-preview-12-2025.
+# It had been mislabeled "cascade" here since the initial commit, which fed
+# a model-family check (see `_is_native_audio_model` below) that used to do
+# a plain `"native-audio" in model_name` substring test — 3.1's model name
+# dropped that substring, so the check silently misclassified it and every
+# live call sent `language_code`, a field native-audio models don't use.
+#
+# Every OTHER behaviour in this bridge — the NO_INTERRUPTION activity
+# handling, the tightened LOW-sensitivity VAD, the reconnect preamble +
+# transcript recap, the never-re-greet system prompt block — was tuned and
+# verified against this exact model as deployed, so none of that changes;
+# only the family label and the (previously redundant, now-confirmed-unused)
+# `language_code` send were wrong. Falling back to an older Live generation
+# would still risk undoing that tuning, so the fallback list stays a single
+# entry.
 #
 # If you ever need to override (e.g. to test a stable point release), set
 # GEMINI_LIVE_MODEL in the environment — this code path will still try
@@ -66,6 +77,27 @@ DEFAULT_MODEL = os.environ.get("GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-previ
 FALLBACK_MODELS = [
     "gemini-3.1-flash-live-preview",
 ]
+
+# Exact-match registry, not substring matching — a substring check is what
+# caused the build-420 bug above: Gemini 3.1's native-audio successor
+# dropped "native-audio" from its model name. An explicit set also fails
+# SAFE for any future/unknown model id: it's classified as non-native (the
+# `with_language_code=True` branch), which is a harmless no-op send rather
+# than a silently wrong one — confirmed live (build 420): with the agent's
+# locale already stated in the system prompt, as every real agent prompt
+# does ("Locale: {locale}"), gemini-3.1-flash-live-preview picks the correct
+# language identically whether `language_code` is sent or not, across
+# hi-IN/es-ES/fr-FR/ja-JP.
+_NATIVE_AUDIO_MODELS = frozenset({
+    "gemini-3.1-flash-live-preview",
+    "gemini-2.5-flash-native-audio-latest",
+    "gemini-2.5-flash-native-audio-preview-09-2025",
+    "gemini-2.5-flash-native-audio-preview-12-2025",
+})
+
+
+def _is_native_audio_model(model_name: str) -> bool:
+    return model_name in _NATIVE_AUDIO_MODELS
 
 
 def _client() -> genai.Client:
@@ -944,15 +976,23 @@ def agent_config_warnings(agent: dict[str, Any]) -> list[dict[str, str]]:
     if isinstance(voice_tweaks, dict):
         resolved_provider = str(voice_tweaks.get("voice_provider") or "fish").strip().lower()
         fish_voice_id = str(voice_tweaks.get("fish_voice_id") or "").strip()
-        if resolved_provider == "fish" and not fish_voice_id:
+        # Build 420: an empty fish_voice_id is no longer a problem by itself —
+        # the agent's language supplies a curated default. What's still worth
+        # flagging is the case where NOTHING resolves: a language we have no
+        # vetted Fish voice for (Fish's catalogue is community-uploaded, so we
+        # ship a default only where one has been reviewed). Those agents keep
+        # Gemini's voice, which is correct behavior, but the operator should
+        # know why their "Pro" selection isn't audible.
+        resolved_voice = fish_voice_id or fish_audio.default_voice_for_locale(
+            agent.get("locale"))
+        if resolved_provider == "fish" and not resolved_voice:
             warnings.append({
                 "kind": "fish_voice_not_selected",
-                "detail": "Voice engine is Fish Audio but no voice was chosen "
-                          "(fish_voice_id is empty) — calls currently use "
-                          "Gemini's own voice instead (Fish only activates once "
-                          "a voice is picked, to avoid an inconsistent/unreliable "
-                          "voice). Pick a voice under Voice & behaviour to "
-                          "actually switch this agent to Fish.",
+                "detail": "Voice engine is Fish Audio but no voice is in effect "
+                          f"— no vetted default exists for this agent's language "
+                          f"({agent.get('locale') or 'unset'}) and none was chosen, "
+                          "so calls use Gemini's own voice instead. Pick a voice "
+                          "under Voice & behaviour to switch this agent to Fish.",
             })
 
     return warnings
@@ -2742,7 +2782,6 @@ def _live_config(
     tools: list[types.Tool],
     resume_handle: Optional[str] = None,
     with_language_code: bool = False,
-    is_native_audio: bool = True,
     tweaks: Optional[dict[str, Any]] = None,
     text_only: bool = False,
 ) -> types.LiveConnectConfig:
@@ -2765,11 +2804,11 @@ def _live_config(
     sensitivity = (t.get("sensitivity") or "").lower()
 
     # NOTE on text_only mode:
-    # The Gemini Live API's cascade model (gemini-3.1-flash-live-preview)
-    # and native-audio variants reject `response_modalities=["TEXT"]`
-    # at connect-time with a generic 1011 internal error — the Live
-    # endpoint is designed around audio half-duplex and won't accept a
-    # text-only modality config. So we DON'T branch the Live config on
+    # Every Live model we've tried, native-audio (gemini-3.1-flash-live-preview
+    # included) or otherwise, rejects `response_modalities=["TEXT"]` at
+    # connect-time with a generic 1011 internal error — the Live endpoint is
+    # designed around audio half-duplex and won't accept a text-only modality
+    # config. So we DON'T branch the Live config on
     # text_only. We keep AUDIO modality, the server still emits PCM
     # frames + parallel output_transcription text, and the client (chat
     # view) silently discards the binary frames while rendering the
@@ -2784,9 +2823,13 @@ def _live_config(
     # it, the pump's part.text fallback handles future TEXT-modality
     # support) so the surface for a proper text mode is already wired.
 
-    # Gemini's native-audio models (gemini-2.5-flash-native-audio-*) infer
-    # language/dialect from the system prompt and reject `language_code`.
-    # The cascade model (gemini-3.1-flash-live-preview) needs it.
+    # Gemini's native-audio models (gemini-3.1-flash-live-preview,
+    # gemini-2.5-flash-native-audio-*) infer language/dialect from the
+    # system prompt, so `with_language_code` is False for them — see
+    # `_NATIVE_AUDIO_MODELS` / build-420 note near DEFAULT_MODEL. Confirmed
+    # live: sending `language_code` to gemini-3.1-flash-live-preview isn't
+    # rejected, but it's redundant once the prompt states the locale (which
+    # every real agent prompt does) — so we simply don't send it.
     speech_kwargs: dict[str, Any] = {
         "voice_config": types.VoiceConfig(
             prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice)
@@ -3975,7 +4018,11 @@ async def run_session(
             # other. Falling back to Gemini's own (reliable, already-tuned)
             # voice when nobody actually picked a Fish voice is correct
             # behavior, not a config-lint overreaching.
-            _fish_on, _fish_voice_id = fish_audio.resolve_voice_engine(agent_tweaks)
+            # Build 420: pass locale so the browser test path resolves the same
+            # curated default voice a real call would — the test call must keep
+            # sounding identical to production.
+            _fish_on, _fish_voice_id = fish_audio.resolve_voice_engine(
+                agent_tweaks, locale=agent.get("locale"))
             if _fish_on:
                 fx["active"] = True
                 log.info("run_session: voice=fish agent=%s voice_id=%s",
@@ -4459,10 +4506,13 @@ async def run_session(
                     log.warning("builder: build_session read failed (continuing without facts): %s", e)
 
             for model_name in models_to_try:
-                # Native-audio models infer dialect from the prompt and reject
-                # `language_code` / `enable_affective_dialog` / `proactivity`;
-                # the cascade Live model accepts them.
-                is_native = "native-audio" in model_name
+                # Native-audio models infer dialect from the prompt, so we
+                # skip sending `language_code` for them (harmless either way —
+                # see build-420 note on _NATIVE_AUDIO_MODELS above — but
+                # skipping it is the documented-correct behavior).
+                # enable_affective_dialog/proactivity are unrelated to this
+                # check — they're never sent to any model (see _live_config).
+                is_native = _is_native_audio_model(model_name)
                 # On reconnects we surgically prepend the no-greet preamble
                 # to the system prompt. This is the only knob that reliably
                 # stops the model from re-introducing itself; the user-role
@@ -4488,7 +4538,6 @@ async def run_session(
                     voice=voice, locale=locale, system_prompt=effective_prompt,
                     tools=tools, resume_handle=resume_handle,
                     with_language_code=not is_native,
-                    is_native_audio=is_native,
                     tweaks=session_tweaks,
                     text_only=text_only,
                 )
@@ -6674,12 +6723,11 @@ async def run_helper_session(
         models_to_try = [usable_model] if usable_model else candidates
         last_err: Exception | None = None
         for model_name in models_to_try:
-            is_native = "native-audio" in model_name
+            is_native = _is_native_audio_model(model_name)
             config = _live_config(
                 voice=voice, locale=locale, system_prompt=system_prompt,
                 tools=tools, resume_handle=resume_handle,
                 with_language_code=not is_native,
-                is_native_audio=is_native,
                 tweaks=tweaks,
             )
             try:

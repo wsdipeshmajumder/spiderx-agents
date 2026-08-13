@@ -593,7 +593,11 @@ async def _bridge(
     # this (voice_provider defaults to "fish" even when an operator never
     # touched the field) — not just agents that explicitly chose Fish.
     from .. import fish_audio
-    _fish_on, _fish_voice_id = fish_audio.resolve_voice_engine(agent.get("voice_tweaks"))
+    # Build 420: locale is passed so an agent whose operator never opened the
+    # voice picker still gets the curated default Fish voice for its language,
+    # rather than silently running on Gemini. Still an explicit reference_id.
+    _fish_on, _fish_voice_id = fish_audio.resolve_voice_engine(
+        agent.get("voice_tweaks"), locale=agent.get("locale"))
     # fx: shared mutable state between the receive loop and the Fish player.
     #   active — currently speaking via Fish (flips to False on any Fish error,
     #            degrading the rest of the call to Gemini's voice)

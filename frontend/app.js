@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 419;
+const SXAI_BUILD = 421;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -9893,7 +9893,11 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
                 <span class="db-form-label">Voice style</span>
                 <select class="db-input vs-select" value=${draft.voice_tweaks.fish_voice_id || ""}
                         onChange=${(e) => setTweak("fish_voice_id", e.target.value)}>
-                  <option value="">Default voice</option>
+                  <!-- Build 420: "" is a real default now, not a no-op — the
+                       backend resolves it to the curated voice for the agent's
+                       language (and keeps the Standard voice for languages we
+                       have no reviewed Pro voice for yet). -->
+                  <option value="">Recommended for this language</option>
                   ${fishVoices.map((v) => html`<option key=${v.id} value=${v.id}>${v.label}</option>`)}
                 </select>
               </label>

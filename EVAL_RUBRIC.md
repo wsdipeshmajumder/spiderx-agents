@@ -5,7 +5,114 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 419**
+**Last updated: build 421**
+
+**Build 421 (fix: `is_native` model-family check silently misclassified
+`gemini-3.1-flash-live-preview`, sending it a redundant `language_code`
+field on every live call):** triggered by a competitor screenshot (Vani,
+`voice-agent.edesy.in`) that labeled the exact same model
+"Gemini Live 3.1 · Native Audio". Our own code called it cascade. Checked
+the primary source instead of trusting either label.
+
+- **Confirmed against Google's own docs** (migration guide + Live API
+  capabilities page, ai.google.dev, checked 2026-08-13):
+  `gemini-3.1-flash-live-preview` is the documented native-audio successor
+  to `gemini-2.5-flash-native-audio-preview-12-2025`, not a cascade model.
+  That contradicted a comment baked into `backend/gemini_bridge.py` since
+  the squashed initial commit (build 177) — never empirically verified in
+  this repo's visible history.
+- **Root cause:** `is_native = "native-audio" in model_name` — a substring
+  check. Gemini 3.1's native-audio model dropped `"native-audio"` from its
+  name, so the check silently returned `False`, which fed
+  `with_language_code = not is_native = True`. Every real call sent
+  `language_code=<locale>` believing the model needed it.
+- **Live-verified the actual effect** (real API key, real sessions, not
+  simulated): with a neutral prompt and no locale context, forcing
+  `language_code` changed output language for `fr-FR`/`es-ES` but not for
+  `hi-IN`/`ja-JP` — inconsistent, not a clean requirement. With a
+  **production-shaped** prompt (the `Locale: {locale}` line every real
+  agent's system prompt already carries — `_agent_system_prompt`), the
+  model picked the correct language identically **with or without**
+  `language_code`, across `hi-IN`/`es-ES`/`fr-FR`/`ja-JP`. The field was a
+  redundant no-op for this model, not a requirement — de-risking removal
+  for every currently-published locale before touching the code.
+- **Fix:** `_is_native_audio_model()` — an explicit `frozenset` registry,
+  not substring matching (substring matching is exactly what caused this
+  bug). Fails safe: an unrecognized future model id defaults to
+  non-native (`language_code` still sent — a harmless redundant send,
+  confirmed above), not a silent miss. Also removed `is_native_audio`, a
+  parameter threaded through `_live_config()` that was never read inside
+  the function — dead code sitting next to the real bug — and corrected
+  two other stale "cascade model" comments in the same function.
+- **Evidence — Unit + Instrumented + Behavioral.** 91/91 offline tests
+  pass, incl. 5 new `TestNativeAudioModelClassification` cases (default
+  model now classifies native, 2.5 native-audio family unaffected,
+  unknown-model fail-safe direction, exact-match not substring, dead
+  param actually removed from the signature). Behavioral: a live call
+  through the **actual unmodified `_live_config()` builder** — the same
+  function `run_session`/`_bridge` call in production — with `hi-IN`
+  locale and `language_code` correctly omitted, returned a live Hindi
+  reply from the real Gemini Live API.
+- **Verdict: PASS.** Does not by itself resolve the previously-reported
+  `silence_duration_ms` reconnect churn — that claim (that native-audio
+  ignores `realtime_input_config`) was not retested here and the
+  code comment flagging it as unverified stays in place. This fix is
+  scoped to the confirmed, separate `language_code` misclassification.
+
+**Build 420 (Fish Audio is the real platform default voice — curated
+per-language default):** requested: "switch to Fish Audio as the default
+product voice model across all published agents". Audit first: the default
+was already nominally Fish — `resolve_voice_engine` reads
+`voice_provider or "fish"` — but build 416 (correctly) refused to activate
+Fish without an explicit `fish_voice_id`, so **every agent whose operator
+never opened the voice picker was silently running on Gemini's voice**. The
+setting said Fish; the calls were Standard.
+
+- **Fix:** `DEFAULT_VOICE_BY_LANG` + `default_voice_for_locale()` in
+  `backend/fish_audio.py`; `resolve_voice_engine` takes `locale=` and falls
+  back to the curated voice for the agent's language. Both live-call paths
+  pass it (`telephony/base.py::_bridge`, `gemini_bridge.py::run_session`),
+  so the browser test call and a real call resolve identically.
+- **Build-416 invariant preserved.** 416's actual requirement was "never
+  call Fish with `reference_id` omitted" — the free backbone then picks a
+  different voice per request and one synth failure flips the
+  degrade-to-Gemini net mid-call, so the caller hears the voice change. A
+  pinned curated id is explicit and stable, satisfying that exactly as well
+  as an operator-chosen one. Fish still never activates without a
+  `reference_id`.
+- **Licensing guard (deliberate gap).** Only `en` ships a default. Fish's
+  catalogue is community-uploaded, not licensed: `GET /model?language=hi
+  &sort_by=score` returns joke voices ("Uncle gigi", "motu", "Mad
+  scientist") and **unlicensed clones of real public figures — "Amitabh
+  Bachchan", "Narendra Modi"** (verified against the live API 2026-08-13).
+  No auto-selection from that pool. Hindi agents (incl. published "Kavya")
+  therefore stay on Gemini's voice by design, and an unknown/absent locale
+  is never guessed. `test_every_curated_default_is_a_reviewed_default_voice`
+  enforces that a default may only point at an id already in
+  `DEFAULT_VOICES`.
+- **Warning narrowed:** `fish_voice_not_selected` previously fired for every
+  agent with an empty `fish_voice_id` — now noise, since the language
+  supplies one. It now fires only when *nothing* resolves (no vetted voice
+  for that language), and names the locale.
+- **Picker fix (same surface):** `list_voices()` sorted purely by Fish's
+  `score`, so the operator-facing dropdown led with game announcers, anime
+  characters and the clones above. Curated `DEFAULT_VOICES` now come first,
+  catalogue as the long tail. Frontend option `""` relabelled
+  "Recommended for this language" — it is a real default now, not a no-op.
+- **Evidence — Unit + Instrumented.** 86/86 `tests/test_offline.py` pass,
+  incl. 8 new `TestResolveVoiceEngine` cases (per-region resolution, explicit
+  id wins, Hindi stays Gemini, unknown locale never guessed, gemini choice
+  never overridden, vetted-id guard) and a rewritten warning case. Live
+  resolution matrix + a real `POST /v1/tts` through the resolved default
+  returned a valid 43,466-byte MP3 (`\xff\xfb` frame header).
+- **Verdict: PARTIAL.** Code+unit complete and en-locale behaviour proven
+  end-to-end against the live Fish API. Open: (a) **no Behavioral evidence
+  on a real phone call** — this session has no production DB access
+  (`.env` carries only the local `PG_URL`, which has zero published agents),
+  so published Eva/Kavya were never read or written; (b) **Hindi has no Pro
+  voice** pending a licensed/hand-vetted id; (c) `en-IN` agents now get a
+  US-accented default (Amy) — safe and licensed, but an accent regression vs
+  Gemini's native en-IN, and worth a vetted Indian-English voice.
 
 **Build 408 (Hours editor — mobile-width fix):** proactive follow-up
 after shipping build 406's multi-window hours editors — tester asked to

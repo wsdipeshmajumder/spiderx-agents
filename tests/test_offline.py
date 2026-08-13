@@ -723,6 +723,65 @@ class TestResolveVoiceEngine(unittest.TestCase):
             {"voice_provider": "fish", "fish_voice_id": "abc123"})
         self.assertFalse(active)
 
+    # ─── build 420: curated per-language default ─────────────────────────
+    #
+    # Fish becomes the real platform default: an agent whose operator never
+    # opened the voice picker now runs on the curated voice for its language.
+    # The build-416 invariant is unchanged — Fish still only ever activates
+    # with an explicit, stable reference_id; a vetted default just supplies
+    # one when the operator didn't.
+
+    def test_locale_supplies_curated_default_when_no_voice_picked(self):
+        active, voice_id = self.fa.resolve_voice_engine(
+            {"voice_provider": "fish", "fish_voice_id": ""}, locale="en-US")
+        self.assertTrue(active)
+        self.assertEqual(voice_id, self.fa.DEFAULT_VOICE_BY_LANG["en"])
+
+    def test_curated_default_applies_to_any_region_of_the_language(self):
+        active, voice_id = self.fa.resolve_voice_engine({}, locale="en-IN")
+        self.assertTrue(active)
+        self.assertEqual(voice_id, self.fa.DEFAULT_VOICE_BY_LANG["en"])
+
+    def test_explicit_voice_id_still_wins_over_the_default(self):
+        active, voice_id = self.fa.resolve_voice_engine(
+            {"voice_provider": "fish", "fish_voice_id": "abc123"}, locale="en-US")
+        self.assertTrue(active)
+        self.assertEqual(voice_id, "abc123")
+
+    def test_language_without_a_vetted_voice_stays_on_gemini(self):
+        # Hindi deliberately has no curated default: Fish's catalogue is
+        # community-uploaded and its top Hindi results include joke voices and
+        # unlicensed clones of real public figures. Never auto-select one.
+        active, voice_id = self.fa.resolve_voice_engine(
+            {"voice_provider": "fish"}, locale="hi-IN")
+        self.assertFalse(active)
+        self.assertIsNone(voice_id)
+
+    def test_unknown_locale_is_never_guessed(self):
+        for loc in (None, "", "   ", "xx-YY"):
+            active, voice_id = self.fa.resolve_voice_engine(
+                {"voice_provider": "fish"}, locale=loc)
+            self.assertFalse(active, loc)
+            self.assertIsNone(voice_id, loc)
+
+    def test_curated_default_never_overrides_an_explicit_gemini_choice(self):
+        active, voice_id = self.fa.resolve_voice_engine(
+            {"voice_provider": "gemini"}, locale="en-US")
+        self.assertFalse(active)
+        self.assertIsNone(voice_id)
+
+    def test_every_curated_default_is_a_reviewed_default_voice(self):
+        # Guards the licensing rule: a default may only ever point at an id
+        # that already passed review in DEFAULT_VOICES.
+        vetted = {v["id"] for v in self.fa.DEFAULT_VOICES}
+        for lang, vid in self.fa.DEFAULT_VOICE_BY_LANG.items():
+            self.assertIn(vid, vetted, f"{lang} default is not a vetted voice")
+
+    def test_default_voice_for_locale_is_case_and_separator_tolerant(self):
+        for loc in ("en-US", "EN-us", "en_IN", "en"):
+            self.assertEqual(self.fa.default_voice_for_locale(loc),
+                             self.fa.DEFAULT_VOICE_BY_LANG["en"], loc)
+
 
 # ─── 5. build-number lockstep convention ─────────────────────────────────
 
@@ -753,6 +812,54 @@ class TestBuildLockstep(unittest.TestCase):
         idx = (REPO / "frontend/index.html").read_text()
         self.assertIn("app.js?v={BUILD}", idx)
         self.assertIn("styles.css?v={BUILD}", idx)
+
+
+class TestNativeAudioModelClassification(unittest.TestCase):
+    """Build 420: `is_native = "native-audio" in model_name` misclassified
+    gemini-3.1-flash-live-preview as cascade — its model name dropped the
+    "native-audio" substring the 2.5 generation used, even though Google's
+    own migration guide documents it as the native-audio successor to
+    gemini-2.5-flash-native-audio-preview-12-2025. That fed `with_language_code
+    = not is_native`, so every live call sent a `language_code` field to a
+    model family that (per docs, and confirmed live against the real API)
+    doesn't need it once the agent's locale is already stated in the system
+    prompt, as every real agent prompt does. `_is_native_audio_model` replaces
+    the substring check with an explicit registry so a future model rename
+    can't silently reintroduce this."""
+
+    def setUp(self):
+        from backend import gemini_bridge as gb
+        self.gb = gb
+
+    def test_default_model_is_classified_native(self):
+        self.assertTrue(self.gb._is_native_audio_model(self.gb.DEFAULT_MODEL))
+
+    def test_25_native_audio_family_still_classified_native(self):
+        for m in ("gemini-2.5-flash-native-audio-latest",
+                  "gemini-2.5-flash-native-audio-preview-09-2025",
+                  "gemini-2.5-flash-native-audio-preview-12-2025"):
+            self.assertTrue(self.gb._is_native_audio_model(m), m)
+
+    def test_unknown_future_model_fails_safe_to_non_native(self):
+        # Fail-safe direction matters: treating an unknown model as
+        # non-native means language_code gets sent (a harmless redundant
+        # send, confirmed live) rather than silently omitted for a real
+        # cascade model that might actually need it.
+        self.assertFalse(self.gb._is_native_audio_model("gemini-9.9-flash-live-preview"))
+
+    def test_classification_is_exact_match_not_substring(self):
+        # Guards against reintroducing the build-420 bug shape: a model name
+        # that merely CONTAINS a known native id must not match.
+        self.assertFalse(self.gb._is_native_audio_model(
+            "gemini-3.1-flash-live-preview-experimental"))
+
+    def test_live_config_no_longer_accepts_is_native_audio_param(self):
+        # The parameter was threaded through _live_config but never read
+        # inside it (dead) — removed rather than left as a misleading no-op
+        # sitting next to the real fix.
+        import inspect
+        params = inspect.signature(self.gb._live_config).parameters
+        self.assertNotIn("is_native_audio", params)
 
 
 class TestStaticImportCacheBust(unittest.TestCase):
@@ -1100,22 +1207,32 @@ class TestAgentConfigWarnings(unittest.TestCase):
         }
         self.assertEqual(self.gb.agent_config_warnings(agent), [])
 
-    def test_agent_config_warnings_flags_fish_without_voice_id(self):
-        # Fish Audio is the platform-wide DEFAULT live-call voice engine
-        # (backend/telephony/base.py) — confirmed live on agent 6: an agent
-        # can resolve to Fish with no fish_voice_id ever chosen, so Fish
-        # speaks in its own generic default voice on every real call.
+    def test_agent_config_warnings_flags_fish_when_language_has_no_vetted_voice(self):
+        # Build 420 narrowed this warning. An empty fish_voice_id is no longer
+        # a problem on its own — the language supplies a curated default. It IS
+        # still a problem when nothing resolves at all, e.g. Hindi, where we
+        # deliberately ship no default (community catalogue, unlicensed clones).
         agent = {"system_prompt": "", "connectors": [], "variables": {},
+                  "locale": "hi-IN",
                   "voice_tweaks": {"voice_provider": "fish", "fish_voice_id": ""}}
         warnings = self.gb.agent_config_warnings(agent)
         self.assertEqual([w["kind"] for w in warnings], ["fish_voice_not_selected"])
 
     def test_agent_config_warnings_flags_fish_default_when_voice_tweaks_absent(self):
         # voice_provider defaults to "fish" when voice_tweaks is missing
-        # entirely, not just when it's explicitly set to "fish".
+        # entirely, not just when it's explicitly set to "fish" — and with no
+        # locale there is nothing to resolve a default from.
         agent = {"system_prompt": "", "connectors": [], "variables": {}}
         warnings = self.gb.agent_config_warnings(agent)
         self.assertEqual([w["kind"] for w in warnings], ["fish_voice_not_selected"])
+
+    def test_agent_config_warnings_clean_when_language_has_a_curated_default(self):
+        # The build-420 payoff: an operator who never opened the voice picker
+        # is now correctly on Fish, so there is nothing to warn about.
+        agent = {"system_prompt": "", "connectors": [], "variables": {},
+                  "locale": "en-US",
+                  "voice_tweaks": {"voice_provider": "fish", "fish_voice_id": ""}}
+        self.assertEqual(self.gb.agent_config_warnings(agent), [])
 
     def test_agent_config_warnings_fish_with_voice_id_is_clean(self):
         agent = {"system_prompt": "", "connectors": [], "variables": {},

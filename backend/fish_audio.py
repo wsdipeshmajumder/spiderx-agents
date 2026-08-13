@@ -40,6 +40,39 @@ DEFAULT_VOICES: list[dict[str, str]] = [
     {"id": "98e364e9a41c465a9d4fdafc267f84ea", "label": "Anthony — Deep English Man", "lang": "en"},
 ]
 
+# Per-LANGUAGE fallback voice, keyed by the primary subtag of an agent's locale
+# (en-US / en-IN → "en"). Build 420: this is what actually makes Fish the
+# platform default rather than a per-agent opt-in — before it, `voice_provider`
+# already defaulted to "fish" but build 416 (correctly) refused to activate Fish
+# without an explicit `fish_voice_id`, so in practice every agent whose operator
+# never opened the voice picker ran on Gemini's voice.
+#
+# This does NOT reopen the build-416 incident. That bug was calling Fish with
+# `reference_id` OMITTED — the free backbone then picks a different voice per
+# request, and one intermittent synth failure flips the degrade-to-Gemini net
+# mid-call, so the caller hears the voice change. The requirement 416 really
+# imposed is "always send an explicit, stable reference_id", and a pinned
+# curated id satisfies that exactly as well as an operator-chosen one does.
+#
+# Only languages with a VETTED voice belong here. Fish's catalogue is
+# community-uploaded, not a licensed professional library: a `sort_by=score`
+# query for Hindi returns joke/character voices ("Uncle gigi", "motu") and
+# unlicensed clones of real public figures (verified 2026-08-13). Shipping one
+# of those as a product default would be a licensing problem, not just a
+# quality one — so a language with no vetted entry resolves to None and the
+# agent keeps Gemini's own voice. Absent/unknown locale does the same: we never
+# guess a language.
+DEFAULT_VOICE_BY_LANG: dict[str, str] = {
+    "en": "001262690f2a4eea84aa764cc536df24",   # Amy — conversational, from DEFAULT_VOICES
+}
+
+
+def default_voice_for_locale(locale: Optional[str]) -> Optional[str]:
+    """Curated fallback Fish voice id for `locale` ("en-US" → Amy), or None
+    when we have no vetted voice for that language (or no locale at all)."""
+    lang = str(locale or "").strip().lower().replace("_", "-").split("-")[0]
+    return DEFAULT_VOICE_BY_LANG.get(lang) if lang else None
+
 
 class FishAudioError(Exception):
     """Raised on any Fish API failure. `status` mirrors the HTTP status so the
@@ -61,7 +94,11 @@ def is_configured() -> bool:
     return bool((os.environ.get("FISH_AUDIO_API_KEY") or "").strip())
 
 
-def resolve_voice_engine(voice_tweaks: Optional[dict]) -> tuple[bool, Optional[str]]:
+def resolve_voice_engine(
+    voice_tweaks: Optional[dict],
+    *,
+    locale: Optional[str] = None,
+) -> tuple[bool, Optional[str]]:
     """Resolve an agent's voice_tweaks to (fish_active, fish_voice_id).
 
     Single source of truth for every live-call path (telephony's `_bridge`
@@ -78,11 +115,22 @@ def resolve_voice_engine(voice_tweaks: Optional[dict]) -> tuple[bool, Optional[s
     which reads as two AIs talking over each other. Requiring an explicit
     fish_voice_id before Fish activates at all (falling back to Gemini's
     own reliable voice otherwise) is the fix — this function is where that
-    requirement is now enforced, once, for every caller."""
+    requirement is now enforced, once, for every caller.
+
+    Build 420: when the operator picked no voice, fall back to the curated
+    per-language default for `locale` (see DEFAULT_VOICE_BY_LANG) instead of
+    giving up on Fish. The build-416 invariant is unchanged and still holds
+    everywhere: Fish activates ONLY with an explicit, stable reference_id —
+    this just lets a vetted platform default supply one. Languages with no
+    vetted voice (and callers that pass no locale) still resolve to Gemini."""
     vt = voice_tweaks or {}
     provider = str(vt.get("voice_provider") or "fish").strip().lower()
     voice_id = (str(vt.get("fish_voice_id") or "").strip() or None)
-    active = provider == "fish" and voice_id is not None and is_configured()
+    if provider != "fish":
+        return False, None
+    if voice_id is None:
+        voice_id = default_voice_for_locale(locale)
+    active = voice_id is not None and is_configured()
     return active, voice_id
 
 
@@ -156,6 +204,12 @@ async def list_voices(*, limit: int = 12, language: str = "en") -> list[dict[str
             if mid and title:
                 out.append({"id": mid, "label": title[:60],
                             "lang": (m.get("languages") or [language])[0]})
+        # Curated voices first (build 420). The catalogue is community-uploaded
+        # and `sort_by=score` surfaces game announcers, joke voices and
+        # unlicensed clones of real public figures — fine as a long tail an
+        # operator can opt into, wrong as the top of a business voice picker.
+        seen = {v["id"] for v in DEFAULT_VOICES}
+        out = list(DEFAULT_VOICES) + [v for v in out if v["id"] not in seen]
         return out or list(DEFAULT_VOICES)
     except Exception:  # noqa: BLE001
         return list(DEFAULT_VOICES)
