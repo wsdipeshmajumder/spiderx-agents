@@ -9866,7 +9866,7 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
              actual default, and Gemini "Standard" despite being the more
              capable option for non-English calls — backwards from what an
              operator would expect those words to mean. The live pipeline
-             reads `id`, unaffected by this relabel. -->
+             reads the id field, unaffected by this relabel. -->
         <div class="db-form-field vs-engine">
           <span class="db-form-label">Voice quality</span>
           <div class="vs-tiers" role="radiogroup" aria-label="Voice quality">
