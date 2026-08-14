@@ -608,6 +608,27 @@ async def _bridge(
     if _fish_on:
         log.info("telephony[%s] voice=fish agent=%s voice_id=%s",
                  provider.name, agent.get("id"), _fish_voice_id or "default")
+    # Provable per-call voice-engine decision in the events ledger (build 422),
+    # same as the browser path — so a NULL calls.voice_provider is never
+    # ambiguous about which engine actually drove the audio.
+    try:
+        from .. import events as _events
+        await _events.emit(
+            "voice.engine.resolved",
+            title=f"Voice engine → {'Fish' if _fish_on else 'Gemini'} · {agent.get('name') or agent.get('id')}",
+            source="system", agent_id=agent.get("id"), org_id=agent.get("org_id"),
+            payload={
+                "engine_active": "fish" if _fish_on else "gemini",
+                "configured_provider": agent.get("_voice_provider"),
+                "fish_active": bool(_fish_on),
+                "fish_voice_id": _fish_voice_id,
+                "fish_configured": fish_audio.is_configured(),
+                "locale": agent.get("locale"),
+                "path": f"phone:{provider.name}",
+            },
+        )
+    except Exception as _e:  # noqa: BLE001
+        log.debug("voice.engine.resolved emit skipped: %s", _e)
 
     async def fish_player() -> None:
         """Pull ready text segments, synthesize with Fish, stream µ-law to the

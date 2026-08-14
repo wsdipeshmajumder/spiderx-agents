@@ -4042,6 +4042,31 @@ async def run_session(
                 fish_player_task = asyncio.create_task(
                     _fish_player_for_ws(ws, fish_q, fx, agent, _fish_voice_id)
                 )
+            # Record the voice-engine decision in the events ledger so it's
+            # provable per call which engine actually drove the audio — a NULL
+            # `calls.voice_provider` (legacy/abandoned rows) no longer leaves it
+            # ambiguous (build 422). `configured` = what the agent asked for;
+            # `active` = whether Fish actually engaged (needs the key + a stable
+            # voice; falls back to Gemini otherwise).
+            try:
+                from . import events as _events
+                _cfg_prov = str(agent_tweaks.get("voice_provider") or "fish").strip().lower()
+                await _events.emit(
+                    "voice.engine.resolved",
+                    title=f"Voice engine → {'Fish' if _fish_on else 'Gemini'} · {agent.get('name') or agent.get('id')}",
+                    source="system", agent_id=agent.get("id"), org_id=agent.get("org_id"),
+                    payload={
+                        "engine_active": "fish" if _fish_on else "gemini",
+                        "configured_provider": _cfg_prov,
+                        "fish_active": bool(_fish_on),
+                        "fish_voice_id": _fish_voice_id,
+                        "fish_configured": fish_audio.is_configured(),
+                        "locale": agent.get("locale"),
+                        "path": "browser_test",
+                    },
+                )
+            except Exception as _e:  # noqa: BLE001
+                log.debug("voice.engine.resolved emit skipped: %s", _e)
 
         await _send_json(ws, {"type": "session_starting", "kind": kind, "agent": agent})
 

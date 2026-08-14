@@ -7,6 +7,20 @@
 
 **Last updated: build 421**
 
+**Voice-engine decision now logged to the events ledger (backend-only, no build
+bump).** A NULL `calls.voice_provider` (legacy/abandoned rows — e.g. Nora call
+137) left it ambiguous whether Fish actually drove the audio. Now, at the point
+each live call resolves its engine, both paths emit a `voice.engine.resolved`
+event via the canonical `events.emit` — browser test path
+(`gemini_bridge.run_session`) and phone path (`telephony.base`) — with payload
+`{engine_active: fish|gemini, configured_provider, fish_active, fish_voice_id,
+fish_configured, locale, path}`. Readable via the canonical `/api/admin/events`
+(kind_prefix `voice.engine`). So it's provable per-call which engine engaged,
+independent of the `calls.voice_provider` column. Verified: `emit` +
+`list_events(kind_prefix="voice.engine")` round-trip returns the row with
+`payload.engine_active`. Best-effort (wrapped in try/except — a logging failure
+never touches the call). Evidence: **Behavioral**.
+
 **Latency fix: slow / un-spontaneous calls — endpointing setting was ignored
 (backend-only, no build bump).** Reported on the Nora agent (#30, en-US). Measured
 from the stereo recording of call 137: ~2.8 s of dead air between the caller
