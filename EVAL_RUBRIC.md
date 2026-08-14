@@ -7,6 +7,25 @@
 
 **Last updated: build 421**
 
+**Latency fix: slow / un-spontaneous calls — endpointing setting was ignored
+(backend-only, no build bump).** Reported on the Nora agent (#30, en-US). Measured
+from the stereo recording of call 137: ~2.8 s of dead air between the caller
+finishing and the agent replying. Root cause in `gemini_bridge._live_config`:
+the VAD builder read `t.get("silence_ms")` / `t.get("prefix_pad_ms")`, but the
+voice-settings UI and all 26 agents store `silence_duration_ms` /
+`prefix_padding_ms` — so **every** operator endpointing override was silently
+dropped and every call used the hardcoded 2000 ms silence. Fix: (1) read the
+correct keys (legacy short keys still accepted); (2) lower the default
+2000→900 ms silence / 400→300 ms prefix; (3) one-shot clamp of all 26 agents'
+stored `silence_duration_ms` (was 1500/2000/2400) down to ≤900 ms so the now-honoured
+values are snappy and none regress. Net: agent replies ~1.1 s sooner; LOW
+end-sensitivity retained so a normal mid-sentence pause still won't cut the
+caller off (operators can raise the value now that it's honoured). Note: call
+137 ran on **Gemini native** voice (`voice_provider=None`), not Fish — so this
+latency is independent of the Fish path. Data clamp applied to the local dev DB;
+prod needs the same migration. Evidence: **Behavioral** (recording-measured lag +
+code trace; live re-call still to confirm).
+
 **Build 421 (fix: `is_native` model-family check silently misclassified
 `gemini-3.1-flash-live-preview`, sending it a redundant `language_code`
 field on every live call):** triggered by a competitor screenshot (Vani,

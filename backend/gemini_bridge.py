@@ -2795,8 +2795,14 @@ def _live_config(
     server-side TTS or burns a voice-model quota."""
     t = tweaks or {}
 
-    silence_ms = t.get("silence_ms")
-    prefix_pad_ms = t.get("prefix_pad_ms")
+    # Endpointing overrides. The voice-settings UI + every agent's saved tweaks
+    # use `silence_duration_ms` / `prefix_padding_ms` — read THOSE (build 422).
+    # Until now this read `silence_ms` / `prefix_pad_ms`, keys nothing writes, so
+    # every operator's endpointing setting was silently dropped and every call
+    # fell back to the hardcoded default below — the platform-wide "slow to
+    # respond / not spontaneous" cause. Legacy short keys still accepted.
+    silence_ms = t.get("silence_duration_ms", t.get("silence_ms"))
+    prefix_pad_ms = t.get("prefix_padding_ms", t.get("prefix_pad_ms"))
     affective = t.get("affective", True)
     proactive = bool(t.get("proactive", False))
     temperature = t.get("temperature")
@@ -2860,9 +2866,15 @@ def _live_config(
     # User can override per-session via the tweaks panel.
     vad_kwargs: dict[str, Any] = {
         "start_of_speech_sensitivity": types.StartSensitivity.START_SENSITIVITY_LOW,
+        # Snappier endpointing default (build 422): 2000 ms of dead air after the
+        # caller stopped read as a sluggish, un-spontaneous agent. 900 ms with
+        # LOW end-sensitivity still tolerates a normal mid-sentence pause without
+        # cutting the caller off, but responds ~1.1 s sooner. Operators who want
+        # more pause tolerance can raise `silence_duration_ms` in Voice settings
+        # (now that that override is actually honoured).
         "end_of_speech_sensitivity": types.EndSensitivity.END_SENSITIVITY_LOW,
-        "silence_duration_ms": 2000,
-        "prefix_padding_ms": 400,
+        "silence_duration_ms": 900,
+        "prefix_padding_ms": 300,
     }
     if silence_ms is not None:
         vad_kwargs["silence_duration_ms"] = int(silence_ms)
