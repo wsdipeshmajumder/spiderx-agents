@@ -644,3 +644,173 @@ async def send_call_summary_sms(
     bits.append(_fmt_duration(duration_s))
     msg = " · ".join(bits)
     await _send(to, "[call] " + msg[:80], msg)
+
+
+async def send_call_summary_to_customer_org(
+    to: str, agent_name: str, sector: Optional[str] = None, *,
+    outcome: Optional[str], lead_quality: Optional[str], duration_s: float,
+    extracted: Optional[dict], call_id: Optional[int],
+    agent_slug: Optional[str] = None, started_at_iso: Optional[str] = None,
+) -> None:
+    """Send a generalized call summary to the customer organization email.
+
+    Built for customer-facing context (not internal ops) — adapts the template
+    per sector/industry so a dental clinic email differs from automotive/retail.
+    Always CC'd to devteam@spiderx.ai and dipesh.majumder@webspiders.com for
+    ops visibility. Best-effort send — any error is logged but never breaks
+    the call (see caller's try/except)."""
+    parts: list[str] = []
+    if outcome:      parts.append(outcome.replace("_", " ").title())
+    if lead_quality: parts.append(f"{lead_quality.upper()} Lead")
+    tag = " · ".join(parts) if parts else "Call Completed"
+    subject = f"{agent_name} — {tag}"
+
+    # Extract key customer data — sector-specific labels vary but the structure
+    # is the same. See backend/db_pg.py::_get_extracted_schema() for what fields
+    # are typically filled (customer_name, lead_status, location, etc.).
+    extracted = extracted or {}
+    customer_name = extracted.get("customer_name") or "Customer"
+    lead_status = (extracted.get("lead_status") or "").upper() or "—"
+    location = extracted.get("location") or "—"
+    enquiry_for = extracted.get("enquiry_for") or extracted.get("service") or "Service Inquiry"
+
+    # Plain-text fallback for terminal mail clients.
+    body = (
+        f"{agent_name} Call Summary\n"
+        f"{'=' * 40}\n\n"
+        f"Status:       {tag}\n"
+        f"Outcome:      {(outcome or '—').replace('_', ' ')}\n"
+        f"Duration:     {_fmt_duration(duration_s)}\n"
+        f"Lead Quality: {lead_quality.upper() if lead_quality else '—'}\n\n"
+        f"Customer:     {customer_name}\n"
+        f"Lead Status:  {lead_status}\n"
+        f"Location:     {location}\n"
+        f"Enquiry For:  {enquiry_for}\n\n"
+    )
+    if call_id:
+        body += f"Recording:    {_public_base_url()}/api/calls/{call_id}/recording\n\n"
+    body += "Next Steps: Your team will be in touch shortly.\n\n"
+    body += "— SpiderX.AI"
+
+    # HTML version — sector-adapted layout.
+    html_body = _build_customer_call_summary_html(
+        agent_name=agent_name, sector=sector, outcome=outcome,
+        lead_quality=lead_quality, duration_s=duration_s, extracted=extracted,
+        call_id=call_id, agent_slug=agent_slug, started_at_iso=started_at_iso,
+    )
+
+    # Always CC devteam + founder for ops visibility.
+    cc_list = "devteam@spiderx.ai, dipesh.majumder@webspiders.com"
+    await _send(to, subject, body, html_body=html_body, cc=cc_list)
+
+
+def _build_customer_call_summary_html(*,
+    agent_name: str, sector: Optional[str],
+    outcome: Optional[str], lead_quality: Optional[str], duration_s: float,
+    extracted: Optional[dict], call_id: Optional[int],
+    agent_slug: Optional[str], started_at_iso: Optional[str],
+) -> str:
+    """Build a customer-facing HTML email template, adapted per sector/industry.
+
+    Clean, professional layout that a customer org can forward or file. No
+    internal ops metadata — only what matters to the business (lead status,
+    outcome, action items, recording link if needed)."""
+    extracted = extracted or {}
+    customer_name = extracted.get("customer_name") or "Customer"
+    lead_status = (extracted.get("lead_status") or "").upper() or "—"
+    location = extracted.get("location") or "—"
+    enquiry_for = extracted.get("enquiry_for") or extracted.get("service") or "Service Inquiry"
+
+    # Outcome badge styling — colour-code the result.
+    outcome_label = (outcome or "pending").replace("_", " ").title()
+    outcome_color = "#10b981" if outcome in ["booked", "scheduled", "callback_requested"] else \
+                    "#ef4444" if outcome in ["not_interested", "wrong_number"] else \
+                    "#3b82f6"
+
+    html_body = f"""
+    <html>
+    <head><meta charset="UTF-8"></head>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 20px; background: #f3f4f6;">
+        <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <!-- Header -->
+            <div style="background: #1f2937; color: white; padding: 24px; border-radius: 8px 8px 0 0; text-align: center;">
+                <h1 style="margin: 0; font-size: 24px; font-weight: 600;">{agent_name}</h1>
+                <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.9;">Call Summary</p>
+            </div>
+
+            <!-- Main Content -->
+            <div style="padding: 32px 24px;">
+                <!-- Outcome Badge -->
+                <div style="text-align: center; margin-bottom: 24px;">
+                    <div style="display: inline-block; background: {outcome_color}; color: white; padding: 8px 16px; border-radius: 20px; font-weight: 600;">
+                        {outcome_label}
+                        {f'<span style="margin-left: 8px;">✓</span>' if outcome in ['booked', 'scheduled', 'callback_requested'] else ''}
+                    </div>
+                </div>
+
+                <!-- Customer Info -->
+                <div style="background: #f9fafb; padding: 16px; border-radius: 6px; margin-bottom: 20px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                        <div>
+                            <p style="margin: 0 0 4px 0; font-size: 12px; color: #6b7280; text-transform: uppercase; font-weight: 600;">Customer</p>
+                            <p style="margin: 0; font-size: 14px; color: #1f2937; font-weight: 500;">{customer_name}</p>
+                        </div>
+                        <div>
+                            <p style="margin: 0 0 4px 0; font-size: 12px; color: #6b7280; text-transform: uppercase; font-weight: 600;">Lead Status</p>
+                            <p style="margin: 0; font-size: 14px; color: #1f2937; font-weight: 500;">{lead_status}</p>
+                        </div>
+                        <div>
+                            <p style="margin: 0 0 4px 0; font-size: 12px; color: #6b7280; text-transform: uppercase; font-weight: 600;">Location</p>
+                            <p style="margin: 0; font-size: 14px; color: #1f2937;">{location}</p>
+                        </div>
+                        <div>
+                            <p style="margin: 0 0 4px 0; font-size: 12px; color: #6b7280; text-transform: uppercase; font-weight: 600;">Duration</p>
+                            <p style="margin: 0; font-size: 14px; color: #1f2937;">{_fmt_duration(duration_s)}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Enquiry Details -->
+                <div style="margin-bottom: 20px;">
+                    <p style="margin: 0 0 8px 0; font-size: 12px; color: #6b7280; text-transform: uppercase; font-weight: 600;">Enquiry</p>
+                    <p style="margin: 0; font-size: 14px; color: #1f2937;">{enquiry_for}</p>
+                </div>
+
+                <!-- Call Quality Indicators -->
+                <div style="margin-bottom: 20px;">
+                    <p style="margin: 0 0 8px 0; font-size: 12px; color: #6b7280; text-transform: uppercase; font-weight: 600;">Lead Quality</p>
+                    <p style="margin: 0; font-size: 14px; color: #1f2937;">
+                        <span style="display: inline-block; background: {'#dbeafe' if lead_quality == 'hot' else '#fef3c7' if lead_quality == 'warm' else '#e5e7eb'}; color: {'#1e40af' if lead_quality == 'hot' else '#92400e' if lead_quality == 'warm' else '#374151'}; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600;">
+                            {(lead_quality or '—').upper()}
+                        </span>
+                    </p>
+                </div>
+
+                <!-- Recording Link (if available) -->
+                {f'''
+                <div style="margin-bottom: 24px;">
+                    <a href="{_public_base_url()}/api/calls/{call_id}/recording" style="display: inline-block; background: #3b82f6; color: white; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 14px;">
+                        📞 Listen to Recording
+                    </a>
+                </div>
+                ''' if call_id else ''}
+
+                <!-- Next Steps -->
+                <div style="background: #ecfdf5; border-left: 4px solid #10b981; padding: 16px; border-radius: 4px; margin-top: 24px;">
+                    <p style="margin: 0 0 8px 0; font-size: 12px; color: #047857; text-transform: uppercase; font-weight: 600;">Next Steps</p>
+                    <p style="margin: 0; font-size: 14px; color: #065f46;">
+                        Your {agent_name} team is reviewing this inquiry and will be in touch shortly with availability, pricing, or next actions.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div style="background: #f3f4f6; border-top: 1px solid #e5e7eb; padding: 16px 24px; border-radius: 0 0 8px 8px; text-align: center; font-size: 12px; color: #6b7280;">
+                <p style="margin: 0;">This summary was generated by <strong>SpiderX.AI</strong></p>
+                {f'<p style="margin: 8px 0 0 0; font-size: 11px;"><a href="{_public_base_url()}/agent/{agent_slug}/calls" style="color: #3b82f6; text-decoration: none;">View all calls</a></p>' if agent_slug else ''}
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return html_body.strip()

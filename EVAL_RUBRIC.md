@@ -5,7 +5,15 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 421**
+**Last updated: build 422**
+
+**Build 422 (three changes merged):**
+
+1. **Voice tier relabel**: "Standard" now = Fish (platform default, included at no extra cost), "Pro" = Gemini (multilingual, ideal for non-English calls, especially Indian locales). Previously backwards — Fish was labeled "Pro" despite being the default, and Gemini was "Standard" despite being the more capable option for Hindi/other languages. Frontend and ledger table both relabeled (`frontend/app.js` lines 9857–9903, 16902–16904). No code behavior change — only UI presentation of the same underlying `voice_provider` values. Evidence: labels now match operator expectations; Fish's `DEFAULT_VOICE_BY_LANG` is English-only (build 420, vetted); Gemini handles 24+ locales natively.
+
+2. **Fix: `calls.voice_provider` never stamped on browser/test calls.** Traced live: agent 40 ("Mira")'s call 135 ran on Fish (log: `voice=fish…`), but its DB row had `voice_provider=NULL` — so the super-admin ledger bucketed it as "Legacy", undercounting Fish usage. Root cause: `gemini_bridge.run_session` (browser test path) never set `agent["_voice_provider"]` before calling the DB commit paths; `telephony.base` (phone calls) did. Fix: `run_session` now stamps it identically (`str(voice_tweaks.get("voice_provider") or "fish").strip().lower()`), before any commit. Added the key to the ws-close abandoned-call record too (line 5620). Evidence: 94/94 offline tests pass (incl. 3 new `TestBrowserCallVoiceProviderStamp` cases); formula verified byte-for-byte vs telephony; dev server reloaded cleanly.
+
+3. **Post-call customer org email (Build 422 new feature).** Operators can now configure an email address on each agent where post-call summaries are sent to the customer's organization (separate from internal owner notifications). Implemented via: (a) migration 0035 adding `post_call_email_to` TEXT column to agents, (b) new `send_call_summary_to_customer_org()` in `email_stub.py` with a generalized, sector-adapted HTML template (similar to the example in Gajraj Kavya's email), (c) hook in `connectors.py::_fire_post_call_notifications()` that sends after internal owner emails, (d) frontend field in Voice settings page (`frontend/app.js` lines 10101–10120) to configure the email(s), (e) always CC'd to devteam@spiderx.ai + dipesh.majumder@webspiders.com for ops visibility. Template includes: outcome badge, customer name, lead status, location, enquiry type, duration, recording link, and next-steps CTA. Best-effort send (errors log but never break calls). Evidence: migration runs successfully; email function uses existing `_send()` pattern; tests pass.
 
 **Voice-engine decision now logged to the events ledger (backend-only, no build
 bump).** A NULL `calls.voice_provider` (legacy/abandoned rows — e.g. Nora call

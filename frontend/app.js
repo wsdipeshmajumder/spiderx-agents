@@ -44,7 +44,7 @@ const THEME_KEY = "sxai.theme";
 // boot we hit /api/build; if the server reports a newer number, the user
 // is running a stale cache — we force-reload once (guarded by
 // sessionStorage so a misconfigured CDN can't cause an infinite loop).
-const SXAI_BUILD = 421;
+const SXAI_BUILD = 422;
 (function () {
   if (typeof window === "undefined" || typeof fetch === "undefined") return;
   fetch("/api/build", { cache: "no-store" })
@@ -9689,6 +9689,7 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
     voice: agent.voice || "Aoede",
     locale: agent.locale || "en-IN",
     greeting: agent.greeting || "",   // build 195: greeting editable here too
+    post_call_email_to: agent.post_call_email_to || "",   // build 422: customer org email
     voice_tweaks: {
       temperature: agent.voice_tweaks?.temperature ?? 0.7,
       top_p: agent.voice_tweaks?.top_p ?? 0.9,
@@ -9854,19 +9855,26 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
            page: which language, which voice. The 8-card grid lives
            below as an optional "Explore all voices" expander. -->
       <section class="db-panel vs-panel">
-        <!-- Voice quality tier (build 378): Standard vs Pro. Provider-agnostic
-             labels by design — the UI never names the underlying engines. "Pro"
-             maps to voice_provider="fish" (premium TTS voice, the default),
-             "Standard" to "gemini" (real-time). The live pipeline reads those
-             values; only the presentation changes here. -->
+        <!-- Voice quality tier (build 378, relabeled build 422): Standard vs
+             Pro. Provider-agnostic labels by design — the UI never names the
+             underlying engines. "Standard" now maps to voice_provider="fish"
+             (the platform default engine, included at no extra cost), "Pro"
+             to "gemini" (Google's own real-time voice — the stronger choice
+             for Hindi and other Indian-language calls; Fish's vetted voice
+             list is English-only, see fish_audio.DEFAULT_VOICE_BY_LANG).
+             Previously swapped: Fish was labeled "Pro" despite being the
+             actual default, and Gemini "Standard" despite being the more
+             capable option for non-English calls — backwards from what an
+             operator would expect those words to mean. The live pipeline
+             reads `id`, unaffected by this relabel. -->
         <div class="db-form-field vs-engine">
           <span class="db-form-label">Voice quality</span>
           <div class="vs-tiers" role="radiogroup" aria-label="Voice quality">
             ${[
-              { id: "gemini", name: "Standard", tag: "Real-time",
-                desc: "Fastest replies with the lowest latency — great for quick, snappy back-and-forth." },
-              { id: "fish", name: "Pro", tag: "Most natural", recommended: true,
-                desc: "Premium, human-sounding voice with selectable voice styles. Best for a polished brand feel." },
+              { id: "fish", name: "Standard", tag: "Included", recommended: true,
+                desc: "Natural, human-sounding voice, included on your plan at no extra cost. English only for now — other languages use the Pro voice below." },
+              { id: "gemini", name: "Pro", tag: "Multilingual",
+                desc: "Google's own real-time voice engine. Fastest replies, and the strongest choice for Hindi and other Indian-language calls." },
             ].map((t) => {
               const active = (draft.voice_tweaks.voice_provider || "fish") === t.id;
               return html`
@@ -9887,7 +9895,7 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
         </div>
         ${draft.voice_tweaks.voice_provider === "fish" ? html`
           <div class="vs-fish">
-            <p class="db-form-help" style=${{ marginTop: 0 }}>Choose a Pro voice style and preview it below. Listening and understanding always stay real-time; if a Pro voice is briefly unavailable on a call, it automatically falls back to the Standard voice — calls are never interrupted.</p>
+            <p class="db-form-help" style=${{ marginTop: 0 }}>Choose a Standard voice style and preview it below. Listening and understanding always stay real-time; if a Standard voice is briefly unavailable on a call, it automatically falls back to the Pro voice — calls are never interrupted.</p>
             <div class="vs-twocol">
               <label class="db-form-field">
                 <span class="db-form-label">Voice style</span>
@@ -10090,6 +10098,24 @@ function AgentVoicePage({ agent, agents, presets, plan, onNav, refreshAgent }) {
           </label>
         </div>
       </details>
+
+      <!-- Post-call actions (build 422): Send summaries to customer organization
+           email. Separate from internal owner notifications; CC'd to devteam.
+           Only active if post_call_email_to is configured on the agent. -->
+      <section class="db-panel">
+        <h3 class="db-section-title">Post-call notifications</h3>
+        <p class="db-panel-sub">Send call summaries to your customer organization (in addition to your team's internal notifications).</p>
+        <div class="db-form">
+          <label class="db-form-field">
+            <span class="db-form-label">Email to customer org</span>
+            <input class="db-input" type="text"
+                   placeholder="customer-admin@company.com, sales@company.com"
+                   value=${draft.post_call_email_to || ""}
+                   onInput=${(e) => setDraft({...draft, post_call_email_to: e.target.value})} />
+            <span class="db-form-help">Comma-separated email addresses where post-call summaries go. Always CC'd to devteam@spiderx.ai for ops visibility. Leave empty to disable.</span>
+          </label>
+        </div>
+      </section>
     </div>
   `;
   const actions = html`
@@ -16892,8 +16918,10 @@ function AdminLlmLedger() {
           </thead>
           <tbody>
             ${data.by_engine.map((e) => {
-              const label = e.voice_provider === "fish" ? "Pro"
-                          : e.voice_provider === "gemini" ? "Standard" : "Legacy";
+              // Build 422: relabeled to match the Voice settings tiers — Fish
+              // (the platform default) is "Standard", Gemini is "Pro".
+              const label = e.voice_provider === "fish" ? "Standard"
+                          : e.voice_provider === "gemini" ? "Pro" : "Legacy";
               const ecpm = e.cost_per_minute_paise == null ? null : Number(e.cost_per_minute_paise) / 100;
               return html`
                 <tr key=${e.voice_provider}>

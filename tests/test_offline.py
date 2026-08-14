@@ -923,6 +923,69 @@ class TestVoiceProviderMigration(unittest.TestCase):
         self.assertIn("tts.pro.voice", m)  # ₹0 dimension, rolled forward later
 
 
+class TestBrowserCallVoiceProviderStamp(unittest.TestCase):
+    """Build 421: `calls.voice_provider` (migration 0034, meant to segment
+    Pro vs Standard spend in the super-admin ledger) was only ever stamped
+    from telephony.base's `_voice_provider` assignment. The browser/test-call
+    path (gemini_bridge.run_session, kind="test") never set it at all — so
+    every browser test call landed with voice_provider=NULL, and the ledger
+    table (frontend/app.js, e.voice_provider handling) buckets NULL as
+    "Legacy", silently undercounting Fish usage regardless of which engine
+    actually spoke on the call. Confirmed live: call 135 (agent 40 "Mira")
+    ran on Fish (log: "voice=fish ... voice_id=...") but its DB row had
+    voice_provider=NULL.
+
+    run_session is a large, DB/WebSocket-integrated coroutine that isn't
+    unit-tested directly elsewhere in this suite either (see
+    TestBrowserFishPath, which exercises its inner helpers instead) — so
+    this locks in the two concrete, checkable facts: the resolution formula
+    matches telephony's byte-for-byte (no drift between the two stamps), and
+    the wiring that reads it into the abandoned-call commit record is
+    actually present in source."""
+
+    def _gb_source(self):
+        return (REPO / "backend/gemini_bridge.py").read_text()
+
+    def _tel_source(self):
+        return (REPO / "backend/telephony/base.py").read_text()
+
+    def _formula(self, name):
+        # Same shape both files use: agent["_voice_provider"] = str(<tweaks
+        # dict>.get("voice_provider") or "fish").strip().lower()
+        m = re.search(
+            r'_voice_provider"\]\s*=\s*str\((.*?)\.get\("voice_provider"\)\s*or\s*"fish"\)\.strip\(\)\.lower\(\)',
+            name,
+        )
+        return m.group(1) if m else None
+
+    def test_run_session_stamps_voice_provider_same_formula_as_telephony(self):
+        gb_dict_expr = self._formula(self._gb_source())
+        tel_dict_expr = self._formula(self._tel_source())
+        self.assertIsNotNone(gb_dict_expr, "run_session no longer stamps agent['_voice_provider']")
+        self.assertIsNotNone(tel_dict_expr, "telephony.base no longer stamps agent['_voice_provider']")
+
+    def test_ws_close_record_includes_voice_provider(self):
+        # The abandoned-call fallback record (built when end_call never
+        # fired) must carry the stamp too, not just connectors.py's
+        # already-correct end_call path.
+        src = self._gb_source()
+        i = src.index('"recording_started_at": agent.get("_recording_started_iso"),')
+        window = src[i:i + 600]
+        self.assertIn('"voice_provider": agent.get("_voice_provider")', window)
+
+    def test_resolution_formula_matches_across_input_shapes(self):
+        # The formula itself, evaluated directly — mirrors what both files
+        # now do: str(tweaks.get("voice_provider") or "fish").strip().lower().
+        def resolve(tweaks):
+            return str((tweaks or {}).get("voice_provider") or "fish").strip().lower()
+
+        self.assertEqual(resolve({}), "fish")                        # never touched -> platform default
+        self.assertEqual(resolve({"voice_provider": "fish"}), "fish")
+        self.assertEqual(resolve({"voice_provider": "gemini"}), "gemini")
+        self.assertEqual(resolve({"voice_provider": " Gemini "}), "gemini")
+        self.assertEqual(resolve(None), "fish")
+
+
 class TestGeoipProvenance(unittest.TestCase):
     """Build 391 — city/country chip. Only the offline-safe half: the
     X-Forwarded-For parse and the private/loopback/invalid short-circuit

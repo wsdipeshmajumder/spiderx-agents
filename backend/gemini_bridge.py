@@ -4005,6 +4005,16 @@ async def run_session(
             # Per-agent voice_tweaks override the session-wide tweaks for test
             # mode. The agent's own voice/locale also win.
             agent_tweaks = agent.get("voice_tweaks") or {}
+            # Build 421: stamp the configured engine onto the agent dict the
+            # same way telephony.base does (its `_voice_provider` line), so
+            # BOTH commit paths below — connectors.py's end_call (which
+            # already reads agent.get("_voice_provider")) and the ws-close
+            # abandoned-call fallback further down — land a real
+            # `calls.voice_provider` value instead of leaving it NULL. Before
+            # this, every browser/test call (kind=test) silently skipped the
+            # stamp entirely, so the super-admin ledger bucketed them all as
+            # "Legacy" regardless of which engine actually spoke.
+            agent["_voice_provider"] = str(agent_tweaks.get("voice_provider") or "fish").strip().lower()
             session_tweaks = {**(tweaks or {}), **agent_tweaks}
             voice = agent_tweaks.get("voice") or agent.get("voice") or DEFAULT_VOICE
             locale = agent_tweaks.get("locale") or agent.get("locale") or "en-US"
@@ -5641,6 +5651,10 @@ async def run_session(
                                         "lead_quality":  None,
                                         "lead_signals":  None,
                                         "recording_started_at": agent.get("_recording_started_iso"),
+                                        # Build 421 — see the `_voice_provider` stamp above; mirrors
+                                        # connectors.py's end_call record so abandoned test calls get
+                                        # the same ledger attribution as completed ones.
+                                        "voice_provider": agent.get("_voice_provider"),
                                     }
                                     # Build 206 — finalize the recording
                                     # writer for the abandoned-call path

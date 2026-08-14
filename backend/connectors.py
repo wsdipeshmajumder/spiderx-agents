@@ -393,6 +393,22 @@ async def _fire_post_call_notifications(*, agent: dict[str, Any],
         )
     except Exception as e:  # noqa: BLE001
         log.warning("post_call.devteam_email failed: %s", e)
+    # Build 422: send a customer-facing summary to the organization's
+    # email (separate from internal owner notifications above). If
+    # `post_call_email_to` is configured on the agent, send there; CC'd
+    # to devteam for ops visibility. Best-effort send — a failure logs
+    # a warning but never breaks the call.
+    customer_email_to = (agent.get("post_call_email_to") or "").strip()
+    if customer_email_to:
+        try:
+            await email_stub.send_call_summary_to_customer_org(
+                to=customer_email_to,
+                agent_name=agent_name,
+                sector=agent.get("sector"),
+                **common, **rich,
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning("post_call.customer_email failed for %s: %s", customer_email_to, e)
 
     # Build 198: emit call lifecycle event for the Observability feed.
     # Severity tracks the outcome kind so the feed colour-codes wins vs
