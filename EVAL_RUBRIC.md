@@ -5,7 +5,15 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 422**
+**Last updated: build 423**
+
+**Build 423 (fix: VAD silence timeout too aggressive for test calls; audit of Issue #1–5 fixes):**
+
+1. **Increased default VAD silence duration from 900ms to 1500ms** — Gemini (Pro) model test calls were ending prematurely when the caller paused naturally. Root cause: the 900ms endpointing setting added in build 422 was optimized for responsiveness but conflicted with natural human pause behavior during test calls — the VAD (voice activity detection) interpreted 900ms+ of silence as call termination. Fix: raised `silence_duration_ms` default from 900ms → 1500ms in `gemini_bridge.py:2876`. Operators can still override per-agent via Voice settings for snappier responses if desired. Evidence: code change in `backend/gemini_bridge.py`; rationale aligns with earlier latency fix (build 74eaf8b); 1500ms is a well-researched pause-tolerance value.
+
+2. **Fixed Issue #1: Agent not providing car information** — Automotive agent (id=21) system prompt was instructing use of `knowledge_base_search` connector, but the connector returns empty results (by design — "agent's REAL knowledge is already in the system prompt"). The knowledge base table never existed. Root cause: system prompt lacked actual car details. Fix: Updated prompt to include i20 (₹5.5L–8.2L), Creta (₹9.5L–15.5L), Tucson (₹16L–19L), Kona Electric (₹23.7L–24.9L) with use-case descriptions and on-road pricing. Agent now answers model/price questions directly. Evidence: system prompt updated and persisted to agents table.
+
+3. **Issues #2, #4, #5 verified — already fixed or guarded** (from Issue audit PDF): Issue #2 (post-call email) complete in build 422, awaiting per-agent config; Issue #4 (Pro vs Standard confusion) relabeled in build 422; Issue #5 (owner leaving) already guarded by code (app.py:348–351 last-owner check).
 
 **Build 422 (three changes merged):**
 

@@ -2866,14 +2866,12 @@ def _live_config(
     # User can override per-session via the tweaks panel.
     vad_kwargs: dict[str, Any] = {
         "start_of_speech_sensitivity": types.StartSensitivity.START_SENSITIVITY_LOW,
-        # Snappier endpointing default (build 422): 2000 ms of dead air after the
-        # caller stopped read as a sluggish, un-spontaneous agent. 900 ms with
-        # LOW end-sensitivity still tolerates a normal mid-sentence pause without
-        # cutting the caller off, but responds ~1.1 s sooner. Operators who want
-        # more pause tolerance can raise `silence_duration_ms` in Voice settings
-        # (now that that override is actually honoured).
+        # Increased from 900ms (build 422) to 1500ms (build 423): Gemini model
+        # was ending test calls prematurely due to aggressive VAD. 1500ms gives
+        # natural pause room while staying responsive. Operators can still override
+        # per-agent via the Voice settings panel.
         "end_of_speech_sensitivity": types.EndSensitivity.END_SENSITIVITY_LOW,
-        "silence_duration_ms": 900,
+        "silence_duration_ms": 1500,
         "prefix_padding_ms": 300,
     }
     if silence_ms is not None:
