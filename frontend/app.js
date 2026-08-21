@@ -19280,7 +19280,7 @@ function App() {
       // /agent/<slug>/numbers   → folded into /go-live; redirect transparently.
       setEmbedSlug(null);
       setEmbedChannel(null);
-      const m = path.match(/^\/agent\/([\w-]+)(?:\/(calls|outcomes|persona|small-talk|knowledge|guardrails|voice|test-call|go-live|chat|numbers|settings|developer|profile|purpose|extra-info))?/);
+      const m = path.match(/^\/agent\/([\w-]+)(?:\/(calls|outcomes|persona|small-talk|knowledge|guardrails|voice|test-call|go-live|chat|numbers|settings|developer|profile|purpose|extra-info|bookings))?/);
       if (m) {
         setAgentsListOpen(false);
         // Legacy /numbers links + bookmarks land on Go live now. Soft replace
