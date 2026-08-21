@@ -89,6 +89,25 @@ BOOKING_TYPE_SCHEMA = {
             "review_request_hours": 48,
         }
     },
+    "coaching_session": {
+        "enabled": True,
+        "entity_name": "Session",
+        "quantity_label": "Sessions",
+        "quantity_min": 1,
+        "quantity_max": 10,
+        "duration_minutes": 60,
+        "hold_duration_minutes": 60,
+        "notes_label": "Coaching Goals",
+        "notes_placeholder": "Career guidance, skill development, mentoring",
+        "icon": "🎯",
+        "metadata_required_fields": [],
+        "email_template": "coaching_session",
+        "reminder_timings": {
+            "payment_reminder_hours": 1,
+            "booking_day_reminder_hours": 24,
+            "review_request_hours": 24,
+        }
+    },
 }
 
 
