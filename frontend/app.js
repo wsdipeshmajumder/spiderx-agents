@@ -8952,10 +8952,6 @@ function SaveStatePill({ state }) {
 // AgentBookingsPage — /agent/<slug>/bookings. Multi-sector booking dashboard.
 // Lists all bookings with filters (type, status, payment), metrics cards, quick actions.
 function AgentBookingsPage({ agent, agents, presets, plan, onNav, refreshAgent }) {
-  if (!agent || !agent.id) {
-    return html`<div style="padding: 40px; text-align: center; color: #999;">Loading agent...</div>`;
-  }
-
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState({ booking_type: "", status: "", payment_status: "" });
@@ -9020,6 +9016,10 @@ function AgentBookingsPage({ agent, agents, presets, plan, onNav, refreshAgent }
     if (!status) return "UNKNOWN";
     return status.replace("_", " ").toUpperCase();
   };
+
+  if (!agent || !agent.id) {
+    return html`<div>Loading...</div>`;
+  }
 
   return html`
     <div class="db-page">
