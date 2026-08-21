@@ -9013,6 +9013,7 @@ function AgentBookingsPage({ agent, agents, presets, plan, onNav, refreshAgent }
   };
 
   const getStatusText = (status) => {
+    if (!status) return "UNKNOWN";
     return status.replace("_", " ").toUpperCase();
   };
 
