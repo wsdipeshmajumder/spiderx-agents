@@ -4170,8 +4170,8 @@ async def create_booking(request: Request) -> dict:
         raise HTTPException(status_code=404, detail="Agent not found")
 
     # Verify user has access to this agent's org
-    user_orgs = await db.get_user_orgs(actor["id"])
-    if agent["org_id"] not in [o["id"] for o in user_orgs]:
+    user_role = await db.get_member_role(agent["org_id"], actor["id"])
+    if user_role is None:
         raise HTTPException(status_code=403, detail="Access denied")
 
     # Check if booking is enabled for this agent
