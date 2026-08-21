@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "sonyk",
+      "runtimeExecutable": ".venv/bin/uvicorn",
+      "runtimeArgs": ["backend.app:app", "--host", "127.0.0.1", "--port", "8767"],
+      "port": 8767
+    }
+  ]
+}

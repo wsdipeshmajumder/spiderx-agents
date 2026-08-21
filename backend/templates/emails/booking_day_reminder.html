@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background: #d4edda; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #28a745; }
+        .details { background: #fff; border: 1px solid #e0e0e0; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .detail-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f0f0f0; }
+        .detail-row:last-child { border-bottom: none; }
+        .label { font-weight: 600; color: #666; }
+        .value { color: #333; }
+        .button { display: inline-block; background: #28a745; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 20px 0; }
+        .button:hover { background: #218838; }
+        .footer { text-align: center; color: #999; font-size: 12px; margin-top: 40px; padding-top: 20px; border-top: 1px solid #e0e0e0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>🎉 Your Booking is Tomorrow!</h2>
+            <p>Hi {{ booking.customer_name }},</p>
+            <p>We're looking forward to seeing you tomorrow for your {{ booking.entity_name }}!</p>
+        </div>
+
+        <div class="details">
+            <div class="detail-row">
+                <span class="label">{{ booking.quantity_label }}</span>
+                <span class="value">{{ booking.quantity }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Time</span>
+                <span class="value">{{ booking.booking_time }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Location</span>
+                <span class="value">{{ agent_name }}</span>
+            </div>
+            {% if booking.duration_minutes %}
+            <div class="detail-row">
+                <span class="label">Duration</span>
+                <span class="value">{{ booking.duration_minutes }} minutes</span>
+            </div>
+            {% endif %}
+        </div>
+
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+            <p>Please arrive on time. If you need to cancel or reschedule, please let us know as soon as possible.</p>
+            {% if booking.special_notes %}
+            <p><strong>Your notes:</strong> {{ booking.special_notes }}</p>
+            {% endif %}
+        </div>
+
+        <div class="footer">
+            <p>If you have any questions, please contact {{ agent_name }}.</p>
+            <p>SpiderX.AI — Booking System</p>
+        </div>
+    </div>
+</body>
+</html>

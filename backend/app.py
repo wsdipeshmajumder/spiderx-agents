@@ -98,6 +98,23 @@ async def _startup() -> None:
             "daily_agent_full_healthcheck", "0 4 * * *",
             _ahc.run_daily_full_healthchecks, tz="Asia/Kolkata",
         )
+        # Every minute — process pending booking reminders (payment_reminder,
+        # booking_day_reminder, review_request). Build 424.
+        from . import jobs as _jobs
+        async def _send_pending_reminders():
+            await _jobs.send_pending_reminders(db)
+        scheduler.register(
+            "booking_pending_reminders", "* * * * *",
+            _send_pending_reminders, tz="Asia/Kolkata",
+        )
+        # 18:00 IST daily — send daily booking digest to all agents with
+        # bookings. Build 424.
+        async def _send_daily_booking_digests():
+            await _jobs.send_daily_digests(db)
+        scheduler.register(
+            "daily_booking_digest", "0 18 * * *",
+            _send_daily_booking_digests, tz="Asia/Kolkata",
+        )
         await scheduler.start()
         log.info("scheduler: started with %d job(s)", len(scheduler.list_jobs()))
     except Exception as e:  # noqa: BLE001
@@ -4193,8 +4210,11 @@ async def create_booking(request: Request) -> dict:
             reminder_config=reminder_config,
         )
 
-        # Queue jobs: email + SMS (async)
-        # TODO: Enqueue send_booking_summary_email, send_booking_sms
+        # Queue jobs: email + SMS (async, fire-and-forget)
+        from . import jobs as _jobs
+        payment_link = result.get("payment_link", "")
+        asyncio.create_task(_jobs.send_booking_summary_email(db, result["booking_id"]))
+        asyncio.create_task(_jobs.send_booking_sms(db, result["booking_id"], payment_link))
 
         return result
     except ValueError as e:

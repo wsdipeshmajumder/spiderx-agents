@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .details { background: #fff; border: 1px solid #e0e0e0; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .detail-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f0f0f0; }
+        .detail-row:last-child { border-bottom: none; }
+        .label { font-weight: 600; color: #666; }
+        .value { color: #333; }
+        .button { display: inline-block; background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 20px 0; }
+        .button:hover { background: #0056b3; }
+        .status { display: inline-block; padding: 4px 12px; border-radius: 4px; font-weight: 600; font-size: 12px; }
+        .status.hold { background: #fff3cd; color: #856404; }
+        .status.confirmed { background: #d4edda; color: #155724; }
+        .footer { text-align: center; color: #999; font-size: 12px; margin-top: 40px; padding-top: 20px; border-top: 1px solid #e0e0e0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>{{ icon }} Your Service Appointment</h2>
+            <p>Hi {{ booking.customer_name }},</p>
+            <p>Your service appointment at <strong>{{ agent_name }}</strong> has been received and is on hold.</p>
+        </div>
+
+        <div class="details">
+            <div class="detail-row">
+                <span class="label">Service</span>
+                <span class="value">{{ booking.special_notes or "Auto Service" }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Date</span>
+                <span class="value">{{ booking.booking_date }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Time</span>
+                <span class="value">{{ booking.booking_time }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Duration</span>
+                <span class="value">{{ booking.duration_minutes }} minutes</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Status</span>
+                <span class="value"><span class="status hold">{{ booking.status|upper }}</span></span>
+            </div>
+        </div>
+
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+            <p><strong>Next Step:</strong> Click below to confirm your service appointment and complete payment.</p>
+            <a href="{{ payment_link }}" class="button">Confirm Appointment</a>
+            <p style="color: #999; font-size: 12px;">Link expires in 2 hours</p>
+        </div>
+
+        <div class="footer">
+            <p>Thank you for booking with us! If you have any questions, please contact {{ agent_name }}.</p>
+            <p>SpiderX.AI — Auto Service Appointment System</p>
+        </div>
+    </div>
+</body>
+</html>
