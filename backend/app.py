@@ -4240,8 +4240,8 @@ async def list_bookings(
         raise HTTPException(status_code=404, detail="Agent not found")
 
     # Verify access
-    user_orgs = await db.get_user_orgs(actor["id"])
-    if agent["org_id"] not in [o["id"] for o in user_orgs]:
+    user_role = await db.get_member_role(agent["org_id"], actor["id"])
+    if user_role is None:
         raise HTTPException(status_code=403, detail="Access denied")
 
     bookings, total = await _bookings.list_bookings(
