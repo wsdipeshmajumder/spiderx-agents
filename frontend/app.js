@@ -8984,7 +8984,7 @@ function AgentBookingsPage({ agent, agents, presets, plan, onNav, refreshAgent }
 
   const config = agent.variables?.booking_config || {};
   const enabledTypes = Object.entries(config)
-    .filter(([k, v]) => k !== "enabled" && v.enabled)
+    .filter(([k, v]) => k !== "enabled" && v && v.enabled)
     .map(([k, v]) => ({ key: k, ...v }));
 
   // Calculate metrics
