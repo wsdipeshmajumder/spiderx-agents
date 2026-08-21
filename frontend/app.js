@@ -19291,17 +19291,29 @@ function App() {
           try { window.history.replaceState({}, "", `/agent/${m[1]}/go-live`); } catch {}
         }
         setRevealSection(section);
-        fetch(`/api/agents/by-slug/${encodeURIComponent(m[1])}`)
-          .then((r) => r.ok ? r.json() : null)
-          .then((a) => {
-            if (a && a.id) {
-              setRevealAgent(a);
-            } else {
-              flashHint("Agent not found.", 2500);
-              window.history.replaceState({}, "", "/");
-            }
-          })
-          .catch(() => {});
+        // Try slug first, then ID if slug is numeric
+        const fetchAgent = async () => {
+          let agent = null;
+          // Try by slug
+          try {
+            const r = await fetch(`/api/agents/by-slug/${encodeURIComponent(m[1])}`);
+            if (r.ok) agent = await r.json();
+          } catch {}
+          // If no agent and slug looks like a number, try by ID
+          if (!agent && /^\d+$/.test(m[1])) {
+            try {
+              const r = await fetch(`/api/agents/${parseInt(m[1], 10)}`);
+              if (r.ok) agent = await r.json();
+            } catch {}
+          }
+          if (agent && agent.id) {
+            setRevealAgent(agent);
+          } else {
+            flashHint("Agent not found.", 2500);
+            try { window.history.replaceState({}, "", "/"); } catch {}
+          }
+        };
+        fetchAgent();
       } else if (path === "/login" || path === "/signup") {
         setAgentsListOpen(false);
         setRevealAgent(null);
