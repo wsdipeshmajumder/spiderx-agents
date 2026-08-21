@@ -4226,6 +4226,7 @@ async def list_bookings(
     agent_id: int,
     booking_type: Optional[str] = None,
     status: Optional[str] = None,
+    payment_status: Optional[str] = None,
     date_from: Optional[str] = None,
     request: Request = None
 ) -> dict:
@@ -4249,6 +4250,7 @@ async def list_bookings(
         agent_id=agent_id,
         booking_type=booking_type,
         status=status,
+        payment_status=payment_status,
         date_from=date_from,
     )
 

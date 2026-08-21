@@ -299,6 +299,7 @@ async def list_bookings(
     agent_id: int,
     booking_type: Optional[str] = None,
     status: Optional[str] = None,
+    payment_status: Optional[str] = None,
     date_from: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
@@ -319,6 +320,10 @@ async def list_bookings(
     if status:
         filters.append("status = :status")
         params["status"] = status
+
+    if payment_status:
+        filters.append("payment_status = :payment_status")
+        params["payment_status"] = payment_status
 
     if date_from:
         filters.append("booking_date >= :date_from::date")
