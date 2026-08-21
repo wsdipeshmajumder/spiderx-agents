@@ -5,7 +5,17 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 423**
+**Last updated: build 424**
+
+**Build 424 (multi-sector booking system: 3 sprints, email/SMS jobs, daily digest scheduler, dashboard):**
+
+1. **Sprint 1: Email & SMS Job Queues + Templates** — Created `backend/jobs.py` with 5 booking jobs (send_booking_summary_email, send_booking_sms, send_payment_reminder, send_booking_day_reminder, send_review_request). Built 9 Jinja2 email templates (5 sector-specific: restaurant_reservation, salon_appointment, dental_appointment, auto_service, coaching_session; 4 generic: payment_reminder, booking_day_reminder, review_request, daily_digest). Integrated job queue with POST /api/bookings endpoint (asyncio.create_task fire-and-forget). All templates use dynamic booking_config labels (entity_name, quantity_label, icon) for multi-sector support. Best-effort execution (errors logged, never crash call). Evidence: `backend/jobs.py`, `backend/templates/emails/*.html`, `backend/app.py` lines 4196–4202 (job enqueueing).
+
+2. **Sprint 2: Reminder Job Scheduler** — Added `send_pending_reminders()` to process booking_reminders table every minute (payment_reminder, booking_day_reminder, review_request). Added `send_daily_digests()` to send aggregated booking summary at 6 PM IST. Registered both jobs with in-process scheduler (1-minute interval for reminders, 18:00 IST for daily digest). Jobs auto-schedule 3 reminder types per booking based on booking_type config. Evidence: `backend/jobs.py` lines 323–380 (reminder processor), lines 383–407 (daily digest), `backend/app.py` lines 104–118 (scheduler registration).
+
+3. **Sprint 3: Dashboard Frontend** — Created `AgentBookingsPage` component for `/agent/{slug}/bookings` page. Features: (a) Metrics cards (total, confirmed, pending payment, completed); (b) Multi-criteria filtering (booking_type, status, payment_status); (c) Sortable table (by booking date or created date); (d) Responsive table view with customer details, status badges, payment status; (e) Dynamic labels from booking_config; (f) Multi-sector support. Added 'Bookings' menu item to Add-ons section. Calls GET `/api/agent/{id}/bookings` API with dynamic filters. Evidence: `frontend/app.js` lines 8952–9165 (AgentBookingsPage component), line 4972 (menu item), conditional rendering in main render section.
+
+All three sprints deliver end-to-end booking flow: (1) agent creates booking → SMS + email sent, reminders scheduled; (2) scheduled jobs fire reminders at appropriate times + daily digest at 6 PM; (3) operator views dashboard with live booking status, filters, metrics. Multi-sector support via `booking_type` + generic JSONB `metadata` + booking_config labels per sector.
 
 **Build 423 (fix: VAD silence timeout too aggressive for test calls; audit of Issue #1–5 fixes):**
 
