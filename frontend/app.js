@@ -8984,7 +8984,7 @@ function AgentBookingsPage({ agent, agents, presets, plan, onNav, refreshAgent }
       }
     };
     fetchBookings();
-  }, [agent.id, filter]);
+  }, [agent.id, JSON.stringify(filter)]);
 
   const config = agent.variables?.booking_config || {};
   const enabledTypes = Object.entries(config)
