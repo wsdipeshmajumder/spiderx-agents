@@ -5,7 +5,11 @@
 > (PASS / PARTIAL / OPEN), **evidence tier**, and the **build** it shipped in.
 > Bump "Last updated" below. See `CLAUDE.md` → Hard rules.
 
-**Last updated: build 424**
+**Last updated: build 425**
+
+**Build 425 (fix: Bookings menu navigation route not recognized, verdict PASS):**
+
+1. **Fixed Bookings menu navigation** — The 'Bookings' menu item appeared in the Add-ons section but clicking it did nothing. Root cause: the agent route regex at `frontend/app.js:19283` listed all recognized subsections (calls, outcomes, persona, voice, chat, numbers, etc.) but "bookings" was omitted from the alternation pattern, so `/agent/<slug>/bookings` URLs were not parsed correctly and `revealSection` was never set to "bookings". Fix: Added "bookings" to the regex alternation pattern, so the route is now recognized and the AgentBookingsPage component renders when the menu item is clicked. Evidence: route regex now includes all 19 recognized sections including bookings; navigation verified in browser to load the bookings dashboard.
 
 **Build 424 (multi-sector booking system: 3 sprints + comprehensive evals, verdict PASS):**
 
