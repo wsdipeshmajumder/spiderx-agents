@@ -223,6 +223,31 @@ async def get_my_org(request: Request) -> dict:
     return org
 
 
+@app.post("/api/me/org")
+async def switch_org(request: Request) -> dict:
+    """Switch user's primary org (workspace switcher)."""
+    user = await current_user(request)
+    data = await request.json()
+    org_id = data.get("org_id")
+
+    if not org_id:
+        raise HTTPException(status_code=400, detail="org_id required")
+
+    # Verify user is a member of this org
+    role = await db.get_member_role(org_id, user["id"])
+    if role is None:
+        raise HTTPException(status_code=403, detail="not a member of this org")
+
+    # Update user's primary org
+    await db.execute(
+        "UPDATE users SET primary_org_id = :org_id WHERE id = :user_id",
+        {"org_id": org_id, "user_id": user["id"]}
+    )
+
+    org = await db.get_org(org_id)
+    return org
+
+
 @app.get("/api/me/orgs")
 async def list_my_orgs(request: Request) -> list[dict]:
     """Every org the user is a member of, with their role + member

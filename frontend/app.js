@@ -5933,7 +5933,22 @@ function WorkspaceSelector({ onNav }) {
           ${orgs.map((o) => html`
             <button key=${o.id} type="button"
                     class=${"db-topbar-ws-item" + (o.is_current ? " is-current" : "")}
-                    onClick=${() => { setOpen(false); /* TODO: switch — needs POST /api/me/org */ }}>
+                    onClick=${async () => {
+                      if (o.is_current) return;
+                      try {
+                        const res = await fetch("/api/me/org", {
+                          method: "POST",
+                          headers: {"Content-Type": "application/json"},
+                          body: JSON.stringify({org_id: o.id})
+                        });
+                        if (res.ok) {
+                          setOpen(false);
+                          window.location.reload();
+                        }
+                      } catch (e) {
+                        console.error("Failed to switch workspace:", e);
+                      }
+                    }}>
               <span class="db-topbar-ws-item-name">${o.name}</span>
               <span class="db-topbar-ws-item-meta">${o.members_n} Member${o.members_n === 1 ? "" : "s"} · ${o.role}</span>
               ${o.is_current ? html`<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>` : ""}
