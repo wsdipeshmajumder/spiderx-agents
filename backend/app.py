@@ -4095,6 +4095,150 @@ async def embed_page(slug: str) -> FileResponse:
     return _render_index()
 
 
+# ─── Bookings (Build 424) ────────────────────────────────────────────────
+# Generic booking system (restaurant, salon, dental, auto, coaching).
+from . import bookings as _bookings  # noqa: E402
+
+
+@app.post("/api/bookings")
+async def create_booking(request: Request) -> dict:
+    """
+    Create a booking (generic, multi-sector).
+
+    Request:
+    {
+      "call_id": "uuid",
+      "agent_id": 47,
+      "booking_type": "restaurant_table",
+      "customer_name": "Priya Sharma",
+      "customer_phone": "+919876543210",
+      "customer_email": "priya@example.com",
+      "quantity": 4,
+      "booking_date": "2026-08-25",
+      "booking_time": "19:30",
+      "special_notes": "Window seat",
+      "metadata": {}
+    }
+    """
+    data = await request.json()
+    actor = await current_user(request)
+
+    agent = await db.get_agent(data["agent_id"])
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Verify user has access to this agent's org
+    user_orgs = await db.get_user_orgs(actor["id"])
+    if agent["org_id"] not in [o["id"] for o in user_orgs]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Check if booking is enabled for this agent
+    booking_config = agent.get("variables", {}).get("booking_config", {})
+    if not booking_config.get(data["booking_type"], {}).get("enabled"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Booking type '{data['booking_type']}' not enabled for this agent"
+        )
+
+    try:
+        result = await _bookings.create_booking(
+            db=db,
+            call_id=data["call_id"],
+            agent_id=data["agent_id"],
+            org_id=agent["org_id"],
+            booking_type=data["booking_type"],
+            customer_name=data["customer_name"],
+            customer_phone=data["customer_phone"],
+            customer_email=data.get("customer_email"),
+            quantity=data["quantity"],
+            booking_date=data["booking_date"],
+            booking_time=data["booking_time"],
+            special_notes=data.get("special_notes"),
+            metadata=data.get("metadata", {}),
+        )
+
+        # Schedule reminders
+        reminder_config = booking_config[data["booking_type"]].get("reminder_timings", {})
+        await _bookings.schedule_reminders(
+            db=db,
+            booking_id=result["booking_id"],
+            booking_type=data["booking_type"],
+            booking_date=data["booking_date"],
+            booking_time=data["booking_time"],
+            reminder_config=reminder_config,
+        )
+
+        # Queue jobs: email + SMS (async)
+        # TODO: Enqueue send_booking_summary_email, send_booking_sms
+
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/agent/{agent_id}/bookings")
+async def list_bookings(
+    agent_id: int,
+    booking_type: Optional[str] = None,
+    status: Optional[str] = None,
+    date_from: Optional[str] = None,
+    request: Request = None
+) -> dict:
+    """
+    List bookings for an agent (all booking types).
+    Supports filtering by booking_type, status, date range.
+    """
+    actor = await current_user(request)
+    agent = await db.get_agent(agent_id)
+
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Verify access
+    user_orgs = await db.get_user_orgs(actor["id"])
+    if agent["org_id"] not in [o["id"] for o in user_orgs]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    bookings, total = await _bookings.list_bookings(
+        db=db,
+        agent_id=agent_id,
+        booking_type=booking_type,
+        status=status,
+        date_from=date_from,
+    )
+
+    # Enrich with display labels
+    config = agent.get("variables", {}).get("booking_config", {})
+
+    for booking in bookings:
+        labels = _bookings.get_booking_labels(booking["booking_type"])
+        booking["entity_name"] = labels.get("entity_name", booking["booking_type"])
+        booking["quantity_label"] = labels.get("quantity_label", "Quantity")
+        booking["icon"] = labels.get("icon", "📅")
+
+    # Aggregations
+    summary = {
+        "total_hold": sum(1 for b in bookings if b["status"] == "hold"),
+        "total_confirmed": sum(1 for b in bookings if b["status"] == "confirmed"),
+        "payment_pending": sum(1 for b in bookings if b["payment_status"] == "pending"),
+        "payment_completed": sum(1 for b in bookings if b["payment_status"] == "confirmed"),
+    }
+
+    return {
+        "bookings": bookings,
+        "total": total,
+        "summary": summary,
+    }
+
+
+# ─── MCP (Build 424) ─────────────────────────────────────────────────────
+# SpiderX Voice as a tool, for the agent orchestration platform. Mounted last
+# so it binds the auth helpers defined above rather than duplicating them —
+# an MCP caller can do exactly what that user can do in the UI, no more.
+from . import mcp_server as _mcp  # noqa: E402
+app.include_router(_mcp._bind(__import__(__name__, fromlist=["_"])))
+
+
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 
 
